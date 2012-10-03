@@ -9,16 +9,19 @@ namespace Raven.Bundles.IndexReplication.Data
 {
 	public class IndexReplicationDestination
 	{
-        public const string BATCH_DATASET = "BatchDataSet";
-        public const string BATCH_COMMAND = "BatchCommand";
-        public const string BATCH_ASYNC = "BatchAsync";
+		public const string DEFAULT_SETTING_DOCUMENT = "__DefaultSettings";
+
+		public const string BATCH_DATASET = "BatchDataSet";
+		public const string BATCH_COMMAND = "BatchCommand";
+		public const string BATCH_ASYNC = "BatchAsync";
 
 		public string Id { get; set; }
 		public string ConnectionStringName { get; set; }
+		public bool? Initialized { get; set; }
 		public string TableName { get; set; }
 		public string PrimaryKeyColumnName { get; set; }
 		public IDictionary<string, string> ColumnsMapping { get; set; }
-        public string BatchMode { get; set; }
+		public string BatchMode { get; set; }
 
 		public IndexReplicationDestination()
 		{
