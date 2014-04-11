@@ -1,8 +1,10 @@
-﻿using Xunit;
+﻿using Raven.Tests.Common;
+
+using Xunit;
 
 namespace Raven.Tests.Bugs.Queries
 {
-	public class Generics : LocalClientTest
+	public class Generics : RavenTest
 	{
 		public class MyClass<T>
 		{

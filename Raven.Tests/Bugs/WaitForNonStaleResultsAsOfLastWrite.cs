@@ -1,11 +1,13 @@
 using System.Threading;
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs
 {
-	public class WaitForNonStaleResultsAsOfLastWrite : LocalClientTest
+	public class WaitForNonStaleResultsAsOfLastWrite : RavenTest
 	{
 		[Fact]
 		public void WillRecordLastWrittenEtag()
@@ -52,7 +54,7 @@ namespace Raven.Tests.Bugs
 
 
 		[Fact]
-		public void CanExpclitlyAskForNonStaleAsOfLastWrite()
+		public void CanExplicitlyAskForNonStaleAsOfLastWrite()
 		{
 			using(var store = NewDocumentStore())
 			{
@@ -82,7 +84,7 @@ namespace Raven.Tests.Bugs
 					session.SaveChanges();
 
 					// this is where we record the etag value
-					var usersQuery = session.Advanced.LuceneQuery<object,RavenDocumentsByEntityName>()
+                    var usersQuery = session.Advanced.DocumentQuery<object, RavenDocumentsByEntityName>()
 						.WaitForNonStaleResultsAsOfLastWrite();
 
 					// wait for indexing to complete

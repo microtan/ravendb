@@ -4,12 +4,14 @@
 // </copyright>
 //-----------------------------------------------------------------------
 using Raven.Client;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs
 {
-	public class ReuseQuery : LocalClientTest
+	public class ReuseQuery : RavenTest
 	{
 		[Fact]
 		public void CanReuseQuery()

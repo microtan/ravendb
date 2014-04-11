@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using Newtonsoft.Json;
+using Raven.Imports.Newtonsoft.Json;
 using Raven.Client;
 using Raven.Client.Document;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
@@ -43,7 +45,7 @@ namespace Raven.Tests.Bugs
 						}
 						finally
 						{
-							ComplexEntity readEntity = session.Query<ComplexEntity>().First(c => c.Id == id);
+							ComplexEntity readEntity = session.Load<ComplexEntity>(id);
 							session.Delete(readEntity);
 							session.SaveChanges();
 						}

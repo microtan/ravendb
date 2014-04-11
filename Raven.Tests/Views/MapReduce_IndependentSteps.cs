@@ -4,18 +4,20 @@
 // </copyright>
 //-----------------------------------------------------------------------
 using System.Threading;
-using Newtonsoft.Json;
+using Raven.Imports.Newtonsoft.Json;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Indexing;
 using Raven.Json.Linq;
 using Raven.Database;
 using Raven.Database.Config;
+using Raven.Tests.Common;
 using Raven.Tests.Storage;
 using Xunit;
+using Raven.Client.Embedded;
 
 namespace Raven.Tests.Views
 {
-	public class MapReduce_IndependentSteps : AbstractDocumentStorageTest
+	public class MapReduce_IndependentSteps : RavenTest
 	{
 		private const string map =
 			@"from post in docs
@@ -33,21 +35,19 @@ select new {
   comments_length = g.Sum(x=>(int)x.comments_length)
   }";
 
+		private readonly EmbeddableDocumentStore store;
 		private readonly DocumentDatabase db;
 
 		public MapReduce_IndependentSteps()
 		{
-			db = new DocumentDatabase(new RavenConfiguration
-			{
-				DataDirectory = DataDir,
-				RunInUnreliableYetFastModeThatIsNotSuitableForProduction = true
-			});
-			db.PutIndex("CommentsCountPerBlog", new IndexDefinition{Map = map, Reduce = reduce, Indexes = {{"blog_id", FieldIndexing.NotAnalyzed}}});
+			store = NewDocumentStore();
+			db = store.DocumentDatabase;
+			db.Indexes.PutIndex("CommentsCountPerBlog", new IndexDefinition{Map = map, Reduce = reduce, Indexes = {{"blog_id", FieldIndexing.NotAnalyzed}}});
 		}
 
 		public override void Dispose()
 		{
-			db.Dispose();
+			store.Dispose();
 			base.Dispose();
 		}
 
@@ -70,27 +70,25 @@ select new {
 			};
 			for (int i = 0; i < values.Length; i++)
 			{
-				db.Put("docs/" + i, null, RavenJObject.Parse(values[i]), new RavenJObject(), null);
+				db.Documents.Put("docs/" + i, null, RavenJObject.Parse(values[i]), new RavenJObject(), null);
 			}
-
-			db.SpinBackgroundWorkers();
 
 			QueryResult q = null;
 			for (var i = 0; i < 5; i++)
 			{
 				do
 				{
-					q = db.Query("CommentsCountPerBlog", new IndexQuery
+					q = db.Queries.Query("CommentsCountPerBlog", new IndexQuery
 					{
 						Query = "blog_id:3",
 						Start = 0,
 						PageSize = 10
-					});
+					}, CancellationToken.None);
 					Thread.Sleep(100);
 				} while (q.IsStale);
 			}
 			q.Results[0].Remove("@metadata");
-			Assert.Equal(@"{""blog_id"":""3"",""comments_length"":""14""}", q.Results[0].ToString(Formatting.None));
+			Assert.Equal(@"{""blog_id"":3,""comments_length"":14}", q.Results[0].ToString(Formatting.None));
 		}
 
 	}

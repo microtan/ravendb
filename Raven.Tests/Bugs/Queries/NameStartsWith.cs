@@ -6,11 +6,13 @@ using Raven.Abstractions.Indexing;
 using Raven.Client;
 using Raven.Client.Embedded;
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs.Queries
 {
-	public class NameStartsWith : LocalClientTest
+	public class NameStartsWith : RavenTest
 	{
 		[Fact]
 		public void can_search_for_mrs_shaba()

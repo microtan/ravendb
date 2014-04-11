@@ -13,15 +13,15 @@ using Raven.Abstractions.Indexing;
 using Raven.Json.Linq;
 using Raven.Client.Document;
 using Raven.Client.Indexes;
-using Raven.Database.Indexing;
 using Raven.Database.Json;
 using Raven.Database.Linq;
-using Raven.Database.Plugins;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Indexes
 {
-	public class LinqIndexesFromClient
+	public class LinqIndexesFromClient : NoDisposalNeeded
 	{
 		[Fact]
 		public void Convert_select_many_will_keep_doc_id()
@@ -97,12 +97,33 @@ namespace Raven.Tests.Indexes
 			var original = new IndexDefinition
 			{
 				Stores = { { "Name", FieldStorage.Yes } },
-				Map = @"docs.Users
-	.Where(user => user.Location == ""Tel Aviv"")
-	.Select(user => new {Name = user.Name})"
+				Map = @"docs.Users.Where(user => user.Location == ""Tel Aviv"").Select(user => new {
+    Name = user.Name
+})"
 			};
 
-			Assert.Equal(original, generated);
+			Assert.Equal(original.Map, generated.Map);
+		}
+
+		[Fact]
+		public void With_parantesis()
+		{
+			IndexDefinition generated = new IndexDefinitionBuilder<User, Named>
+			{
+				Map = users => from user in users
+							   where user.Location == "Tel Aviv"
+							   select new { Age = user.Age - (20 - user.Age) },
+				Stores = { { user => user.Name, FieldStorage.Yes } }
+			}.ToIndexDefinition(new DocumentConvention());
+			var original = new IndexDefinition
+			{
+				Stores = { { "Name", FieldStorage.Yes } },
+				Map = @"docs.Users.Where(user => user.Location == ""Tel Aviv"").Select(user => new {
+    Age = user.Age - (20 - user.Age)
+})"
+			};
+
+			Assert.Equal(original.Map, generated.Map);
 		}
 
 		[Fact]
@@ -118,11 +139,13 @@ namespace Raven.Tests.Indexes
 			var original = new IndexDefinition
 			{
 				Stores = { { "Name", FieldStorage.Yes } },
-				Map = @"docs.Users
-	.Where(user => user.Location == ""Tel Aviv"")
-	.Select(user => new {Name = user.Name, Id = user.__document_id})"
+				Map = @"docs.Users.Where(user => user.Location == ""Tel Aviv"").Select(user => new {
+    Name = user.Name,
+    Id = user.__document_id
+})"
 			};
 
+			Assert.Equal(original.Map, generated.Map);
 			Assert.Equal(original, generated);
 		}
 
@@ -139,12 +162,12 @@ namespace Raven.Tests.Indexes
 			var original = new IndexDefinition
 			{
 				Stores = {{"Name", FieldStorage.Yes}},
-				Map =
-					@"docs.Users
-	.Where(user => !(user.Location == ""Te(l) (A)viv""))
-	.Select(user => new {Name = user.Name})"
+				Map = @"docs.Users.Where(user => !(user.Location == ""Te(l) (A)viv"")).Select(user => new {
+    Name = user.Name
+})"
 			};
 
+			Assert.Equal(original.Map, generated.Map);
 			Assert.Equal(original, generated);
 		}
 
@@ -157,10 +180,9 @@ namespace Raven.Tests.Indexes
 							   select user
 			}.ToIndexDefinition(new DocumentConvention());
 			var original = new IndexDefinition {
-				Map = @"docs.Users
-	.Where(user => Enumerable.Contains(user.Name, 'C'))"
+				Map = "docs.Users.Where(user => Enumerable.Contains(user.Name, 'C'))"
 			};
-			Assert.Equal(original, generated);
+			Assert.Equal(original.Map, generated.Map);
 		}
 
 		[Fact]
@@ -177,19 +199,20 @@ namespace Raven.Tests.Indexes
 			}.ToIndexDefinition(new DocumentConvention());
 			var original = new IndexDefinition
 			{
-				Map = @"docs.Users
-	.Select(user => new {Location = user.Location, Count = 1})",
-				Reduce = @"results
-	.GroupBy(agg => agg.Location)
-	.Select(g => new {Location = g.Key, Count = g.Sum(x => ((System.Int32)(x.Count)))})"
+				Map = @"docs.Users.Select(user => new {
+    Location = user.Location,
+    Count = 1
+})",
+				Reduce = @"results.GroupBy(agg => agg.Location).Select(g => new {
+    Location = g.Key,
+    Count = Enumerable.Sum(g, x => ((int) x.Count))
+})"
 			};
 
 			Assert.Equal(original.Map, generated.Map);
 			Assert.Equal(original.Reduce, generated.Reduce);
 		}
 
-
-#if !NET_3_5        
 		public void Convert_map_reduce_query_with_map_(Expression<Func<IEnumerable<User>, IEnumerable>> mapExpression, string expectedIndexString)
 		{
 			IndexDefinition generated = new IndexDefinitionBuilder<User, LocationCount>
@@ -203,9 +226,10 @@ namespace Raven.Tests.Indexes
 			var original = new IndexDefinition
 			{
 				Map = expectedIndexString,
-				Reduce = @"results
-	.GroupBy(agg => agg.Location)
-	.Select(g => new {Location = g.Key, Count = g.Sum(x => ((System.Int32)(x.Count)))})"
+				Reduce = @"results.GroupBy(agg => agg.Location).Select(g => new {
+    Location = g.Key,
+    Count = Enumerable.Sum(g, x => ((int) x.Count))
+})"
 			};
 
 			Assert.Equal(expectedIndexString, generated.Map);
@@ -218,8 +242,10 @@ namespace Raven.Tests.Indexes
 			Convert_map_reduce_query_with_map_(
 users => from user in users
 		 select new { Location = user.Location, Count = (user.Age + 3) * (user.Age + 4) },
-@"docs.Users
-	.Select(user => new {Location = user.Location, Count = (user.Age + 3) * (user.Age + 4)})");
+@"docs.Users.Select(user => new {
+    Location = user.Location,
+    Count = (user.Age + 3) * (user.Age + 4)
+})");
 		}
 
 		[Fact]
@@ -227,9 +253,11 @@ users => from user in users
 		{
 			Convert_map_reduce_query_with_map_(
 users => from user in users
-		 select new { Location = user.Location, Count = user.Age >= 1 ? 1 : 0 }, 
-@"docs.Users
-	.Select(user => new {Location = user.Location, Count = user.Age >= 1 ? 1 : 0})");
+		 select new { Location = user.Location, Count = user.Age >= 1 ? 1 : 0 },
+@"docs.Users.Select(user => new {
+    Location = user.Location,
+    Count = user.Age >= 1 ? 1 : 0
+})");
 		}
 
 		[Fact]
@@ -238,8 +266,10 @@ users => from user in users
 			Convert_map_reduce_query_with_map_(
 users => from user in users
 		select new { Location = user.Location, Count = user.Gender == Gender.Female ? 1 : 0},
-@"docs.Users
-	.Select(user => new {Location = user.Location, Count = user.Gender == ""Female"" ? 1 : 0})");
+@"docs.Users.Select(user => new {
+    Location = user.Location,
+    Count = user.Gender == ""Female"" ? 1 : 0
+})");
 		}
 
 		[Fact]
@@ -248,13 +278,12 @@ users => from user in users
 			Convert_map_reduce_query_with_map_(
 users => from user in users
 		 select new { Location = user.Location, Count = user.Location is String ? 1 : 0 },
-@"docs.Users
-	.Select(user => new {Location = user.Location, Count = user.Location is String ? 1 : 0})");
+@"docs.Users.Select(user => new {
+    Location = user.Location,
+    Count = user.Location is String ? 1 : 0
+})");
 		}
 
-
-
-#endif
 
 		public enum Gender
 		{
@@ -286,7 +315,9 @@ users => from user in users
 		public class LocationAge
 		{
 			public string Location { get; set; }
-			public decimal Age { get; set; }
+			public decimal AverageAge { get; set; }
+			public int Count { get; set; }
+			public decimal AgeSum { get; set; }
 		}
 
 		public class Order

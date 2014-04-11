@@ -4,11 +4,14 @@
 // </copyright>
 //-----------------------------------------------------------------------
 using System;
+
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class CanUseNonStringsForId : LocalClientTest
+	public class CanUseNonStringsForId : RavenTest
 	{
 		[Fact]
 		public void CanStoreAndLoadEntityWithIntKey()

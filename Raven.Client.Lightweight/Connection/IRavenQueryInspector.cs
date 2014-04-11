@@ -4,10 +4,10 @@
 // </copyright>
 //-----------------------------------------------------------------------
 using System.Collections.Generic;
+using System.Threading.Tasks;
+using Raven.Abstractions.Data;
 using Raven.Client.Document;
-#if !NET_3_5
 using Raven.Client.Connection.Async;
-#endif
 
 namespace Raven.Client.Connection
 {
@@ -21,19 +21,20 @@ namespace Raven.Client.Connection
 		/// </summary>
 		string IndexQueried { get; }
 
-#if !SILVERLIGHT
+		/// <summary>
+		/// Get the name of the index being queried in async queries
+		/// </summary>
+		string AsyncIndexQueried { get; }
+
 		/// <summary>
 		/// Grant access to the database commands
 		/// </summary>
 		IDatabaseCommands DatabaseCommands { get; }
-#endif
 
-#if !NET_3_5
 		/// <summary>
 		/// Grant access to the async database commands
 		/// </summary>
 		IAsyncDatabaseCommands AsyncDatabaseCommands { get; }
-#endif
 
 		/// <summary>
 		/// The query session
@@ -43,6 +44,29 @@ namespace Raven.Client.Connection
 		/// <summary>
 		/// The last term that we asked the query to use equals on
 		/// </summary>
-		KeyValuePair<string, string> GetLastEqualityTerm();
+		KeyValuePair<string, string> GetLastEqualityTerm(bool isAsync = false);
+
+		/// <summary>
+		/// Get the index query for this query
+		/// </summary>
+		IndexQuery GetIndexQuery(bool isAsync);
+		/// <summary>
+		/// Get the facets as per the specified facet document with the given start and pageSize
+		/// </summary>
+		FacetResults GetFacets(string facetSetupDoc, int start, int? pageSize);
+
+		/// <summary>
+		/// Get the facet results as per the specified facets with the given start and pageSize
+		/// </summary>
+		FacetResults GetFacets(List<Facet> facets, int start, int? pageSize);
+		/// <summary>
+		/// Get the facets as per the specified facet document with the given start and pageSize
+		/// </summary>
+		Task<FacetResults> GetFacetsAsync(string facetSetupDoc, int start, int? pageSize);
+
+		/// <summary>
+		/// Get the facet results as per the specified facets with the given start and pageSize
+		/// </summary>
+		Task<FacetResults> GetFacetsAsync(List<Facet> facets, int start, int? pageSize);
 	}
 }

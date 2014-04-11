@@ -11,11 +11,13 @@ using Raven.Database.Indexing;
 using Raven.Database.Json;
 using Raven.Database.Linq;
 using Raven.Database.Plugins;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Linq
 {
-	public class LinqTransformerCompilationTests
+	public class LinqTransformerCompilationTests : NoDisposalNeeded
 	{
 		private const string query =
 			@"
@@ -132,7 +134,7 @@ namespace Raven.Tests.Linq
 		}
 
 		[Fact]
-		public void Can_compile_map_reudce_using_linq_methods()
+		public void Can_compile_map_reduce_using_linq_methods()
 		{
 			var viewGenerator = new DynamicViewCompiler("test", new IndexDefinition
 			{
@@ -141,7 +143,7 @@ namespace Raven.Tests.Linq
 				Reduce =
 					@"results
 	.GroupBy(agg => agg.Location)
-	.Select(g => new {Location = g.Key, Count = g.Sum(x => x.Count}))"
+	.Select(g => new {Location = g.Key, Count = g.Sum(x => x.Count)})"
 			},  ".").GenerateInstance();
 
 

@@ -5,12 +5,14 @@
 //-----------------------------------------------------------------------
 using Raven.Abstractions.Indexing;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs.Queries
 {
-	public class TermsLocal : LocalClientTest
+	public class TermsLocal : RavenTest
 	{
 		[Fact]
 		public void CanGetTermsForIndex()

@@ -1,5 +1,8 @@
 ﻿using Raven.Abstractions.Indexing;
+using Raven.Client;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 using Raven.Client.Indexes;
@@ -7,7 +10,7 @@ using Raven.Client.Linq;
 
 namespace Raven.Tests.Bugs.Indexing
 {
-	public class CanIndexWithCharLiteral : LocalClientTest
+	public class CanIndexWithCharLiteral : RavenTest
 	{
 		[Fact]
 		public void CanQueryDocumentsIndexWithCharLiteral()
@@ -30,10 +33,10 @@ namespace Raven.Tests.Bugs.Indexing
 				}
 			}
 		}
-	}
 
-	public class Result
-	{
-		public string SortVersion { get; set; }
+		private class Result
+		{
+			public string SortVersion { get; set; }
+		}
 	}
 }

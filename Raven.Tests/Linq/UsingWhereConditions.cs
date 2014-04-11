@@ -4,52 +4,39 @@
 // </copyright>
 //-----------------------------------------------------------------------
 using System;
-using System.Collections.Generic;
+using System.IO;
 using System.Linq;
-using System.Text;
+using System.Threading;
 using Raven.Abstractions;
 using Raven.Abstractions.Data;
-using Raven.Abstractions.Indexing;
+using Raven.Client;
 using Raven.Client.Embedded;
 using Raven.Client.Indexes;
 using Raven.Database.Extensions;
+using Raven.Tests.Common;
+
 using Xunit;
-using Raven.Database.Data;
-using Raven.Client;
-using System.IO;
-using Raven.Client.Document;
-using Raven.Client.Linq;
-using System.Threading;
-using System.Diagnostics;
 
 /*
  * Different test using where clause
  */
 namespace Raven.Tests.Linq
 {
-	public class UsingWhereConditions
+	public class UsingWhereConditions : RavenTest
 	{
 		[Fact]
 		public void Can_Use_Where()
 		{
-
-			//When running in the XUnit GUI strange things happen is we just create a path relative to 
-			//the .exe itself, so make our folder in the System temp folder instead ("<user>\AppData\Local\Temp")
-			string directoryName =  Path.Combine(Path.GetTempPath(), "ravendb.RavenWhereTests");
-			IOExtensions.DeleteDirectory(directoryName);
-
-			using (var db = new EmbeddableDocumentStore() { DataDirectory = directoryName })
+			using (var db = NewDocumentStore())
 			{
-				db.Initialize();
-
-				string indexName = "CommitByRevision";
+				const string indexName = "CommitByRevision";
 				using (var session = db.OpenSession())
 	            {
 					AddData(session);                    
 
 					db.DatabaseCommands.DeleteIndex(indexName);
-					var result = db.DatabaseCommands.PutIndex<CommitInfo, CommitInfo>(indexName,
-							new IndexDefinitionBuilder<CommitInfo, CommitInfo>()
+					var result = db.DatabaseCommands.PutIndex(indexName,
+							new IndexDefinitionBuilder<CommitInfo, CommitInfo>
 							{
 								Map = docs => from doc in docs
 											  select new { doc.Revision},
@@ -152,7 +139,7 @@ namespace Raven.Tests.Linq
 					//There are 2 CommitInfos which has Revision >=7  || <= 1 
 					Assert.Equal(2, Results.ToArray().Count());
 	            }
-			}            
+			}
 		}
 
 		private static string Repo = "/svn/repo/";
@@ -162,7 +149,7 @@ namespace Raven.Tests.Linq
 			do
 			{
 				//doesn't matter what the query is here, just want to see if it's stale or not
-				results = session.Advanced.LuceneQuery<CommitInfo>(indexName)                              
+                results = session.Advanced.DocumentQuery<CommitInfo>(indexName)                              
 							  .Where("") 
 							  .QueryResult;   
 
@@ -173,14 +160,25 @@ namespace Raven.Tests.Linq
 
 		private void AddData(IDocumentSession documentSession)
 		{
-			documentSession.Store(new CommitInfo { Author="kenny", PathInRepo="/src/test/", Repository=Repo, Revision=1, Date= SystemTime.Now, CommitMessage="First commit" });
-			documentSession.Store(new CommitInfo { Author = "kenny", PathInRepo = "/src/test/FirstTest/", Repository = Repo, Revision = 2, Date = SystemTime.Now, CommitMessage = "Second commit" });
-			documentSession.Store(new CommitInfo { Author = "kenny", PathInRepo = "/src/test/FirstTest/test.txt", Repository = Repo, Revision = 3, Date = SystemTime.Now, CommitMessage = "Third commit" });
-			documentSession.Store(new CommitInfo { Author = "john", PathInRepo = "/src/test/SecondTest/", Repository = Repo, Revision = 4, Date = SystemTime.Now, CommitMessage = "Fourth commit" });
-			documentSession.Store(new CommitInfo { Author = "john", PathInRepo = "/src/", Repository = Repo, Revision = 5, Date = SystemTime.Now, CommitMessage = "Fifth commit" });
-			documentSession.Store(new CommitInfo { Author = "john", PathInRepo = "/src/test/SecondTest/test.txt", Repository = Repo, Revision = 6, Date = SystemTime.Now, CommitMessage = "Sixt commit" });
-			documentSession.Store(new CommitInfo { Author = "kenny", PathInRepo = "/src/test/SecondTest/test1.txt", Repository = Repo, Revision = 7, Date = SystemTime.Now, CommitMessage = "Seventh commit" });
+			documentSession.Store(new CommitInfo { Author="kenny", PathInRepo="/src/test/", Repository=Repo, Revision=1, Date= SystemTime.UtcNow, CommitMessage="First commit" });
+			documentSession.Store(new CommitInfo { Author = "kenny", PathInRepo = "/src/test/FirstTest/", Repository = Repo, Revision = 2, Date = SystemTime.UtcNow, CommitMessage = "Second commit" });
+			documentSession.Store(new CommitInfo { Author = "kenny", PathInRepo = "/src/test/FirstTest/test.txt", Repository = Repo, Revision = 3, Date = SystemTime.UtcNow, CommitMessage = "Third commit" });
+			documentSession.Store(new CommitInfo { Author = "john", PathInRepo = "/src/test/SecondTest/", Repository = Repo, Revision = 4, Date = SystemTime.UtcNow, CommitMessage = "Fourth commit" });
+			documentSession.Store(new CommitInfo { Author = "john", PathInRepo = "/src/", Repository = Repo, Revision = 5, Date = SystemTime.UtcNow, CommitMessage = "Fifth commit" });
+			documentSession.Store(new CommitInfo { Author = "john", PathInRepo = "/src/test/SecondTest/test.txt", Repository = Repo, Revision = 6, Date = SystemTime.UtcNow, CommitMessage = "Sixth commit" });
+			documentSession.Store(new CommitInfo { Author = "kenny", PathInRepo = "/src/test/SecondTest/test1.txt", Repository = Repo, Revision = 7, Date = SystemTime.UtcNow, CommitMessage = "Seventh commit" });
 			documentSession.SaveChanges();
 		}
+
+        public class CommitInfo
+        {
+            public string Id { get; set; }
+            public string Author { get; set; }
+            public string PathInRepo { get; set; }
+            public string Repository { get; set; }
+            public int Revision { get; set; }
+            public DateTime Date { get; set; }
+            public string CommitMessage { get; set; }
+        }
 	}
 }

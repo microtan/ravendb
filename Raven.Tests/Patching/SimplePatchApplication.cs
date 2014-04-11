@@ -3,17 +3,18 @@
 //     Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 // </copyright>
 //-----------------------------------------------------------------------
-using Newtonsoft.Json;
+using Raven.Imports.Newtonsoft.Json;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Exceptions;
 using Raven.Json.Linq;
-using Raven.Database.Exceptions;
 using Raven.Database.Json;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Patching
 {
-	public class SimplePatchApplication
+	public class SimplePatchApplication : NoDisposalNeeded
 	{
 		private readonly RavenJObject doc = 
 			RavenJObject.Parse(@"{ title: ""A Blog Post"", body: ""html markup"", comments: [ {author: ""ayende"", text:""good post""}] }");
@@ -235,7 +236,7 @@ namespace Raven.Tests.Patching
 		}
 		
 		[Fact]
-		public void PropertyAddition_WithConcurrenty_MissingProp()
+		public void PropertyAddition_WithConcurrently_MissingProp()
 		{
 			var patchedDoc = new JsonPatcher(doc).Apply(
 			   new[]
@@ -254,23 +255,7 @@ namespace Raven.Tests.Patching
 		}
 
 		[Fact]
-		public void PropertyAddition_WithConcurrenty_NullValueOnMissingPropShouldThrow()
-		{
-			Assert.Throws<ConcurrencyException>(() => new JsonPatcher(doc).Apply(
-			   new[]
-				{
-					new PatchRequest
-					{
-						Type = PatchCommandType.Set,
-						Name = "blog_id",
-						Value = new RavenJValue(1),
-						PrevVal = new RavenJValue((object)null)
-					},
-				}));
-		}
-
-		[Fact]
-		public void PropertyAddition_WithConcurrenty_BadValueOnMissingPropShouldThrow()
+		public void PropertyAddition_WithConcurrently_BadValueOnMissingPropShouldThrow()
 		{
 			Assert.Throws<ConcurrencyException>(() => new JsonPatcher(doc).Apply(
 				new[]
@@ -286,7 +271,7 @@ namespace Raven.Tests.Patching
 		}
 
 		[Fact]
-		public void PropertyAddition_WithConcurrenty_ExistingValueOn_Ok()
+		public void PropertyAddition_WithConcurrently_ExistingValueOn_Ok()
 		{
 			RavenJObject apply = new JsonPatcher(doc).Apply(
 				new[]
@@ -295,12 +280,12 @@ namespace Raven.Tests.Patching
 					{
 						Type = PatchCommandType.Set,
 						Name = "body",
-						Value = new RavenJValue("differnt markup"),
+						Value = new RavenJValue("different markup"),
 						PrevVal = new RavenJValue("html markup")
 					},
 				});
 
-			Assert.Equal(@"{""title"":""A Blog Post"",""body"":""differnt markup"",""comments"":[{""author"":""ayende"",""text"":""good post""}]}", apply.ToString(Formatting.None));
+			Assert.Equal(@"{""title"":""A Blog Post"",""body"":""different markup"",""comments"":[{""author"":""ayende"",""text"":""good post""}]}", apply.ToString(Formatting.None));
 		}
 
 

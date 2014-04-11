@@ -5,7 +5,10 @@ using System.Net;
 using System.Text;
 using Raven.Client.Document;
 using Raven.Tests.Bugs;
+using Raven.Tests.Common;
+
 using Xunit;
+using Raven.Client.Connection;
 
 namespace Raven.Tests.NotModified
 {
@@ -13,7 +16,7 @@ namespace Raven.Tests.NotModified
 	/// The tests in this class test that 304 is returned when nothing at all is changed, and that 200 is returned when the
 	/// object being tested is changed; they do not test what happens when other objects are changed
 	/// </summary>
-	public class NotModified : RemoteClientTest
+	public class NotModified : RavenTest
 	{
 		[Fact]
 		public void ServerReturnsNotModifiedWhenAppropriateForDocument()
@@ -51,12 +54,11 @@ namespace Raven.Tests.NotModified
 			using (var docStore = new DocumentStore { Url = "http://localhost:8079" }.Initialize())
 			{
 				// Store an item
-				Guid? firstEtag;
+				Raven.Abstractions.Data.Etag firstEtag;
 				using (var session = docStore.OpenSession())
 				{
 					session.Store(firstItemToStore);
 					session.SaveChanges();
-					firstEtag = session.Advanced.GetEtagFor(firstItemToStore);
 				}
 
 				// Here, we should get the same etag we got when we asked the session
@@ -64,7 +66,7 @@ namespace Raven.Tests.NotModified
 				using (var response = GetHttpResponseHandle304(getRequest))
 				{
 					Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-					Assert.Equal(firstEtag.ToString(), response.Headers["ETag"]);
+					firstEtag = response.GetEtagHeader();
 				}
 
 				// If we ask with If-None-Match (and it's a match), we'll get 304 Not Modified
@@ -76,12 +78,11 @@ namespace Raven.Tests.NotModified
 				}
 
 				// Change the item or add a second item
-				Guid? secondEtag;
+				Raven.Abstractions.Data.Etag secondEtag;
 				using (var session = docStore.OpenSession())
 				{
 					session.Store(secondItemToStore);
 					session.SaveChanges();
-					secondEtag = session.Advanced.GetEtagFor(secondItemToStore);
 				}
 
 				// If we ask with the old etag, we'll get a new result
@@ -90,7 +91,7 @@ namespace Raven.Tests.NotModified
 				using (var response = GetHttpResponseHandle304(getRequest))
 				{
 					Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-					Assert.Equal(secondEtag.ToString(), response.Headers["ETag"]);
+					secondEtag = response.GetEtagHeader();
 				}
 
 				// If we ask with the new etag, we'll get 304 Not Modified

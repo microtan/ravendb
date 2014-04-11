@@ -1,7 +1,9 @@
-﻿using System;
+﻿using System.Threading;
 using System.Transactions;
-using Raven.Client.Document;
 using Raven.Tests.Bugs;
+using Raven.Tests.Common;
+using Raven.Tests.Common.Util;
+
 using Xunit;
 
 namespace Raven.Tests.Track
@@ -11,25 +13,23 @@ namespace Raven.Tests.Track
 		[Fact]
 		public void CacheRespectInFlightTransaction()
 		{
-			using (GetNewServer())
-			using (var store = new DocumentStore
+            using (var store = NewRemoteDocumentStore(requestedStorage: "esent"))
 			{
-				Url = "http://localhost:8079"
-			}.Initialize())
-			{
+                if(store.DatabaseCommands.GetStatistics().SupportsDtc == false)
+                    return;
+
 				// Session #1
 				using (var scope = new TransactionScope())
 				using (var session = store.OpenSession())
 				{
-					System.Transactions.Transaction.Current.EnlistDurable(ManyDocumentsViaDTC.DummyEnlistmentNotification.Id,
-																  new ManyDocumentsViaDTC.DummyEnlistmentNotification(),
-																  EnlistmentOptions.None);
-
+					Transaction.Current.EnlistDurable(DummyEnlistmentNotification.Id,
+					                                  new DummyEnlistmentNotification(),
+					                                  EnlistmentOptions.None);
 
 					session.Advanced.UseOptimisticConcurrency = true;
 					session.Advanced.AllowNonAuthoritativeInformation = false;
 
-					session.Store(new SomeDocument() { Id = 1, Data = "Data1" });
+					session.Store(new SomeDocument {Id = 1, Data = "Data1"});
 
 					session.SaveChanges();
 					scope.Complete();
@@ -39,31 +39,31 @@ namespace Raven.Tests.Track
 				using (var scope = new TransactionScope())
 				using (var session = store.OpenSession())
 				{
-					System.Transactions.Transaction.Current.EnlistDurable(ManyDocumentsViaDTC.DummyEnlistmentNotification.Id,
-																  new ManyDocumentsViaDTC.DummyEnlistmentNotification(),
-																  EnlistmentOptions.None);
+					Transaction.Current.EnlistDurable(DummyEnlistmentNotification.Id,
+					                                  new DummyEnlistmentNotification(),
+					                                  EnlistmentOptions.None);
 
 					session.Advanced.UseOptimisticConcurrency = true;
 					session.Advanced.AllowNonAuthoritativeInformation = false;
 
 					var doc = session.Load<SomeDocument>(1);
-					if (doc.Data != "Data1")
-						throw new InvalidOperationException("Should be Data1");
-
+					Assert.Equal("Data1", doc.Data);
+					
 					doc.Data = "Data2";
 
 					session.SaveChanges();
 					scope.Complete();
 				}
 
+				Thread.Sleep(1000); // wait a bit here because a commit operation is done in async manner
 
 				// Session #3
 				using (var scope = new TransactionScope())
 				using (var session = store.OpenSession())
 				{
-					System.Transactions.Transaction.Current.EnlistDurable(ManyDocumentsViaDTC.DummyEnlistmentNotification.Id,
-																  new ManyDocumentsViaDTC.DummyEnlistmentNotification(),
-																  EnlistmentOptions.None);
+					Transaction.Current.EnlistDurable(DummyEnlistmentNotification.Id,
+					                                  new DummyEnlistmentNotification(),
+					                                  EnlistmentOptions.None);
 
 					session.Advanced.UseOptimisticConcurrency = true;
 					session.Advanced.AllowNonAuthoritativeInformation = false;
@@ -80,7 +80,6 @@ namespace Raven.Tests.Track
 		public class SomeDocument
 		{
 			public string Data { get; set; }
-
 			public int Id { get; set; }
 		}
 	}

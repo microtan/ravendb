@@ -1,26 +1,30 @@
-﻿using Raven.Abstractions;
-using System;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
+using Raven.Abstractions;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Linq
 {
-	public class Any : LocalClientTest
+	public class Any : RavenTest
 	{
 		private class TestDoc
 		{
 			public string SomeProperty { get; set; }
 			public string[] StringArray { get; set; }
+			public List<string> StringList { get; set; }
 		}
 
 		[Fact]
-		public void CanQueryArray()
+		public void CanQueryArrayWithAny()
 		{
 			using (var store = NewDocumentStore())
 			{
 				using (var session = store.OpenSession())
 				{
-					var doc = new TestDoc {StringArray = new string[] {"test", "doc", "foo"}};
+					var doc = new TestDoc {StringArray = new [] {"test", "doc", "foo"}};
 					session.Store(doc);
 					session.SaveChanges();
 				}
@@ -32,6 +36,112 @@ namespace Raven.Tests.Linq
 							   where ar.StringArray.Any(ac => ac == otherDoc.SomeProperty)
 							   select ar).FirstOrDefault();
 					Assert.NotNull(doc);
+				}
+			}
+		}
+
+		[Fact]
+		public void CanCountWithAny()
+		{
+			using (var store = NewDocumentStore())
+			{
+				using (var session = store.OpenSession())
+				{
+					session.Store(new TestDoc {StringArray = new[] {"one", "two"}});
+					session.Store(new TestDoc {StringArray = new string[0]});
+					session.Store(new TestDoc {StringArray = new string[0]});
+					session.SaveChanges();
+				}
+
+				using (var session = store.OpenSession())
+				{
+					Assert.Equal(1, session.Query<TestDoc>().Customize(customization => customization.WaitForNonStaleResults()).Count(p => p.StringArray.Any()));
+				}
+			}
+		}
+
+		[Fact]
+		public void CanCountWithLengthGreaterThenZero()
+		{
+			using (var store = NewDocumentStore())
+			{
+				using (var session = store.OpenSession())
+				{
+					session.Store(new TestDoc { SomeProperty = "Value", StringArray = new[] { "one", "two" } });
+					session.Store(new TestDoc { SomeProperty = "Value", StringArray = new string[0] });
+					session.Store(new TestDoc { SomeProperty = "Value", StringArray = new string[0] });
+					session.SaveChanges();
+				}
+
+				using (var session = store.OpenSession())
+				{
+					var count = session.Query<TestDoc>()
+						.Customize(customization => customization.WaitForNonStaleResults())
+						.Count(p => p.StringArray.Length > 0 && p.SomeProperty == "Value");
+					Assert.Equal(1, count);
+				}
+			}
+		}
+
+		[Fact]
+		public void CanCountWithCountGreaterThenZero()
+		{
+			using (var store = NewDocumentStore())
+			{
+				using (var session = store.OpenSession())
+				{
+					session.Store(new TestDoc { SomeProperty = "Value", StringList = new List<string> { "one", "two" } });
+					session.Store(new TestDoc { SomeProperty = "Value", StringList = new List<string>() });
+					session.Store(new TestDoc { SomeProperty = "Value", StringList = null });
+					session.SaveChanges();
+				}
+
+				using (var session = store.OpenSession())
+				{
+					var count = session.Query<TestDoc>()
+						.Customize(customization => customization.WaitForNonStaleResults())
+						.Count(p => p.StringList.Count > 0 && p.SomeProperty == "Value");
+					Assert.Equal(1, count);
+				}
+			}
+		}
+
+		[Fact]
+		public void EmptyArraysShouldBeCountedProperlyWhenUsingAny()
+		{
+			using (var store = NewDocumentStore())
+			{
+				using (var session = store.OpenSession())
+				{
+					session.Store(new TestDoc { StringArray = new[] { "one", "two" } });
+					session.Store(new TestDoc { StringArray = new string[0] });
+					session.Store(new TestDoc { StringArray = new string[0] });
+					session.SaveChanges();
+				}
+				WaitForUserToContinueTheTest(store);
+				using (var session = store.OpenSession())
+				{
+					Assert.Equal(2, session.Query<TestDoc>().Customize(customization => customization.WaitForNonStaleResults()).Count(p => p.StringArray.Any() == false));
+				}
+			}
+		}
+
+		[Fact]
+		public void CanCountNullArraysWithAnyIfHaveAnotherPropertyStoredInTheIndex()
+		{
+			using (var store = NewDocumentStore())
+			{
+				using (var session = store.OpenSession())
+				{
+					session.Store(new TestDoc {SomeProperty = "Test", StringArray = new[] {"one", "two"}});
+					session.Store(new TestDoc {SomeProperty = "Test", StringArray = new string[0]});
+					session.Store(new TestDoc {SomeProperty = "Test", StringArray = new string[0]});
+					session.SaveChanges();
+				}
+				WaitForUserToContinueTheTest(store);
+				using (var session = store.OpenSession())
+				{
+					Assert.Equal(2, session.Query<TestDoc>().Customize(customization => customization.WaitForNonStaleResults()).Count(p => p.StringArray.Any() == false && p.SomeProperty == "Test"));
 				}
 			}
 		}
@@ -48,7 +158,7 @@ namespace Raven.Tests.Linq
 			{
 				using (var session = store.OpenSession())
 				{
-					DateTime dateTime = SystemTime.Now;
+					DateTime dateTime = SystemTime.UtcNow;
 					var query = from a in session.Query<OrderableEntity>()
 													.Customize(x => x.WaitForNonStaleResultsAsOfNow())
 								where dateTime < a.Order

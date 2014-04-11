@@ -5,43 +5,41 @@
 //-----------------------------------------------------------------------
 using System.ComponentModel.Composition.Hosting;
 using System.IO;
+using Raven.Client.Embedded;
 using Raven.Json.Linq;
 using Raven.Database;
 using Raven.Database.Config;
-using Raven.Database.Exceptions;
+using Raven.Abstractions.Exceptions;
 using Raven.Database.Plugins;
+using Raven.Tests.Common;
 using Raven.Tests.Storage;
 using Xunit;
 
 namespace Raven.Tests.Triggers
 {
-	public class AttachmentDeleteTrigger: AbstractDocumentStorageTest
+	public class AttachmentDeleteTrigger: RavenTest
 	{
+		private readonly EmbeddableDocumentStore store;
 		private readonly DocumentDatabase db;
 
 		public AttachmentDeleteTrigger()
 		{
-			db = new DocumentDatabase(new RavenConfiguration
-			{
-				DataDirectory = DataDir,
-				Container = new CompositionContainer(new TypeCatalog(
-					typeof(RefuseAttachmentDeleteTrigger)))
-			});
-
+			store = NewDocumentStore(catalog:(new TypeCatalog(typeof (RefuseAttachmentDeleteTrigger))));
+			db = store.DocumentDatabase;
 		}
 
 		public override void Dispose()
 		{
-			db.Dispose();
+			store.Dispose();
 			base.Dispose();
 		}
 
 		[Fact]
 		public void CanVetoDeletes()
 		{
-			db.PutStatic("ayende", null, new MemoryStream(new byte[] { 1, 2, 3 }), new RavenJObject());
-			var operationVetoedException = Assert.Throws<OperationVetoedException>(()=>db.DeleteStatic("ayende", null));
-			Assert.Equal("DELETE vetoed by Raven.Tests.Triggers.AttachmentDeleteTrigger+RefuseAttachmentDeleteTrigger because: Can't delete attachments", operationVetoedException.Message);
+			db.Attachments.PutStatic("ayende", null, new MemoryStream(new byte[] { 1, 2, 3 }), new RavenJObject());
+			var operationVetoedException = Assert.Throws<OperationVetoedException>(()=>db.Attachments.DeleteStatic("ayende", null));
+			Assert.Equal("DELETE vetoed on attachment ayende by Raven.Tests.Triggers.AttachmentDeleteTrigger+RefuseAttachmentDeleteTrigger because: Can't delete attachments", operationVetoedException.Message);
 		}
 
 		public class RefuseAttachmentDeleteTrigger: AbstractAttachmentDeleteTrigger

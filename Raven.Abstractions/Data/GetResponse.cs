@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using Raven.Json.Linq;
 
 namespace Raven.Abstractions.Data
 {
@@ -7,10 +8,10 @@ namespace Raven.Abstractions.Data
 	{
 		public GetResponse()
 		{
-			Headers = new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase);
+			Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 		}
 
-		public string Result { get; set; }
+		public RavenJToken Result { get; set; }
 		public IDictionary<string,string> Headers { get; set; }
 		public int Status { get; set; }
 

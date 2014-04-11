@@ -5,11 +5,13 @@
 //-----------------------------------------------------------------------
 using Raven.Abstractions.Indexing;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class IndexingRavenDocuments : LocalClientTest
+	public class IndexingRavenDocuments : RavenTest
 	{
 		[Fact]
 		public void WillNotIndexRavenDocuments()
@@ -31,7 +33,7 @@ namespace Raven.Tests.Bugs
 
 				using (var s = store.OpenSession())
 				{
-					var waitForNonStaleResults = s.Advanced.LuceneQuery<User>("Users")
+                    var waitForNonStaleResults = s.Advanced.DocumentQuery<User>("Users")
 						.WaitForNonStaleResults();
 					Assert.Equal(1, waitForNonStaleResults.QueryResult.TotalResults);
 				}

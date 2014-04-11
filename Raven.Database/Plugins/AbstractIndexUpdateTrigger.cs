@@ -37,7 +37,13 @@ namespace Raven.Database.Plugins
 			
 		}
 
-		public abstract AbstractIndexUpdateTriggerBatcher CreateBatcher(string indexName);
+		public virtual void SecondStageInit()
+		{
+
+		}
+
+
+		public abstract AbstractIndexUpdateTriggerBatcher CreateBatcher(int indexId);
 
 		public DocumentDatabase Database { get; set; }
 	}

@@ -5,21 +5,20 @@
 //-----------------------------------------------------------------------
 using System;
 using System.Linq;
-using System.Linq.Expressions;
-using Newtonsoft.Json;
 using Raven.Client;
 using Raven.Client.Document;
 using Raven.Client.Embedded;
 using Raven.Client.Linq;
+using Raven.Imports.Newtonsoft.Json;
 using Xunit;
+using Xunit.Sdk;
 
 namespace Raven.Tests.Linq
 {
 	public class WhereClause : IDisposable
 	{
-		private IDocumentStore documentStore;
-		private IDocumentSession documentSession;
-
+		private readonly IDocumentStore documentStore;
+		private readonly IDocumentSession documentSession;
 
 		public WhereClause()
 		{
@@ -46,6 +45,39 @@ namespace Raven.Tests.Linq
 		}
 
 		[Fact]
+		public void HandlesNegative()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(x => !x.IsActive);
+			Assert.Equal("IsActive:false", q.ToString());
+		}
+
+		[Fact]
+		public void HandlesNegativeEquality()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(x => x.IsActive == false);
+			Assert.Equal("IsActive:false", q.ToString());
+		}
+
+		[Fact]
+		public void HandleDoubleRangeSearch()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			double min = 1246.434565380224, max = 1246.434565380226;
+			var q = indexedUsers.Where(x => x.Rate >= min && x.Rate <= max);
+			Assert.Equal("Rate_Range:[Dx1246.43456538022 TO Dx1246.43456538023]", q.ToString());
+		}
+
+		[Fact]
+		public void CanHandleCasts()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(x => ((Dog)x.Animal).Color == "black");
+			Assert.Equal("Animal.Color:black", q.ToString());
+		}
+
+		[Fact]
 		public void StartsWith()
 		{
 			var indexedUsers = GetRavenQueryInspector();
@@ -69,7 +101,7 @@ namespace Raven.Tests.Linq
 			var indexedUsers = GetRavenQueryInspector();
 			var q = indexedUsers.Where(user => user.Name.StartsWith("foo") == false);
 
-			Assert.Equal("( *:* -Name:foo*)", q.ToString());
+			Assert.Equal("(*:* AND -Name:foo*)", q.ToString());
 		}
 
 		[Fact]
@@ -78,9 +110,103 @@ namespace Raven.Tests.Linq
 			var indexedUsers = GetRavenQueryInspector();
 			var q = indexedUsers.Where(user => !user.Name.StartsWith("foo"));
 
-			Assert.Equal("( *:* -Name:foo*)", q.ToString());
+			Assert.Equal("(*:* AND -Name:foo*)", q.ToString());
 		}
 
+
+		[Fact]
+		public void IsNullOrEmpty()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(user => string.IsNullOrEmpty(user.Name));
+
+			Assert.Equal("(Name:[[NULL_VALUE]] OR Name:[[EMPTY_STRING]])", q.ToString());
+		}
+
+		[Fact]
+		public void IsNullOrEmptyEqTrue()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(user => string.IsNullOrEmpty(user.Name) == true);
+
+			Assert.Equal("(Name:[[NULL_VALUE]] OR Name:[[EMPTY_STRING]])", q.ToString());
+		}
+
+		[Fact]
+		public void IsNullOrEmptyEqFalse()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(user => string.IsNullOrEmpty(user.Name) == false);
+
+			Assert.Equal("(*:* AND -(Name:[[NULL_VALUE]] OR Name:[[EMPTY_STRING]]))", q.ToString());
+		}
+
+		[Fact]
+		public void IsNullOrEmptyNegated()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(user => !string.IsNullOrEmpty(user.Name));
+
+			Assert.Equal("(*:* AND -(Name:[[NULL_VALUE]] OR Name:[[EMPTY_STRING]]))", q.ToString());
+		}
+		
+		[Fact]
+		public void IsNullOrEmpty_Any()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(user => user.Name.Any());
+
+			Assert.Equal("(*:* AND -(Name:[[NULL_VALUE]] OR Name:[[EMPTY_STRING]]))", q.ToString());
+		}
+
+		[Fact]
+		public void IsNullOrEmpty_Any_Negated_Not_Supported()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(user => !user.Name.Any());
+
+			var exception = Assert.Throws<InvalidOperationException>(() => q.ToString());
+			Assert.Equal("Cannot process negated Any(), see RavenDB-732 http://issues.hibernatingrhinos.com/issue/RavenDB-732", exception.Message);
+		}
+
+		[Fact]
+		public void IsNullOrEmpty_AnyEqTrue()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(user => user.Name.Any() == true);
+
+			Assert.Equal("(*:* AND -(Name:[[NULL_VALUE]] OR Name:[[EMPTY_STRING]]))", q.ToString());
+		}
+
+		[Fact]
+		public void IsNullOrEmpty_AnyEqFalse()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(user => user.Name.Any() == false);
+
+			Assert.Equal("(*:* AND -(*:* AND -(Name:[[NULL_VALUE]] OR Name:[[EMPTY_STRING]])))", q.ToString());
+		}
+
+		[Fact]
+		public void IsNullOrEmpty_AnyNegated()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(user => user.Name.Any() == false);
+
+			Assert.Equal("(*:* AND -(*:* AND -(Name:[[NULL_VALUE]] OR Name:[[EMPTY_STRING]])))", q.ToString());
+			// Note: this can be generated also a smaller query: 
+			// Assert.Equal("*:* AND (Name:[[NULL_VALUE]] OR Name:[[EMPTY_STRING]])", q.ToString());
+		}
+
+		[Fact]
+		public void AnyWithPredicateShouldBeNotSupported()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(user => user.Name.Any(char.IsUpper));
+
+			var exception = Assert.Throws<NotSupportedException>(() => q.ToString());
+			Assert.Contains("Method not supported", exception.InnerException.Message);
+		}
 
 		[Fact]
 		public void BracesOverrideOperatorPrecedence_second_method()
@@ -89,6 +215,8 @@ namespace Raven.Tests.Linq
 			var q = indexedUsers.Where(user => user.Name == "ayende" && (user.Name == "rob" || user.Name == "dave"));
 
 			Assert.Equal("Name:ayende AND (Name:rob OR Name:dave)", q.ToString());
+			// Note: this can be generated also a smaller query: 
+			// Assert.Equal("*:* AND (Name:[[NULL_VALUE]] OR Name:[[EMPTY_STRING]])", q.ToString());
 		}
 
 		[Fact]
@@ -106,19 +234,9 @@ namespace Raven.Tests.Linq
 		{
 			var indexedUsers = GetRavenQueryInspector();
 			var q = from user in indexedUsers
-					where user.Name.Equals("ayende", StringComparison.InvariantCultureIgnoreCase)
+					where user.Name.Equals("ayende", StringComparison.OrdinalIgnoreCase)
 					select user;
 			Assert.Equal("Name:ayende", q.ToString());
-		}
-
-		[Fact]
-		public void CanForceUsingCase()
-		{
-			var indexedUsers = GetRavenQueryInspector();
-			var q = from user in indexedUsers
-					where user.Name.Equals("ayende", StringComparison.InvariantCulture)
-					select user;
-			Assert.Equal("Name:[[ayende]]", q.ToString());
 		}
 
 		[Fact]
@@ -128,7 +246,7 @@ namespace Raven.Tests.Linq
 			var q = from user in indexedUsers
 					where 15 > user.Age
 					select user;
-			Assert.Equal("Age_Range:[* TO 0x0000000F]", q.ToString());
+			Assert.Equal("Age_Range:{* TO Ix15}", q.ToString());
 		}
 
 		[Fact]
@@ -138,7 +256,7 @@ namespace Raven.Tests.Linq
 			var q = from user in indexedUsers
 					where 15 >= user.Age
 					select user;
-			Assert.Equal("Age_Range:{* TO 0x0000000F}", q.ToString());
+			Assert.Equal("Age_Range:[* TO Ix15]", q.ToString());
 		}
 
 		[Fact]
@@ -148,7 +266,7 @@ namespace Raven.Tests.Linq
 			var q = from user in indexedUsers
 					where 15 < user.Age
 					select user;
-			Assert.Equal("Age_Range:[0x0000000F TO NULL]", q.ToString());
+			Assert.Equal("Age_Range:{Ix15 TO NULL}", q.ToString());
 		}
 
 		[Fact]
@@ -158,7 +276,7 @@ namespace Raven.Tests.Linq
 			var q = from user in indexedUsers
 					where 15 <= user.Age
 					select user;
-			Assert.Equal("Age_Range:{0x0000000F TO NULL}", q.ToString());
+			Assert.Equal("Age_Range:[Ix15 TO NULL]", q.ToString());
 		}
 
 		[Fact]
@@ -236,7 +354,7 @@ namespace Raven.Tests.Linq
 		}
 
 		[Fact]
-		public void CanUnderstandSimpleContainsInExpresssion1()
+		public void CanUnderstandSimpleContainsInExpression1()
 		{
 			var indexedUsers = GetRavenQueryInspector();
 			var q = from x in indexedUsers
@@ -248,7 +366,7 @@ namespace Raven.Tests.Linq
 		}
 
 		[Fact]
-		public void CanUnderstandSimpleContainsInExpresssion2()
+		public void CanUnderstandSimpleContainsInExpression2()
 		{
 			var indexedUsers = GetRavenQueryInspector();
 			var q = from x in indexedUsers
@@ -260,7 +378,7 @@ namespace Raven.Tests.Linq
 		}
 
 		[Fact]
-		public void CanUnderstandSimpleStartsWithInExpresssion1()
+		public void CanUnderstandSimpleStartsWithInExpression1()
 		{
 			var indexedUsers = GetRavenQueryInspector();
 			var q = from x in indexedUsers
@@ -273,7 +391,7 @@ namespace Raven.Tests.Linq
 
 
 		[Fact]
-		public void CanUnderstandSimpleStartsWithInExpresssion2()
+		public void CanUnderstandSimpleStartsWithInExpression2()
 		{
 			var indexedUsers = GetRavenQueryInspector();
 			var q = from indexedUser in indexedUsers
@@ -326,7 +444,7 @@ namespace Raven.Tests.Linq
 		}
 
 		[Fact]
-		public void WithNoBracesOperatorPrecedenceIsHonoured()
+		public void WithNoBracesOperatorPrecedenceIsHonored()
 		{
 			var indexedUsers = GetRavenQueryInspector();
 			var q = from user in indexedUsers
@@ -354,13 +472,13 @@ namespace Raven.Tests.Linq
 			var q = from user in indexedUsers
 					where user.Birthday < new DateTime(2010, 05, 15)
 					select user;
-			Assert.Equal("Birthday:{* TO 20100515000000000}", q.ToString());
+			Assert.Equal("Birthday:{* TO 2010-05-15T00:00:00.0000000}", q.ToString());
 		}
 
 		[Fact]
 		public void NegatingSubClauses()
 		{
-			var query = ((IDocumentQuery<object>)new DocumentQuery<object>(null, null, null, null, null, null)).Not
+			var query = ((IDocumentQuery<object>)new DocumentQuery<object>(null, null, null, null, null, null, null, false)).Not
 				.OpenSubclause()
 				.WhereEquals("IsPublished", true)
 				.AndAlso()
@@ -376,7 +494,7 @@ namespace Raven.Tests.Linq
 			var q = from user in indexedUsers
 					where user.Birthday == new DateTime(2010, 05, 15)
 					select user;
-			Assert.Equal("Birthday:20100515000000000", q.ToString());
+			Assert.Equal("Birthday:2010-05-15T00:00:00.0000000", q.ToString());
 		}
 
 		[Fact]
@@ -386,7 +504,7 @@ namespace Raven.Tests.Linq
 			var q = from user in indexedUsers
 					where user.Birthday <= new DateTime(2010, 05, 15)
 					select user;
-			Assert.Equal("Birthday:[* TO 20100515000000000]", q.ToString());
+			Assert.Equal("Birthday:[* TO 2010-05-15T00:00:00.0000000]", q.ToString());
 		}
 
 		[Fact]
@@ -396,7 +514,7 @@ namespace Raven.Tests.Linq
 			var q = from user in indexedUsers
 					where user.Birthday > new DateTime(2010, 05, 15)
 					select user;
-			Assert.Equal("Birthday:{20100515000000000 TO NULL}", q.ToString());
+			Assert.Equal("Birthday:{2010-05-15T00:00:00.0000000 TO NULL}", q.ToString());
 		}
 
 		[Fact]
@@ -406,7 +524,7 @@ namespace Raven.Tests.Linq
 			var q = from user in indexedUsers
 					where user.Birthday >= new DateTime(2010, 05, 15)
 					select user;
-			Assert.Equal("Birthday:[20100515000000000 TO NULL]", q.ToString());
+			Assert.Equal("Birthday:[2010-05-15T00:00:00.0000000 TO NULL]", q.ToString());
 		}
 
 		[Fact]
@@ -416,7 +534,7 @@ namespace Raven.Tests.Linq
 			var q = from user in indexedUsers
 					where user.Birthday >= new DateTime(2010, 05, 15)
 					select user.Name;
-			Assert.Equal("<Name>: Birthday:[20100515000000000 TO NULL]", q.ToString());
+			Assert.Equal("<Name>: Birthday:[2010-05-15T00:00:00.0000000 TO NULL]", q.ToString());
 		}
 
 		[Fact]
@@ -427,7 +545,7 @@ namespace Raven.Tests.Linq
 			var q = from user in indexedUsers
 					where user.Birthday >= dateTime
 					select new { user.Name, user.Age };
-			Assert.Equal("<Name, Age>: Birthday:[20100515000000000 TO NULL]", q.ToString());
+			Assert.Equal("<Name, Age>: Birthday:[2010-05-15T00:00:00.0000000 TO NULL]", q.ToString());
 		}
 
 		[Fact]
@@ -448,7 +566,7 @@ namespace Raven.Tests.Linq
 			var q = from user in indexedUsers
 					where user.Age > 3
 					select user;
-			Assert.Equal("Age_Range:{0x00000003 TO NULL}", q.ToString());
+			Assert.Equal("Age_Range:{Ix3 TO NULL}", q.ToString());
 		}
 
 		[Fact]
@@ -458,7 +576,7 @@ namespace Raven.Tests.Linq
 			var q = from user in indexedUsers
 					where user.Birthday >= DateTime.Parse("2010-05-15")
 					select new { user.Name, user.Age };
-			Assert.Equal("<Name, Age>: Birthday:[20100515000000000 TO NULL]", q.ToString());
+			Assert.Equal("<Name, Age>: Birthday:[2010-05-15T00:00:00.0000000 TO NULL]", q.ToString());
 		}
 
 		[Fact]
@@ -486,8 +604,7 @@ namespace Raven.Tests.Linq
 		public void CanUnderstandSimpleAny_Dynamic()
 		{
 			var indexedUsers = GetRavenQueryInspector();
-			var q = indexedUsers
-				.Where(x => x.Properties.Any(y => y.Key == "first"));
+			var q = indexedUsers.Where(x => x.Properties.Any(y => y.Key == "first"));
 			Assert.Equal("Properties,Key:first", q.ToString());
 		}
 
@@ -495,9 +612,64 @@ namespace Raven.Tests.Linq
 		public void CanUnderstandSimpleAny_Static()
 		{
 			var indexedUsers = GetRavenQueryInspectorStatic();
-			var q = indexedUsers
-				.Where(x => x.Properties.Any(y => y.Key == "first"));
+			var q = indexedUsers.Where(x => x.Properties.Any(y => y.Key == "first"));
 			Assert.Equal("Properties_Key:first", q.ToString());
+		}
+
+		[Fact]
+		public void AnyOnCollection()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(x => x.Properties.Any());
+			Assert.Equal("Properties:*", q.ToString());
+		}
+		
+		[Fact]
+		public void AnyOnCollectionEqTrue()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(x => x.Properties.Any() == true);
+			Assert.Equal("Properties:*", q.ToString());
+		}
+
+		[Fact]
+		public void AnyOnCollectionEqFalse()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(x => x.Properties.Any() == false);
+			Assert.Equal("(*:* AND -Properties:*)", q.ToString());
+		}
+
+		[Fact]
+		public void WillWrapLuceneSaveKeyword_NOT()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(x => x.Name == "NOT");
+			Assert.Equal("Name:\"NOT\"", q.ToString());
+		}
+
+		[Fact]
+		public void WillWrapLuceneSaveKeyword_OR()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(x => x.Name == "OR");
+			Assert.Equal("Name:\"OR\"", q.ToString());
+		}
+
+		[Fact]
+		public void WillWrapLuceneSaveKeyword_AND()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(x => x.Name == "AND");
+			Assert.Equal("Name:\"AND\"", q.ToString());
+		}
+
+		[Fact]
+		public void WillNotWrapCaseNotMatchedLuceneSaveKeyword_And()
+		{
+			var indexedUsers = GetRavenQueryInspector();
+			var q = indexedUsers.Where(x => x.Name == "And");
+			Assert.Equal("Name:And", q.ToString());
 		}
 
 		public class IndexedUser
@@ -507,11 +679,25 @@ namespace Raven.Tests.Linq
 			public string Name { get; set; }
 			public string Email { get; set; }
 			public UserProperty[] Properties { get; set; }
+			public bool IsActive { get; set; }
+			public IAnimal Animal { get; set; }
+			public double Rate { get; set; }
+		}
+
+		public interface IAnimal
+		{
+			
+		}
+
+		public class Dog : IAnimal
+		{
+			public string Color { get; set; }
 		}
 
 		public class UserProperty
 		{
 			public string Key { get; set; }
+			public string Value { get; set; }
 		}
 
 		public void Dispose()

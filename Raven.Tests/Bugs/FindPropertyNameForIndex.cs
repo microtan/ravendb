@@ -1,13 +1,15 @@
 using System.Linq;
 using Raven.Client.Document;
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class FindPropertyNameForIndex :  LocalClientTest
+	public class FindPropertyNameForIndex : RavenTest
 	{
-		protected override void ModifyConfiguration(Database.Config.RavenConfiguration configuration)
+		protected override void ModifyConfiguration(Database.Config.InMemoryRavenConfiguration configuration)
 		{
 		}
 

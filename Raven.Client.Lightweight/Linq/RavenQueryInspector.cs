@@ -8,12 +8,16 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Threading.Tasks;
 using Raven.Abstractions.Data;
+using Raven.Abstractions.Extensions;
+using Raven.Abstractions.Indexing;
 using Raven.Client.Connection;
 using Raven.Client.Document;
-#if !NET_3_5
 using Raven.Client.Connection.Async;
-#endif
+using Raven.Client.Indexes;
+using Raven.Client.Spatial;
+using Raven.Json.Linq;
 
 namespace Raven.Client.Linq
 {
@@ -25,14 +29,12 @@ namespace Raven.Client.Linq
 		private readonly Expression expression;
 		private readonly IRavenQueryProvider provider;
 		private readonly RavenQueryStatistics queryStats;
+		private readonly RavenQueryHighlightings highlightings;
 		private readonly string indexName;
-#if !SILVERLIGHT
 		private readonly IDatabaseCommands databaseCommands;
-#endif
-#if !NET_3_5
 		private readonly IAsyncDatabaseCommands asyncDatabaseCommands;
-#endif
 		private InMemoryDocumentSessionOperations session;
+		private readonly bool isMapReduce;
 
 		/// <summary>
 		/// Initializes a new instance of the <see cref="RavenQueryInspector{T}"/> class.
@@ -40,15 +42,13 @@ namespace Raven.Client.Linq
 		public RavenQueryInspector(
 			IRavenQueryProvider provider, 
 			RavenQueryStatistics queryStats,
+			RavenQueryHighlightings highlightings,
 			string indexName,
 			Expression expression,
 			InMemoryDocumentSessionOperations session
-#if !SILVERLIGHT
 			, IDatabaseCommands databaseCommands
-#endif
-#if !NET_3_5
-			, IAsyncDatabaseCommands asyncDatabaseCommands
-#endif
+			, IAsyncDatabaseCommands asyncDatabaseCommands,
+			bool isMapReduce
 			)
 		{
 			if (provider == null)
@@ -57,19 +57,21 @@ namespace Raven.Client.Linq
 			}
 			this.provider = provider.For<T>();
 			this.queryStats = queryStats;
+			this.highlightings = highlightings;
 			this.indexName = indexName;
 			this.session = session;
-#if !SILVERLIGHT
 			this.databaseCommands = databaseCommands;
-#endif
-#if !NET_3_5
 			this.asyncDatabaseCommands = asyncDatabaseCommands;
-#endif
-			this.provider.AfterQueryExecuted(queryStats.UpdateQueryStats);
+			this.isMapReduce = isMapReduce;
+			this.provider.AfterQueryExecuted(this.AfterQueryExecuted);
 			this.expression = expression ?? Expression.Constant(this);
 		}
 
-		
+		private void AfterQueryExecuted(QueryResult queryResult)
+		{
+			this.queryStats.UpdateQueryStats(queryResult);
+			this.highlightings.Update(queryResult);
+		}
 
 		#region IOrderedQueryable<T> Members
 
@@ -125,6 +127,30 @@ namespace Raven.Client.Linq
 			return this;
 		}
 
+	    public IRavenQueryable<TResult> TransformWith<TTransformer, TResult>() where TTransformer : AbstractTransformerCreationTask, new()
+	    {
+	        var transformer = new TTransformer();
+	        provider.TransformWith(transformer.TransformerName);
+	        return (IRavenQueryable<TResult>)this.As<TResult>();
+	    }
+
+        public IRavenQueryable<TResult> TransformWith<TResult>(string transformerName)
+        {
+            provider.TransformWith(transformerName);
+            return (IRavenQueryable<TResult>)this.As<TResult>();
+        }
+
+	    public IRavenQueryable<T> AddQueryInput(string input, RavenJToken foo)
+	    {
+	        provider.AddQueryInput(input, foo);
+	        return this;
+	    }
+
+		public IRavenQueryable<T> Spatial(Expression<Func<T, object>> path, Func<SpatialCriteriaFactory, SpatialCriteria> clause)
+		{
+			return Customize(x => x.Spatial(path.ToPropertyPath(), clause));
+		}
+
 		/// <summary>
 		/// Returns a <see cref="System.String"/> that represents this instance.
 		/// </summary>
@@ -134,16 +160,50 @@ namespace Raven.Client.Linq
 		public override string ToString()
 		{
 			RavenQueryProviderProcessor<T> ravenQueryProvider = GetRavenQueryProvider();
-			var luceneQuery = ravenQueryProvider.GetLuceneQueryFor(expression);
+			var documentQuery = ravenQueryProvider.GetDocumentQueryFor(expression);
 			string fields = "";
 			if (ravenQueryProvider.FieldsToFetch.Count > 0)
 				fields = "<" + string.Join(", ", ravenQueryProvider.FieldsToFetch.ToArray()) + ">: ";
-			return fields + luceneQuery;
+			return fields + documentQuery;
+		}
+
+		public IndexQuery GetIndexQuery(bool isAsync = true)
+		{
+			RavenQueryProviderProcessor<T> ravenQueryProvider = GetRavenQueryProvider();
+			if (isAsync == false)
+			{
+				var documentQuery = ravenQueryProvider.GetDocumentQueryFor(expression);
+				return documentQuery.GetIndexQuery(false);
+			}
+			var asyncDocumentQuery = ravenQueryProvider.GetAsyncDocumentQueryFor(expression);
+			return asyncDocumentQuery.GetIndexQuery(true);
+		}
+
+		public virtual FacetResults GetFacets(string facetSetupDoc, int start, int? pageSize)
+		{
+			return databaseCommands.GetFacets(indexName, GetIndexQuery(false), facetSetupDoc, start, pageSize);
+		}
+
+		public virtual FacetResults GetFacets(List<Facet> facets, int start, int? pageSize)
+		{
+			return databaseCommands.GetFacets(indexName, GetIndexQuery(false), facets, start, pageSize);
+		}
+
+		public virtual Task<FacetResults> GetFacetsAsync(string facetSetupDoc, int start, int? pageSize)
+		{
+			return asyncDatabaseCommands.GetFacetsAsync(indexName, GetIndexQuery(true), facetSetupDoc, start, pageSize);
+		}
+
+		public virtual Task<FacetResults> GetFacetsAsync(List<Facet> facets, int start, int? pageSize)
+		{
+			return asyncDatabaseCommands.GetFacetsAsync(indexName, GetIndexQuery(true), facets, start, pageSize);
 		}
 
 		private RavenQueryProviderProcessor<T> GetRavenQueryProvider()
 		{
-			return new RavenQueryProviderProcessor<T>(provider.QueryGenerator, provider.CustomizeQuery, null, indexName, new HashSet<string>(), new Dictionary<string, string>());
+		    return new RavenQueryProviderProcessor<T>(provider.QueryGenerator, provider.CustomizeQuery, null, indexName,
+		                                              new HashSet<string>(), new List<RenamedField>(), isMapReduce,
+                                                      provider.ResultTransformer, provider.QueryInputs);
 		}
 
 		/// <summary>
@@ -153,13 +213,27 @@ namespace Raven.Client.Linq
 		{
 			get
 			{
-				var ravenQueryProvider = new RavenQueryProviderProcessor<T>(provider.QueryGenerator, null, null, indexName, new HashSet<string>(), new Dictionary<string, string>());
-				var luceneQuery = ravenQueryProvider.GetLuceneQueryFor(expression);
-				return ((IRavenQueryInspector)luceneQuery).IndexQueried;
+				var ravenQueryProvider = new RavenQueryProviderProcessor<T>(provider.QueryGenerator, null, null, indexName, new HashSet<string>(), new List<RenamedField>(), isMapReduce, 
+                    provider.ResultTransformer, provider.QueryInputs);
+				var documentQuery = ravenQueryProvider.GetDocumentQueryFor(expression);
+				return ((IRavenQueryInspector)documentQuery).IndexQueried;
 			}
 		}
 
-#if !SILVERLIGHT
+		/// <summary>
+		/// Get the name of the index being queried asynchronously
+		/// </summary>
+		public string AsyncIndexQueried
+		{
+			get
+			{
+				var ravenQueryProvider = new RavenQueryProviderProcessor<T>(provider.QueryGenerator, null, null, indexName, new HashSet<string>(), new List<RenamedField>(), isMapReduce,
+                    provider.ResultTransformer, provider.QueryInputs);
+				var documentQuery = ravenQueryProvider.GetAsyncDocumentQueryFor(expression);
+				return ((IRavenQueryInspector)documentQuery).IndexQueried;
+			}
+		}
+
 		/// <summary>
 		/// Grant access to the database commands
 		/// </summary>
@@ -173,10 +247,6 @@ namespace Raven.Client.Linq
 			}
 		}
 
-		
-#endif
-
-#if !NET_3_5
 		/// <summary>
 		/// Grant access to the async database commands
 		/// </summary>
@@ -189,7 +259,6 @@ namespace Raven.Client.Linq
 				return asyncDatabaseCommands;
 			}
 		}
-#endif
 
 		public InMemoryDocumentSessionOperations Session
 		{
@@ -202,32 +271,18 @@ namespace Raven.Client.Linq
 		///<summary>
 		/// Get the last equality term for the query
 		///</summary>
-		public KeyValuePair<string, string> GetLastEqualityTerm()
+		public KeyValuePair<string, string> GetLastEqualityTerm(bool isAsync = false)
 		{
-			var ravenQueryProvider = new RavenQueryProviderProcessor<T>(provider.QueryGenerator, null, null, indexName, new HashSet<string>(), new Dictionary<string, string>());
-			var luceneQuery = ravenQueryProvider.GetLuceneQueryFor(expression);
-			return ((IRavenQueryInspector)luceneQuery).GetLastEqualityTerm();
-		}
+            var ravenQueryProvider = new RavenQueryProviderProcessor<T>(provider.QueryGenerator, null, null, indexName, new HashSet<string>(), new List<RenamedField>(), isMapReduce, provider.ResultTransformer, provider.QueryInputs);
+			if (isAsync)
+			{
+				var asyncDocumentQuery = ravenQueryProvider.GetAsyncDocumentQueryFor(expression);
+				return ((IRavenQueryInspector)asyncDocumentQuery).GetLastEqualityTerm(true);
+			}
 
-#if SILVERLIGHT
-		/// <summary>
-		///   This function exists solely to forbid calling ToList() on a queryable in Silverlight.
-		/// </summary>
-		[Obsolete("You cannot execute a query synchronously from the Silverlight client. Instead, use queryable.ToListAsync().", true)]
-		public static IList<TOther> ToList<TOther>()
-		{
-			throw new NotSupportedException();
+			var documentQuery = ravenQueryProvider.GetDocumentQueryFor(expression);
+			return ((IRavenQueryInspector) documentQuery).GetLastEqualityTerm();
 		}
-
-		/// <summary>
-		///   This function exists solely to forbid calling ToArray() on a queryable in Silverlight.
-		/// </summary>
-		[Obsolete("You cannot execute a query synchronously from the Silverlight client. Instead, use queryable.ToListAsync().", true)]
-		public static TOther[] ToArray<TOther>()
-		{
-			throw new NotSupportedException();
-		}
-#endif
 
 		/// <summary>
 		/// Set the fields to fetch

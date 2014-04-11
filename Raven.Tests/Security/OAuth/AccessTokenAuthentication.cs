@@ -1,49 +1,41 @@
 using System;
+using System.Linq;
 using System.Net;
-using System.Text;
-using Newtonsoft.Json;
+using Raven.Abstractions.Data;
+using Raven.Database.Server.Security;
+using Raven.Imports.Newtonsoft.Json;
 using Raven.Client;
 using Raven.Database.Config;
-using Raven.Database.Extensions;
 using Raven.Database.Server;
 using Raven.Database.Server.Security.OAuth;
 using Raven.Json.Linq;
 using Raven.Server;
+using Raven.Tests.Common;
+
 using Xunit;
-using System.Linq;
 
 namespace Raven.Tests.Security.OAuth
 {
-
-	public class AccessTokenAuthentication : RemoteClientTest, IDisposable
+	public class AccessTokenAuthentication : RavenTest
 	{
-		readonly string path;
 		const string relativeUrl = "/docs";
 		const string baseUrl = "http://localhost";
 		const int port = 8079;
 
 		public AccessTokenAuthentication()
 		{
-			path = GetPath("TestDb");
-			NonAdminHttp.EnsureCanListenToWhenInNonAdminContext(8079);
+			NonAdminHttp.EnsureCanListenToWhenInNonAdminContext(port);
 		}
 
-		protected override void ModifyConfiguration(RavenConfiguration ravenConfiguration)
+		protected override void ModifyConfiguration(InMemoryRavenConfiguration ravenConfiguration)
 		{
 			ravenConfiguration.AnonymousUserAccessMode = AnonymousUserAccessMode.None;
-			ravenConfiguration.AuthenticationMode = "OAuth";
-			ravenConfiguration.OAuthTokenCertificate = CertGenerator.GenerateNewCertificate("RavenDB.Test");
+            Authentication.EnableOnce();
 		}
 
 		protected override void CreateDefaultIndexes(IDocumentStore documentStore)
 		{
 			// Do not create the default index "RavenDocumentsByEntityName".
-		}
-
-		public override void Dispose()
-		{
-			IOExtensions.DeleteDirectory(path);
-			base.Dispose();
 		}
 
 		public string GetAccessToken(RavenDbServer server, string user = "jsmith", string databases = "*", bool valid = true, bool expired = false)
@@ -52,10 +44,10 @@ namespace Raven.Tests.Security.OAuth
 
 			if (expired) issued -= TimeSpan.FromHours(1).TotalMilliseconds;
 
-			var authorizedDatabases = databases.Split(',').Select(tenantId=> new AccessTokenBody.DatabaseAccess{TenantId = tenantId}).ToArray();
+			var authorizedDatabases = databases.Split(',').Select(tenantId=> new DatabaseAccess{TenantId = tenantId}).ToList();
 			var body = RavenJObject.FromObject(new AccessTokenBody { UserId = user, AuthorizedDatabases = authorizedDatabases, Issued = issued }).ToString(Formatting.None);
 
-			var signature = valid ? CertHelper.Sign(body, server.Database.Configuration.OAuthTokenCertificate) : "InvalidSignature";
+			var signature = valid ? AccessToken.Sign(body, server.SystemDatabase.Configuration.OAuthTokenKey) : "InvalidSignature";
 
 			var token = RavenJObject.FromObject(new { Body = body, Signature = signature }).ToString(Formatting.None);
 
@@ -72,7 +64,7 @@ namespace Raven.Tests.Security.OAuth
 		{
 			using (var server = GetNewServer())
 			{
-				var token = GetAccessToken(server);
+				var token = GetAccessToken(server, databases: "<system>");
 
 				var request = GetNewWebRequest()
 					.WithBearerTokenAuthorization(token);
@@ -93,17 +85,12 @@ namespace Raven.Tests.Security.OAuth
 			using (var response = request.MakeRequest())
 			{
 				Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-				var challenge = response.Headers["WWW-Authenticate"];
-				Assert.NotEmpty(challenge);
-				Assert.True(challenge.StartsWith("Bearer "));
-				Assert.Contains("error=\"invalid_request\"", challenge);
 			}
 		}
 
 		[Fact]
 		public void RequestsWithAnInvalidAccessTokenShouldBeRejected()
 		{
-
 			using (var server = GetNewServer())
 			{
 				var token = GetAccessToken(server, valid: false);
@@ -155,8 +142,6 @@ namespace Raven.Tests.Security.OAuth
 
 				using (var response = request.MakeRequest())
 				{
-
-
 					Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
 					var challenge = response.Headers["WWW-Authenticate"];
 					Assert.NotEmpty(challenge);

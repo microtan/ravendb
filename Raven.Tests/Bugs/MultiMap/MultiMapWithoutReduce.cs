@@ -1,12 +1,15 @@
 using System;
 using System.Diagnostics;
 using System.Linq;
+
+using Raven.Tests.Common;
+
 using Xunit;
 using Xunit.Sdk;
 
 namespace Raven.Tests.Bugs.MultiMap
 {
-	public class MultiMapWithoutReduce : LocalClientTest
+	public class MultiMapWithoutReduce : RavenTest
 	{
 		[Fact]
 		public void CanQueryFromMultipleSources()

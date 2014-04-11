@@ -3,17 +3,18 @@
 //     Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 // </copyright>
 //-----------------------------------------------------------------------
-using Newtonsoft.Json;
+using Raven.Imports.Newtonsoft.Json;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Exceptions;
 using Raven.Json.Linq;
-using Raven.Database.Exceptions;
 using Raven.Database.Json;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Patching
 {
-	public class NestedPatching
+	public class NestedPatching : NoDisposalNeeded
 	{
 		private readonly RavenJObject doc = RavenJObject.Parse(@"{ title: ""A Blog Post"", body: ""html markup"", comments: [{""author"":""ayende"",""text"":""good post 1""},{author: ""ayende"", text:""good post 2""}], ""user"": { ""name"": ""ayende"", ""id"": 13} }");
 		[Fact]
@@ -75,8 +76,8 @@ namespace Raven.Tests.Patching
 					},
 				});
 
-			Assert.Equal(@"{""title"":""A Blog Post"",""body"":""html markup"",""comments"":[{""author"":""ayende"",""text"":""good post 1""},{""author"":""ayende"",""text"":""good post 2""}],""user"":{""name"":""rahien"",""id"":13}}",
-				patchedDoc.ToString(Formatting.None));
+            Assert.Equal(RavenJToken.Parse(@"{""title"":""A Blog Post"",""body"":""html markup"",""comments"":[{""author"":""ayende"",""text"":""good post 1""},{""author"":""ayende"",""text"":""good post 2""}],""user"":{""name"":""rahien"",""id"":13}}"),
+				patchedDoc,new RavenJTokenEqualityComparer());
 		}
 
 		[Fact]
@@ -97,8 +98,8 @@ namespace Raven.Tests.Patching
 					},
 				});
 
-			Assert.Equal(@"{""title"":""A Blog Post"",""body"":""html markup"",""comments"":[{""author"":""ayende"",""text"":""good post 1""},{""author"":""ayende"",""text"":""good post 2""}],""user"":{""name"":""rahien"",""id"":13}}",
-				patchedDoc.ToString(Formatting.None));
+            Assert.Equal(RavenJToken.Parse(@"{""title"":""A Blog Post"",""body"":""html markup"",""comments"":[{""author"":""ayende"",""text"":""good post 1""},{""author"":""ayende"",""text"":""good post 2""}],""user"":{""name"":""rahien"",""id"":13}}"),
+				patchedDoc, new RavenJTokenEqualityComparer());
 		}
 
 		[Fact]

@@ -4,18 +4,14 @@ using System.ComponentModel.Composition.Hosting;
 using System.Linq;
 using Raven.Client.Document;
 using Raven.Client.Indexes;
-using Raven.Database.Server;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class CreateIndexesRemotely :RemoteClientTest
+	public class CreateIndexesRemotely :RavenTest
 	{
-		protected override void ModifyConfiguration(Database.Config.RavenConfiguration ravenConfiguration)
-		{
-			ravenConfiguration.AnonymousUserAccessMode = AnonymousUserAccessMode.Get;
-		}
-
 		protected override void CreateDefaultIndexes(Client.IDocumentStore documentStore)
 		{
 		}

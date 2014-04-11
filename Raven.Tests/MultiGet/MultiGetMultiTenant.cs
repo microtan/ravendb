@@ -1,14 +1,17 @@
 ﻿using System;
 using System.Linq;
+using Raven.Client;
 using Raven.Client.Document;
 using Raven.Tests.Bugs;
+using Raven.Tests.Common;
+
 using Xunit;
 using Raven.Client.Linq;
 using Raven.Client.Extensions;
 
 namespace Raven.Tests.MultiGet
 {
-	public class MultiGetMultiTenant : RemoteClientTest
+	public class MultiGetMultiTenant : RavenTest
 	{
 		[Fact]
 		public void CanUseLazyWithMultiTenancy()
@@ -16,7 +19,7 @@ namespace Raven.Tests.MultiGet
 			using (var server = GetNewServer())
 			using (var store = new DocumentStore { Url = "http://localhost:8079" }.Initialize())
 			{
-				store.DatabaseCommands.EnsureDatabaseExists("test");
+				store.DatabaseCommands.GlobalAdmin.EnsureDatabaseExists("test");
 
 				using (var session = store.OpenSession("test"))
 				{
@@ -42,6 +45,7 @@ namespace Raven.Tests.MultiGet
 			using (GetNewServer())
 			using (var store = new DocumentStore { Url = "http://localhost:8079", DefaultDatabase = "test"}.Initialize())
 			{
+				store.DatabaseCommands.GlobalAdmin.EnsureDatabaseExists("test");
 				using (var session = store.OpenSession())
 				{
 					session.Store(new User { Name = "oren" });
@@ -90,8 +94,14 @@ namespace Raven.Tests.MultiGet
 		public void CanAggressivelyCacheLoads()
 		{
 			using (var server = GetNewServer())
-			using (var store = new DocumentStore { Url = "http://localhost:8079", DefaultDatabase = "test"}.Initialize())
+			using (var store = new DocumentStore
 			{
+				Url = "http://localhost:8079", 
+				DefaultDatabase = "test",
+				Conventions = {ShouldAggressiveCacheTrackChanges = false}
+			}.Initialize())
+			{
+				store.DatabaseCommands.GlobalAdmin.EnsureDatabaseExists("test");
 				using (var session = store.OpenSession())
 				{
 					session.Store(new User());
@@ -120,7 +130,5 @@ namespace Raven.Tests.MultiGet
 				Assert.Equal(1, server.Server.NumberOfRequests);
 			}
 		}
-
-
 	}
 }

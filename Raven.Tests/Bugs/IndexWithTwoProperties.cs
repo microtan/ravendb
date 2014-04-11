@@ -6,11 +6,13 @@
 using System.Linq;
 using Raven.Abstractions.Indexing;
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class IndexWithTwoProperties : LocalClientTest
+	public class IndexWithTwoProperties : RavenTest
 	{
 		[Fact]
 		public void CanCreateIndexByTwoProperties()

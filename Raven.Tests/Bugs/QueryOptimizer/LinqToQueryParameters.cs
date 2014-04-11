@@ -1,13 +1,13 @@
-using System.IO;
-using ICSharpCode.NRefactory;
-using Raven.Database.Linq;
+using ICSharpCode.NRefactory.CSharp;
 using Raven.Database.Linq.Ast;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs.QueryOptimizer
 {
-	public class LinqToQueryParameters
+	public class LinqToQueryParameters : NoDisposalNeeded
 	{
 		[Fact]
 		public void SimpleProperties()
@@ -26,7 +26,7 @@ namespace Raven.Tests.Bugs.QueryOptimizer
 		}
 
 		[Fact]
-		public void SimplePropertiesWithNamedArugment()
+		public void SimplePropertiesWithNamedArgument()
 		{
 			var qp = Translate("from doc in docs select new { N2 = doc.Name }");
 
@@ -93,9 +93,9 @@ select new { TagsName = t.Name,  Name = p.Name, UserName = user.Name }");
 
 		private static string[] Translate(string query)
 		{
-			var parser = ParserFactory.CreateParser(SupportedLanguage.CSharp, new StringReader("var q = " + query));
+			var parser = new CSharpParser();
 
-			var block = parser.ParseBlock();
+			var block = parser.ParseExpression(query);
 
 			var captureQueryParameterNamesVisitor = new CaptureQueryParameterNamesVisitor();
 			block.AcceptVisitor(captureQueryParameterNamesVisitor, null);

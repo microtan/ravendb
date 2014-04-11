@@ -1,12 +1,14 @@
 using Raven.Database;
 using Raven.Database.Config;
 using Raven.Database.Data;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs.Queries
 {
-	public class DynamicQueriesOnMetadata : LocalClientTest
+	public class DynamicQueriesOnMetadata : RavenTest
 	{
 		[Fact]
 		public void CanQueryOnMetadataUsingDynamicQueries()
@@ -24,7 +26,7 @@ namespace Raven.Tests.Bugs.Queries
 
 				using (var s = store.OpenSession())
 				{
-					var glasses = s.Advanced.LuceneQuery<Glass>()
+                    var glasses = s.Advanced.DocumentQuery<Glass>()
 						.WhereEquals("@metadata.Is-Nice", true)
 						.ToArray();
 					Assert.NotEmpty(glasses);

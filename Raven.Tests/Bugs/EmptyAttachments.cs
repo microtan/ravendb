@@ -1,6 +1,8 @@
 ﻿using System;
 using System.IO;
 using Raven.Json.Linq;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
@@ -11,7 +13,7 @@ namespace Raven.Tests.Bugs
 		[Fact]
 		public void CanSaveAndLoad()
 		{
-			using (var store = NewDocumentStore("esent", true))
+			using (var store = NewDocumentStore(requestedStorage: "esent"))
 			{
 				store.DatabaseCommands.PutAttachment("a", null, new MemoryStream(), new RavenJObject());
 
@@ -24,13 +26,13 @@ namespace Raven.Tests.Bugs
 		[Fact]
 		public void CanSaveAndIterate()
 		{
-			using (var store = NewDocumentStore("esent", true))
+			using (var store = NewDocumentStore(requestedStorage: "esent"))
 			{
 				store.DatabaseCommands.PutAttachment("a", null, new MemoryStream(), new RavenJObject());
 
 				store.DocumentDatabase.TransactionalStorage.Batch(accessor =>
 				{
-					accessor.Attachments.GetAttachmentsAfter(Guid.Empty, 100).ToList();
+					accessor.Attachments.GetAttachmentsAfter(Raven.Abstractions.Data.Etag.Empty, 100, long.MaxValue).ToList();
 				});
 			}
 		}

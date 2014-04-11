@@ -1,19 +1,26 @@
 using System;
-using System.Collections.Generic;
-using NLog;
+using Raven.Abstractions.Logging;
+using Raven.Database.Util;
 
 namespace Raven.Database.Impl
 {
 	public class ExceptionAggregator
 	{
-		private readonly Logger log;
+		private readonly ILog log;
 		private readonly string errorMsg;
-		readonly List<Exception> list = new List<Exception>();
+		private readonly LogLevel level;
+		readonly ConcurrentSet<Exception> list = new ConcurrentSet<Exception>();
 
-		public ExceptionAggregator(Logger log, string errorMsg)
+		public ExceptionAggregator(string errorMsg)
+			: this(null, errorMsg)
+		{
+		}
+
+		public ExceptionAggregator(ILog log, string errorMsg, LogLevel level = LogLevel.Error)
 		{
 			this.log = log;
 			this.errorMsg = errorMsg;
+			this.level = level;
 		}
 
 		public void Execute(Action action)
@@ -33,8 +40,11 @@ namespace Raven.Database.Impl
 			if (list.Count == 0)
 				return;
 
-			var aggregateException = new AggregateException(list);
-			log.ErrorException(errorMsg, aggregateException);
+			var aggregateException = new AggregateException(errorMsg, list);
+
+			if (log != null)
+				log.Log(level, () => errorMsg, aggregateException);
+
 			throw aggregateException;
 		}
 	}

@@ -3,7 +3,7 @@
 //     Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 // </copyright>
 //-----------------------------------------------------------------------
-#if !SILVERLIGHT
+#if !NETFX_CORE
 using System;
 using System.Collections.Generic;
 using System.Transactions;
@@ -18,7 +18,6 @@ namespace Raven.Client.Connection
 	/// </summary>
 	public static class RavenTransactionAccessor
 	{
-#if !NET_3_5
 		[ThreadStatic]
 		private static Stack<TransactionInformation> currentRavenTransactions;
 
@@ -31,6 +30,9 @@ namespace Raven.Client.Connection
 				return currentRavenTransactions;
 			}
 		}
+
+		[ThreadStatic]
+		private static bool supressExplicitRavenTransaction = false;
 
 		/// <summary>
 		/// Starts a transaction
@@ -50,29 +52,38 @@ namespace Raven.Client.Connection
 		{
 			CurrentRavenTransactions.Push(new TransactionInformation
 			{
-				Id = Guid.NewGuid(),
+				Id = Guid.NewGuid().ToString(),
 				Timeout = timeout
 			});
 			return new DisposableAction(() => CurrentRavenTransactions.Pop());
 		}
-#endif
+		
+		public static TimeSpan? DefaultTimeout { get; set; }
+
 		/// <summary>
 		/// Gets the transaction information for the current transaction
 		/// </summary>
 		/// <returns></returns>
 		public static TransactionInformation GetTransactionInformation()
 		{
-			#if !NET_3_5
-			if (CurrentRavenTransactions.Count >0)
+			if (CurrentRavenTransactions.Count > 0 && supressExplicitRavenTransaction == false)
 				return CurrentRavenTransactions.Peek();
-			#endif
 			if (Transaction.Current == null)
 				return null;
 			return new TransactionInformation
 			{
-				Id = PromotableRavenClientEnlistment.GetLocalOrDistributedTransactionId(Transaction.Current.TransactionInformation),
-				Timeout = TransactionManager.DefaultTimeout
+                Id = Transaction.Current.TransactionInformation.LocalIdentifier,
+				Timeout = DefaultTimeout ?? TransactionManager.DefaultTimeout
 			};
+		}
+
+		internal static IDisposable SupressExplicitRavenTransaction()
+		{
+			supressExplicitRavenTransaction = true;
+			return new DisposableAction(() =>
+			{
+				supressExplicitRavenTransaction = false;
+			});
 		}
 	}
 }

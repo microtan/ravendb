@@ -1,9 +1,11 @@
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs
 {
-	public class IntegerIds : LocalClientTest
+	public class IntegerIds : RavenTest
 	{
 		[Fact]
 		public void CanSaveAndLoad()
@@ -59,7 +61,7 @@ namespace Raven.Tests.Bugs
 
 				using (var s = store.OpenSession())
 				{
-					var load = s.Query<WithIntKey>().Where(x => x.Id == 1).First();
+					var load = s.Query<WithIntKey>().First(x => x.Id == 1 && x.Name =="abcv");
 					Assert.Equal("abcv", load.Name);
 				}
 			}

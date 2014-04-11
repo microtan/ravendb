@@ -8,88 +8,93 @@ using System.Threading;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Extensions;
 using Raven.Abstractions.Indexing;
+using Raven.Client.Document;
+using Raven.Database.Indexing;
 using Raven.Json.Linq;
 using Raven.Database;
 using Raven.Database.Config;
-using Raven.Tests.Storage;
+using Raven.Tests.Common;
+
+using Spatial4n.Core.Context.Nts;
+using Spatial4n.Core.Shapes;
 using Xunit;
+using System.Linq;
+using SpatialRelation = Raven.Abstractions.Indexing.SpatialRelation;
 
 namespace Raven.Tests.Spatial
 {
-	public class SpatialIndexTest : AbstractDocumentStorageTest
+	public class SpatialIndexTest : RavenTest
 	{
-		private readonly DocumentDatabase db;
+		private readonly DocumentStore store;
 
 		public SpatialIndexTest()
 		{
-			db = new DocumentDatabase(new RavenConfiguration
-			{
-				RunInMemory = true
-			});
-			db.SpinBackgroundWorkers();
+            store = NewRemoteDocumentStore(databaseName: "SpatialIndexTest");
 		}
 
 		public override void Dispose()
 		{
-			db.Dispose();
+			store.Dispose();
 			base.Dispose();
 		}
 
-		// same test as in Spatial.Net test cartisian
+		// same test as in Spatial.Net test cartesian
 		[Fact]
 		public void CanPerformSpatialSearch()
 		{
 			var indexDefinition = new IndexDefinition
 			{
-				Map = "from e in docs.Events select new { Tag = \"Event\", _ = SpatialIndex.Generate(e.Latitude, e.Longitude) }",
+				Map = "from e in docs.Events select new { Tag = \"Event\", _ = SpatialGenerate(e.Latitude, e.Longitude) }",
 				Indexes = {
 					{ "Tag", FieldIndexing.NotAnalyzed }
 				}
 			};
 
-			db.PutIndex("eventsByLatLng", indexDefinition);
+			store.DatabaseCommands.PutIndex("eventsByLatLng", indexDefinition);
 
 			var events = SpatialIndexTestHelper.GetEvents();
 
 			for (int i = 0; i < events.Length; i++)
 			{
-				db.Put("Events/" + (i + 1), null,
+				store.DatabaseCommands.Put("Events/" + (i + 1), null,
 					RavenJObject.FromObject(events[i]),
-					RavenJObject.Parse("{'Raven-Entity-Name': 'Events'}"), null);
+					RavenJObject.Parse("{'Raven-Entity-Name': 'Events'}"));
 			}
 
 			const double lat = 38.96939, lng = -77.386398;
-			const double radius = 6.0;
+			const double radiusInKm = 6.0*1.609344;
 			QueryResult queryResult;
 			do
 			{
-				queryResult = db.Query("eventsByLatLng", new SpatialIndexQuery()
+				queryResult = store.DatabaseCommands.Query("eventsByLatLng", new SpatialIndexQuery()
 				{
 					Query = "Tag:[[Event]]",
-					Latitude = lat,
-					Longitude = lng,
-					Radius = radius,
+					QueryShape = SpatialIndexQuery.GetQueryShapeFromLatLon(lat, lng, radiusInKm),
+					SpatialRelation = SpatialRelation.Within,
+					SpatialFieldName = Constants.DefaultSpatialFieldName,
 					SortedFields = new[] { new SortedField("__distance"), }
-				});
+				}, null);
 				if (queryResult.IsStale)
 					Thread.Sleep(100);
 			} while (queryResult.IsStale);
 
+			var expected = events.Count(e => GetGeographicalDistance(lat, lng, e.Latitude, e.Longitude) <= radiusInKm);
+
+			Assert.Equal(expected, queryResult.Results.Count);
 			Assert.Equal(7, queryResult.Results.Count);
 
-			//TODO
-			//double previous = 0;
-			//foreach (var r in queryResult.Results)
-			//{
-			//    Event e = r.JsonDeserialization<Event>();
+			double previous = 0;
+			foreach (var r in queryResult.Results)
+			{
+				Event e = r.JsonDeserialization<Event>();
 
-			//    double distance = Raven.Database.Indexing.SpatialIndex.GetDistanceMi(lat, lng, e.Latitude, e.Longitude);
-			//    Console.WriteLine("Venue: " + e.Venue + ", Distance " + distance);
+				double distance = GetGeographicalDistance(lat, lng, e.Latitude, e.Longitude);
+				Console.WriteLine("Venue: " + e.Venue + ", Distance " + distance);
 
-			//    Assert.True(distance < radius);
-			//    Assert.True(distance >= previous);
-			//    previous = distance;
-			//}
+				Assert.True(distance < radiusInKm);
+				Assert.True(distance >= previous);
+				previous = distance;
+			}
 		}
 
 		[Fact]
@@ -97,35 +102,39 @@ namespace Raven.Tests.Spatial
 		{
 			var indexDefinition = new IndexDefinition
 			{
-				Map = "from e in docs.Events select new { Tag = \"Event\", _ = SpatialIndex.Generate(e.Latitude, e.Longitude) }",
+				Map = "from e in docs.Events select new { Tag = \"Event\", _ = SpatialGenerate(e.Latitude, e.Longitude) }",
 				Indexes = {
 					{ "Tag", FieldIndexing.NotAnalyzed }
 				}
 			};
 
-			db.PutIndex("eventsByLatLng", indexDefinition);
+			store.DatabaseCommands.PutIndex("eventsByLatLng", indexDefinition);
 
-			db.Put("Events/1", null,
+            store.DatabaseCommands.Put("Events/1", null,
+                RavenJObject.Parse(@"{""Venue"": ""Jimmy's Old Town Tavern"", ""Latitude"": null, ""Longitude"": 35 }"),
+                RavenJObject.Parse("{'Raven-Entity-Name': 'Events'}"));
+
+            store.DatabaseCommands.Put("Events/2", null,
+                RavenJObject.Parse(@"{""Venue"": ""Jimmy's Old Town Tavern"", ""Latitude"": 30, ""Longitude"": null }"),
+                RavenJObject.Parse("{'Raven-Entity-Name': 'Events'}"));
+
+			store.DatabaseCommands.Put("Events/3", null,
 				RavenJObject.Parse(@"{""Venue"": ""Jimmy's Old Town Tavern"", ""Latitude"": null, ""Longitude"": null }"),
-				RavenJObject.Parse("{'Raven-Entity-Name': 'Events'}"), null);
+				RavenJObject.Parse("{'Raven-Entity-Name': 'Events'}"));
 
-			const double radius = 6.0;
 			QueryResult queryResult;
 			do
 			{
-				queryResult = db.Query("eventsByLatLng", new SpatialIndexQuery()
+				queryResult = store.DatabaseCommands.Query("eventsByLatLng", new IndexQuery()
 				{
 					Query = "Tag:[[Event]]",
-					Latitude = 0,
-					Longitude = 0,
-					Radius = radius,
 					SortedFields = new[] { new SortedField("__distance"), }
-				});
+				}, null);
 				if (queryResult.IsStale)
 					Thread.Sleep(100);
 			} while (queryResult.IsStale);
 
-			Assert.Equal(1, queryResult.Results.Count);
+			Assert.Equal(3, queryResult.Results.Count);
 		}
 
 		[Fact]
@@ -133,13 +142,13 @@ namespace Raven.Tests.Spatial
 		{
 			var indexDefinition = new IndexDefinition
 			{
-				Map = "from e in docs.Events select new { e.Venue, _ = SpatialIndex.Generate(e.Latitude, e.Longitude) }",
+				Map = "from e in docs.Events select new { e.Venue, _ = SpatialGenerate(e.Latitude, e.Longitude) }",
 				Indexes = {
 					{ "Tag", FieldIndexing.NotAnalyzed }
 				}
 			};
 
-			db.PutIndex("eventsByLatLng", indexDefinition);
+			store.DatabaseCommands.PutIndex("eventsByLatLng", indexDefinition);
 
 			var events = new[]
 			{
@@ -156,9 +165,9 @@ namespace Raven.Tests.Spatial
 
 			for (int i = 0; i < events.Length; i++)
 			{
-				db.Put("Events/" + (i + 1), null,
+				store.DatabaseCommands.Put("Events/" + (i + 1), null,
 					RavenJObject.FromObject(events[i]),
-					RavenJObject.Parse("{'Raven-Entity-Name': 'Events'}"), null);
+					RavenJObject.Parse("{'Raven-Entity-Name': 'Events'}"));
 			}
 
 			const double lat = 38.96939, lng = -77.386398;
@@ -166,17 +175,17 @@ namespace Raven.Tests.Spatial
 			QueryResult queryResult;
 			do
 			{
-				queryResult = db.Query("eventsByLatLng", new SpatialIndexQuery()
+				queryResult = store.DatabaseCommands.Query("eventsByLatLng", new SpatialIndexQuery()
 				{
-					Latitude = lat,
-					Longitude = lng,
-					Radius = radius,
+					QueryShape = SpatialIndexQuery.GetQueryShapeFromLatLon(lat, lng, radius),
+					SpatialRelation = SpatialRelation.Within,
+					SpatialFieldName = Constants.DefaultSpatialFieldName,
 					SortedFields = new[]
 					{
 						new SortedField("__distance"), 
 						new SortedField("Venue"),
 					}
-				});
+				}, null);
 				if (queryResult.IsStale)
 					Thread.Sleep(100);
 			} while (queryResult.IsStale);
@@ -197,13 +206,13 @@ namespace Raven.Tests.Spatial
 		{
 			var indexDefinition = new IndexDefinition
 			{
-				Map = "from e in docs.Events select new { e.Venue, _ = SpatialIndex.Generate(e.Latitude, e.Longitude) }",
+				Map = "from e in docs.Events select new { e.Venue, _ = SpatialGenerate(e.Latitude, e.Longitude) }",
 				Indexes = {
 					{ "Tag", FieldIndexing.NotAnalyzed }
 				}
 			};
 
-			db.PutIndex("eventsByLatLng", indexDefinition);
+			store.DatabaseCommands.PutIndex("eventsByLatLng", indexDefinition);
 
 			var events = new[]
 			{
@@ -219,9 +228,9 @@ namespace Raven.Tests.Spatial
 
 			for (int i = 0; i < events.Length; i++)
 			{
-				db.Put("Events/" + (i + 1), null,
+				store.DatabaseCommands.Put("Events/" + (i + 1), null,
 					RavenJObject.FromObject(events[i]),
-					RavenJObject.Parse("{'Raven-Entity-Name': 'Events'}"), null);
+					RavenJObject.Parse("{'Raven-Entity-Name': 'Events'}"));
 			}
 
 			const double lat = 38.96939, lng = -77.386398;
@@ -229,17 +238,17 @@ namespace Raven.Tests.Spatial
 			QueryResult queryResult;
 			do
 			{
-				queryResult = db.Query("eventsByLatLng", new SpatialIndexQuery()
+				queryResult = store.DatabaseCommands.Query("eventsByLatLng", new SpatialIndexQuery()
 				{
-					Latitude = lat,
-					Longitude = lng,
-					Radius = radius,
+					QueryShape = SpatialIndexQuery.GetQueryShapeFromLatLon(lat, lng, radius),
+					SpatialRelation = SpatialRelation.Within,
+					SpatialFieldName = Constants.DefaultSpatialFieldName,
 					SortedFields = new[]
 					{
 						new SortedField("Venue"),
 						new SortedField("__distance"), 
 					}
-				});
+				}, null);
 				if (queryResult.IsStale)
 					Thread.Sleep(100);
 			} while (queryResult.IsStale);
@@ -253,6 +262,22 @@ namespace Raven.Tests.Spatial
 			}
 		}
 
+		/// <summary>
+		/// The International Union of Geodesy and Geophysics says the Earth's mean radius in KM is:
+		///
+		/// [1] http://en.wikipedia.org/wiki/Earth_radius
+		/// </summary>
+		private const double EarthMeanRadiusKm = 6371.0087714;
+		private const double DegreesToRadians = Math.PI / 180;
+		private const double RadiansToDegrees = 1 / DegreesToRadians;
 
+		public static double GetGeographicalDistance(double fromLat, double fromLng, double toLat, double toLng)
+		{
+			var Context = new NtsSpatialContext(true);
+			Point ptFrom = Context.MakePoint(fromLng, fromLat);
+			Point ptTo = Context.MakePoint(toLng, toLat);
+			var distance = Context.GetDistCalc().Distance(ptFrom, ptTo);
+			return (distance / RadiansToDegrees) * EarthMeanRadiusKm;
+		}
 	}
 }

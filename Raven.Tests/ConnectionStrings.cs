@@ -1,30 +1,12 @@
-﻿
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using Raven.Client.Document;
-using Raven.Client.Embedded;
-using Raven.Client.Indexes;
+﻿using Raven.Client.Document;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests
 {
-	public class ConnectionStrings : LocalClientTest
+	public class ConnectionStrings : RavenTest
 	{
-		[Fact]
-		public void WillNotAffectResourceManagerId()
-		{
-			var resourceManagerId = Guid.NewGuid();
-			using (var store = new DocumentStore
-			{
-				ResourceManagerId = resourceManagerId
-			})
-			{
-				store.ParseConnectionString("Url=http://localhost:8079/;");
-
-				Assert.Equal(resourceManagerId, store.ResourceManagerId);
-			}
-		}
 
 		[Fact]
 		public void check_url()
@@ -52,22 +34,6 @@ namespace Raven.Tests
 		}
 
 		[Fact]
-		public void check_with_rmid()
-		{
-			using (var store = new DocumentStore())
-			{
-				store.ParseConnectionString("ResourceManagerId=d5723e19-92ad-4531-adad-8611e6e05c8a;");
-
-				Assert.Null(store.Url);
-				Assert.Null(store.Identifier);
-				Assert.Equal("d5723e19-92ad-4531-adad-8611e6e05c8a", store.ResourceManagerId.ToString());
-				Assert.NotNull(store.Credentials);
-				Assert.Null(store.DefaultDatabase);
-				Assert.True(store.EnlistInDistributedTransactions);
-			}
-		}
-
-		[Fact]
 		public void check_url_and_rmid()
 		{
 			using (var store = new DocumentStore())
@@ -76,7 +42,6 @@ namespace Raven.Tests
 
 				Assert.Equal("http://localhost:8079", store.Url);
 				Assert.Equal("http://localhost:8079", store.Identifier);
-				Assert.Equal("d5723e19-92ad-4531-adad-8611e6e05c8a", store.ResourceManagerId.ToString());
 				Assert.NotNull(store.Credentials);
 				Assert.Null(store.DefaultDatabase);
 				Assert.True(store.EnlistInDistributedTransactions);
@@ -124,7 +89,6 @@ namespace Raven.Tests
 
 				Assert.Equal("http://localhost:8079", store.Url);
 				Assert.Equal("http://localhost:8079 (DB: DevMachine)", store.Identifier);
-				Assert.Equal("d5723e19-92ad-4531-adad-8611e6e05c8a", store.ResourceManagerId.ToString());
 				Assert.NotNull(store.Credentials);
 				Assert.Equal("DevMachine", store.DefaultDatabase);
 				Assert.True(store.EnlistInDistributedTransactions);
@@ -139,6 +103,28 @@ namespace Raven.Tests
 				store.ParseConnectionString("Url=http://localhost:8079/;ApiKey=d5723e19-92ad-4531-adad-8611e6e05c8a;");
 
 				Assert.Equal("d5723e19-92ad-4531-adad-8611e6e05c8a", store.ApiKey);
+			}
+		}
+
+		[Fact]
+		public void Can_get_failover_servers()
+		{
+			using (var store = new DocumentStore())
+			{
+				store.ParseConnectionString("Url=http://localhost:8079/;Failover={Url:'http://localhost:8078/'};Failover={Url:'http://localhost:8077', Database:'test'};Failover=Northwind|{Url:'http://localhost:8076/'};Failover={Url:'http://localhost:8075', Username:'user', Password:'secret'};Failover={Url:'http://localhost:8074', ApiKey:'d5723e19-92ad-4531-adad-8611e6e05c8a'}");
+
+				Assert.Equal("http://localhost:8079", store.Url);
+				Assert.Equal(4, store.FailoverServers.ForDefaultDatabase.Length);
+				Assert.Equal("http://localhost:8078", store.FailoverServers.ForDefaultDatabase[0].Url);
+				Assert.Equal("http://localhost:8077", store.FailoverServers.ForDefaultDatabase[1].Url);
+				Assert.Equal("test", store.FailoverServers.ForDefaultDatabase[1].Database);
+				Assert.Equal(1, store.FailoverServers.GetForDatabase("Northwind").Length);
+				Assert.Equal("http://localhost:8076", store.FailoverServers.GetForDatabase("Northwind")[0].Url);
+				Assert.Equal("http://localhost:8075", store.FailoverServers.ForDefaultDatabase[2].Url);
+				Assert.Equal("user", store.FailoverServers.ForDefaultDatabase[2].Username);
+				Assert.Equal("secret", store.FailoverServers.ForDefaultDatabase[2].Password);
+				Assert.Equal("http://localhost:8074", store.FailoverServers.ForDefaultDatabase[3].Url);
+				Assert.Equal("d5723e19-92ad-4531-adad-8611e6e05c8a", store.FailoverServers.ForDefaultDatabase[3].ApiKey);
 			}
 		}
 	}

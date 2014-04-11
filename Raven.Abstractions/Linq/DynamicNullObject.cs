@@ -1,8 +1,9 @@
-﻿#if !NET_3_5
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Dynamic;
+using System.Linq.Expressions;
+using Raven.Imports.Newtonsoft.Json.Utilities;
 
 namespace Raven.Abstractions.Linq
 {
@@ -15,15 +16,51 @@ namespace Raven.Abstractions.Linq
 
 		public bool IsExplicitNull { get; set; }
 
+		public override bool TryConvert(ConvertBinder binder, out object result)
+		{
+			result = binder.ReturnType.IsValueType()
+				         ? Activator.CreateInstance(binder.ReturnType)
+				         : null;
+			return true;
+		}
+
+		public override bool TryBinaryOperation(BinaryOperationBinder binder, object arg, out object result)
+		{
+			switch (binder.Operation)
+			{
+				case ExpressionType.Equal:
+					result = arg == null || arg is DynamicNullObject;
+					break;
+				case ExpressionType.NotEqual:
+					result = arg != null && arg is DynamicNullObject == false;
+					break;
+				default:
+					result = new DynamicNullObject();
+					break;
+			}
+			return true;
+		}
+
 		public override bool TryGetIndex(GetIndexBinder binder, object[] indexes, out object result)
 		{
-			result = this;
+			result = new DynamicNullObject
+			{
+				IsExplicitNull = false
+			};
 			return true;
 		}
 
 		public override bool TryGetMember(GetMemberBinder binder, out object result)
 		{
-			result = this;
+			if (binder.Name == "HasValue")
+			{
+				result = false;
+				return true;
+			}
+			result = new DynamicNullObject
+			{
+				IsExplicitNull = false
+			};
 			return true;
 		}
 
@@ -36,11 +73,20 @@ namespace Raven.Abstractions.Linq
 		{
 			switch (binder.Name)
 			{
+				case "GetValueOrDefault":
+					result = new DynamicNullObject {IsExplicitNull = true};
+					return true;
 				case "Count":
 					result = 0;
 					return true;
 				case "DefaultIfEmpty":
-					result = new[]{this};
+					result = new[]
+					{
+						new DynamicNullObject
+						{
+							IsExplicitNull = false
+						}
+					};
 					return true;
 				default:
 					return base.TryInvokeMember(binder, args, out result);
@@ -49,7 +95,10 @@ namespace Raven.Abstractions.Linq
 
 		public override bool TryInvoke(InvokeBinder binder, object[] args, out object result)
 		{
-			result = this;
+			result = new DynamicNullObject
+			{
+				IsExplicitNull = false
+			};
 			return true;
 		}
 
@@ -58,37 +107,14 @@ namespace Raven.Abstractions.Linq
 			return GetEnumerator();
 		}
 
-		// null is false or 0 by default
-		public static implicit operator bool(DynamicNullObject o) { return false; }
-		public static implicit operator bool?(DynamicNullObject o) { return null; }
-		public static implicit operator decimal(DynamicNullObject o) { return 0; }
-		public static implicit operator decimal?(DynamicNullObject o) { return null; }
-		public static implicit operator double(DynamicNullObject o) { return 0; }
-		public static implicit operator double?(DynamicNullObject o) { return null; }
-		public static implicit operator float(DynamicNullObject o) { return 0; }
-		public static implicit operator float?(DynamicNullObject o) { return null; }
-		public static implicit operator long(DynamicNullObject o) { return 0; }
-		public static implicit operator long?(DynamicNullObject o) { return null; }
-		public static implicit operator string(DynamicNullObject o) { return null; }
-
-		public override bool Equals(object obj)
+		public static bool operator >=(DynamicNullObject left, object right)
 		{
-			return obj is DynamicNullObject;
+			return false;
 		}
 
-		public override int GetHashCode()
+		public static bool operator <=(DynamicNullObject left, object right)
 		{
-			return 0;
-		}
-
-		public static bool operator ==(DynamicNullObject left, object right)
-		{
-			return right == null || right is DynamicNullObject;
-		}
-
-		public static bool operator !=(DynamicNullObject left, object right)
-		{
-			return right != null && (right is DynamicNullObject) == false;
+			return false;
 		}
 
 		public static bool operator >(DynamicNullObject left, object right)
@@ -101,15 +127,44 @@ namespace Raven.Abstractions.Linq
 			return false;
 		}
 
-		public static bool operator >=(DynamicNullObject left, object right)
+		public static bool operator ==(DynamicNullObject left, object right)
 		{
-			return false;
+			return right == null || right is DynamicNullObject;
 		}
 
-		public static bool operator <=(DynamicNullObject left, object right)
+		public static bool operator !=(DynamicNullObject left, object right)
 		{
-			return false;
+			return right != null && (right is DynamicNullObject) == false;
+		}
+
+		public static implicit operator double(DynamicNullObject o) { return double.NaN; }
+		public static implicit operator double?(DynamicNullObject o) { return null; }
+
+		public static implicit operator int(DynamicNullObject o) { return 0; }
+		public static implicit operator int?(DynamicNullObject o) { return null; }
+
+		public static implicit operator long(DynamicNullObject o) { return 0; }
+		public static implicit operator long?(DynamicNullObject o) { return null; }
+
+		public static implicit operator decimal(DynamicNullObject o) { return 0; }
+		public static implicit operator decimal?(DynamicNullObject o) { return null; }
+
+		public static implicit operator float(DynamicNullObject o) { return float.NaN; }
+		public static implicit operator float?(DynamicNullObject o) { return null; }
+	
+		public override bool Equals(object obj)
+		{
+			return obj is DynamicNullObject;
+		}
+
+		public override int GetHashCode()
+		{
+			return 0;
+		}
+
+		public static implicit operator string(DynamicNullObject self)
+		{
+			return null;
 		}
 	}
 }
-#endif

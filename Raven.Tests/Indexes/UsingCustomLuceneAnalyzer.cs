@@ -8,13 +8,16 @@ using System.Collections.Generic;
 using System.Linq;
 using Raven.Abstractions.Indexing;
 using Raven.Client;
+using Raven.Client.Embedded;
 using Raven.Client.Indexes;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Indexes
 {
-	public class UsingCustomLuceneAnalyzer : LocalClientTest
+	public class UsingCustomLuceneAnalyzer : RavenTest
 	{
 		public class Entity
 		{
@@ -41,7 +44,7 @@ namespace Raven.Tests.Indexes
 		
 		public void with_index_and_some_entities(Action<IDocumentSession> action)
 		{
-			using (var store = NewDocumentStore())
+			using (var store = NewDocumentStore(requestedStorage: "esent"))
 			{
 				var indexDefinition = new IndexDefinitionBuilder<Entity, EntityCount>()
 				{
@@ -89,7 +92,7 @@ namespace Raven.Tests.Indexes
 		{
 			with_index_and_some_entities(delegate(IDocumentSession session)
 			{
-				var result = session.Advanced.LuceneQuery<EntityCount>("someIndex").WaitForNonStaleResults()
+                var result = session.Advanced.DocumentQuery<EntityCount>("someIndex").WaitForNonStaleResults()
 					.WhereEquals(new WhereParams
 					{
 						FieldName = "NormalizedName",
@@ -109,7 +112,7 @@ namespace Raven.Tests.Indexes
 		{
 			with_index_and_some_entities(delegate(IDocumentSession session)
 			{
-				var result = session.Advanced.LuceneQuery<EntityCount>("someIndex")
+                var result = session.Advanced.DocumentQuery<EntityCount>("someIndex")
 					.WaitForNonStaleResults()
 					.WhereEquals(new WhereParams
 					{
@@ -128,9 +131,9 @@ namespace Raven.Tests.Indexes
 		{
 			using (var session = store.OpenSession())
 			{
-				session.Advanced.LuceneQuery<object>(indexName)
+                session.Advanced.DocumentQuery<object>(indexName)
 					.Where("NOT \"*\"")
-					.WaitForNonStaleResultsAsOfNow(TimeSpan.FromSeconds(5))
+					.WaitForNonStaleResultsAsOfNow(TimeSpan.FromMinutes(5))
 					.ToArray();
 			}
 		}

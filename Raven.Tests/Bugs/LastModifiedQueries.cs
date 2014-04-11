@@ -3,15 +3,19 @@ using System.Linq;
 using Raven.Abstractions;
 using Raven.Abstractions.Linq;
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class LastModifiedQueries : LocalClientTest
+	public class LastModifiedQueries : RavenTest
 	{
 		[Fact]
 		public void LastModifiedIsQueryable()
 		{
+		    var frozen = DateTime.UtcNow;
+		    SystemTime.UtcDateTime = () => frozen;
 			using(var store = NewDocumentStore())
 			{
 				new RavenDocumentsByEntityName().Execute(store);
@@ -21,9 +25,9 @@ namespace Raven.Tests.Bugs
 					session.Store(new User {Name = "John Doe"} );
 					session.SaveChanges();
 
-					var dateTime = DateTools.DateToString(SystemTime.UtcNow, DateTools.Resolution.MILLISECOND);
+                    var dateTime = DateTools.DateToString(frozen.AddSeconds(1), DateTools.Resolution.MILLISECOND);
 
-					var results = session.Advanced.LuceneQuery<object>(new RavenDocumentsByEntityName().IndexName)
+                    var results = session.Advanced.DocumentQuery<object>(new RavenDocumentsByEntityName().IndexName)
 						.Where("LastModified:[* TO " + dateTime + "]")
 						.WaitForNonStaleResults()
 						.ToArray();
@@ -51,9 +55,9 @@ namespace Raven.Tests.Bugs
 				{
 					user = session.Load<User>("users/1");
 					var ravenJObject = session.Advanced.GetMetadataFor(user);
-					var dateTime = ravenJObject.Value<DateTime>("Last-Modified").ToUniversalTime();
-					var results = session.Advanced.LuceneQuery<object>(new RavenDocumentsByEntityName().IndexName)
-						.WhereEquals("LastModified", DateTools.DateToString(dateTime, DateTools.Resolution.MILLISECOND))
+					var dateTime = ravenJObject.Value<DateTime>("Last-Modified");
+                    var results = session.Advanced.DocumentQuery<object>(new RavenDocumentsByEntityName().IndexName)
+						.WhereEquals("LastModified", dateTime)
 						.WaitForNonStaleResults()
 						.ToArray();
 					Assert.Equal(1, results.Count());

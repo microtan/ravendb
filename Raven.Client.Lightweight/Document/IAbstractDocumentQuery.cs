@@ -114,14 +114,6 @@ namespace Raven.Client.Document
 		/// <returns></returns>
 		void OpenSubclause();
 
-		///<summary>
-		///  Instruct the index to group by the specified fields using the specified aggregation operation
-		///</summary>
-		///<remarks>
-		///  This is only valid on dynamic indexes queries
-		///</remarks>
-		void GroupBy(AggregationOperation aggregationOperation, params string[] fieldsToGroupBy);
-
 		/// <summary>
 		///   Simplified method for closing a clause within the query
 		/// </summary>
@@ -142,24 +134,6 @@ namespace Raven.Client.Document
 		/// Check that the field has one of the specified value
 		/// </summary>
 		void WhereIn(string fieldName, IEnumerable<object> values);
-
-		/// <summary>
-		///   Avoid using WhereContains(), use Search() instead
-		/// </summary>
-		[Obsolete("Avoid using WhereContains(), use Search() instead")]
-		void WhereContains(string fieldName, object value);
-
-		/// <summary>
-		///   Avoid using WhereContains(), use Search() instead
-		/// </summary>
-		[Obsolete("Avoid using WhereContains(), use Search() instead")]
-		void WhereContains(string fieldName, params object [] values);
-
-		/// <summary>
-		///   Avoid using WhereContains(), use Search() instead
-		/// </summary>
-		[Obsolete("Avoid using WhereContains(), use Search() instead")]
-		void WhereContains(string fieldName, IEnumerable<object> values);
 
 		/// <summary>
 		///   Matches fields which starts with the specified value.
@@ -271,6 +245,46 @@ namespace Raven.Client.Document
 		void OrderBy(params string[] fields);
 
 		/// <summary>
+		///   Adds matches highlighting for the specified field.
+		/// </summary>
+		/// <remarks>
+		///   The specified field should be analysed and stored for highlighter to work.
+		///   For each match it creates a fragment that contains matched text surrounded by highlighter tags.
+		/// </remarks>
+		/// <param name="fieldName">The field name to highlight.</param>
+		/// <param name="fragmentLength">The fragment length.</param>
+		/// <param name="fragmentCount">The maximum number of fragments for the field.</param>
+		/// <param name="fragmentsField">The field in query results item to put highlightings into.</param>
+		void Highlight(string fieldName, int fragmentLength, int fragmentCount, string fragmentsField);
+
+		/// <summary>
+		///   Adds matches highlighting for the specified field.
+		/// </summary>
+		/// <remarks>
+		///   The specified field should be analysed and stored for highlighter to work.
+		///   For each match it creates a fragment that contains matched text surrounded by highlighter tags.
+		/// </remarks>
+		/// <param name="fieldName">The field name to highlight.</param>
+		/// <param name="fragmentLength">The fragment length.</param>
+		/// <param name="fragmentCount">The maximum number of fragments for the field.</param>
+		/// <param name="highlightings">Field highlightings for all results.</param>
+		void Highlight(string fieldName, int fragmentLength, int fragmentCount, out FieldHighlightings highlightings);
+
+		/// <summary>
+		///   Sets the tags to highlight matches with.
+		/// </summary>
+		/// <param name="preTag">Prefix tag.</param>
+		/// <param name="postTag">Postfix tag.</param>
+		void SetHighlighterTags(string preTag, string postTag);
+
+		/// <summary>
+		///   Sets the tags to highlight matches with.
+		/// </summary>
+		/// <param name="preTags">Prefix tags.</param>
+		/// <param name="postTags">Postfix tags.</param>
+		void SetHighlighterTags(string[] preTags, string[] postTags);
+
+		/// <summary>
 		///   Instructs the query to wait for non stale results as of now.
 		/// </summary>
 		/// <returns></returns>
@@ -320,8 +334,21 @@ namespace Raven.Client.Document
 		/// <summary>
 		///   The last term that we asked the query to use equals on
 		/// </summary>
-		KeyValuePair<string, string> GetLastEqualityTerm();
+		KeyValuePair<string, string> GetLastEqualityTerm(bool isAsync = false);
 
 		void Intersect();
+		void AddRootType(Type type);
+	    void SetResultTransformer(string resultsTransformer);
+		void Distinct();
+
+        /// <summary>
+        /// Performs a query matching ANY of the provided values against the given field (OR)
+        /// </summary>
+        void ContainsAny(string fieldName, IEnumerable<object> values);
+
+        /// <summary>
+        /// Performs a query matching ALL of the provided values against the given field (AND)
+        /// </summary>
+        void ContainsAll(string fieldName, IEnumerable<object> values);
 	}
 }

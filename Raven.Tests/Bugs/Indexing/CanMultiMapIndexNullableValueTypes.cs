@@ -2,13 +2,16 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+
+using Raven.Tests.Common;
+
 using Xunit;
 using Raven.Client.Indexes;
 using Raven.Abstractions.Indexing;
 
 namespace Raven.Tests.Bugs.Indexing
 {
-	public class CanMultiMapIndexNullableValueTypes : LocalClientTest
+	public class CanMultiMapIndexNullableValueTypes : RavenTest
 	{
 		class Company
 		{
@@ -30,7 +33,7 @@ namespace Raven.Tests.Bugs.Indexing
 		[Fact]
 		public void WillNotProduceAnyErrors()
 		{
-			using (var store = NewDocumentStore("esent", false))
+			using (var store = NewDocumentStore(requestedStorage: "esent"))
 			{
 				var indexCreationTask = new Companies_ByTurnover();
 				indexCreationTask.Execute(store);

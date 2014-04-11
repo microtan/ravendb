@@ -12,9 +12,14 @@ using Raven.Database.Storage;
 
 namespace Raven.Database.Tasks
 {
-	public class RemoveFromIndexTask : Task
+	public class RemoveFromIndexTask : DatabaseTask
 	{
 		public HashSet<string> Keys { get; set; }
+
+        public override bool SeparateTasksByIndex
+        {
+            get { return true; }
+        }
 
 		public override string ToString()
 		{
@@ -23,25 +28,33 @@ namespace Raven.Database.Tasks
 
 		public RemoveFromIndexTask()
 		{
-			Keys = new HashSet<string>(StringComparer.InvariantCultureIgnoreCase);
+			Keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		}
 
-		public override bool TryMerge(Task task)
+		public override void Merge(DatabaseTask task)
 		{
 			var removeFromIndexTask = ((RemoveFromIndexTask)task);
 			Keys.UnionWith(removeFromIndexTask.Keys);
-			return true;
 		}
 
 		public override void Execute(WorkContext context)
 		{
-			var keysToRemove = new HashSet<string>(StringComparer.InvariantCultureIgnoreCase);
-			context.TransactionaStorage.Batch(accessor =>
+			var keysToRemove = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			try
 			{
-				keysToRemove = new HashSet<string>(Keys.Where(key=>FilterDocuments(context, accessor, key)));
-				accessor.Indexing.TouchIndexEtag(Index);
-			});
-			context.IndexStorage.RemoveFromIndex(Index, keysToRemove.ToArray(), context);
+				context.TransactionalStorage.Batch(accessor =>
+				{
+					keysToRemove = new HashSet<string>(Keys.Where(key=>FilterDocuments(context, accessor, key)));
+					accessor.Indexing.TouchIndexEtag(Index);
+				});
+				if (keysToRemove.Count == 0)
+					return;
+				context.IndexStorage.RemoveFromIndex(Index, keysToRemove.ToArray(), context);
+			}
+			finally
+			{
+				context.MarkAsRemovedFromIndex(keysToRemove);
+			}
 		}
 
 		/// <summary>
@@ -67,7 +80,7 @@ namespace Raven.Database.Tasks
 			return generator.ForEntityNames.Contains(entityName) == false;
 		}
 
-		public override Task Clone()
+		public override DatabaseTask Clone()
 		{
 			return new RemoveFromIndexTask
 			{

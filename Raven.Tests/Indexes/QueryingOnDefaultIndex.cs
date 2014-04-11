@@ -3,47 +3,51 @@
 //     Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 // </copyright>
 //-----------------------------------------------------------------------
+using System.Threading;
 using Raven.Abstractions.Data;
+using Raven.Client.Embedded;
 using Raven.Json.Linq;
 using Raven.Client.Indexes;
 using Raven.Database;
 using Raven.Database.Config;
+using Raven.Tests.Common;
 using Raven.Tests.Storage;
 using Xunit;
 
 namespace Raven.Tests.Indexes
 {
-	public class QueryingOnDefaultIndex: AbstractDocumentStorageTest
+	public class QueryingOnDefaultIndex: RavenTest
 	{
+		private readonly EmbeddableDocumentStore store;
 		private readonly DocumentDatabase db;
 
 		public QueryingOnDefaultIndex()
 		{
-			db = new DocumentDatabase(new RavenConfiguration {DataDirectory = DataDir, RunInUnreliableYetFastModeThatIsNotSuitableForProduction = true});
-			db.PutIndex(new RavenDocumentsByEntityName().IndexName, new RavenDocumentsByEntityName().CreateIndexDefinition());
-			db.SpinBackgroundWorkers();
+			store = NewDocumentStore();
+			db = store.DocumentDatabase;
+			db.Indexes.PutIndex(new RavenDocumentsByEntityName().IndexName, new RavenDocumentsByEntityName().CreateIndexDefinition());
 		}
 
 		public override void Dispose()
 		{
-			db.Dispose();
+			store.Dispose();
 			base.Dispose();
 		}
 
 		[Fact]
 		public void CanQueryOverDefaultIndex()
 		{
-			db.Put("users/ayende", null, RavenJObject.Parse("{'email':'ayende@ayende.com'}"),
+			db.Documents.Put("users/ayende", null, RavenJObject.Parse("{'email':'ayende@ayende.com'}"),
 			       RavenJObject.Parse("{'Raven-Entity-Name': 'Users'}"), null);
 
 			QueryResult queryResult;
 			do
 			{
-				queryResult = db.Query("Raven/DocumentsByEntityName", new IndexQuery
+				queryResult = db.Queries.Query("Raven/DocumentsByEntityName", new IndexQuery
 				{
 					Query = "Tag:[[Users]]",
 					PageSize = 10
-				});
+				}, CancellationToken.None);
 			} while (queryResult.IsStale);
 
 			Assert.Equal("ayende@ayende.com", queryResult.Results[0].Value<string>("email"));
@@ -53,11 +57,11 @@ namespace Raven.Tests.Indexes
 		[Fact]
 		public void CanPageOverDefaultIndex()
 		{
-			db.Put("users/ayende", null, RavenJObject.Parse("{'email':'ayende@ayende.com'}"),
+			db.Documents.Put("users/ayende", null, RavenJObject.Parse("{'email':'ayende@ayende.com'}"),
 				   RavenJObject.Parse("{'Raven-Entity-Name': 'Users'}"), null);
-			db.Put("users/rob", null, RavenJObject.Parse("{'email':'robashton@codeofrob.com'}"),
+			db.Documents.Put("users/rob", null, RavenJObject.Parse("{'email':'robashton@codeofrob.com'}"),
 				   RavenJObject.Parse("{'Raven-Entity-Name': 'Users'}"), null);
-			db.Put("users/joe", null, RavenJObject.Parse("{'email':'joe@bloggs.com'}"),
+			db.Documents.Put("users/joe", null, RavenJObject.Parse("{'email':'joe@bloggs.com'}"),
 				   RavenJObject.Parse("{'Raven-Entity-Name': 'Users'}"), null);
 
 			QueryResult queryResultPageOne;
@@ -65,34 +69,34 @@ namespace Raven.Tests.Indexes
 			QueryResult queryResultPageThree;
 			do
 			{
-				queryResultPageOne = db.Query("Raven/DocumentsByEntityName", new IndexQuery
+				queryResultPageOne = db.Queries.Query("Raven/DocumentsByEntityName", new IndexQuery
 				{
 					Query = "Tag:[[Users]]",
 					Start = 0,
 					PageSize = 2,
 					SortedFields = new [] { new SortedField("__document_id"), }
-				});
+				}, CancellationToken.None);
 			} while (queryResultPageOne.IsStale);
 			do
 			{
-				queryResultPageTwo = db.Query("Raven/DocumentsByEntityName", new IndexQuery
+				queryResultPageTwo = db.Queries.Query("Raven/DocumentsByEntityName", new IndexQuery
 				{
 					Query = "Tag:[[Users]]",
 					Start = 1,
 					PageSize = 2,
 					SortedFields = new [] { new SortedField("__document_id"), }
-				});
+				}, CancellationToken.None);
 			} while (queryResultPageTwo.IsStale);
 
 			do
 			{
-				queryResultPageThree = db.Query("Raven/DocumentsByEntityName", new IndexQuery
+				queryResultPageThree = db.Queries.Query("Raven/DocumentsByEntityName", new IndexQuery
 				{
 					Query = "Tag:[[Users]]",
 					Start = 2,
 					PageSize = 2,
 					SortedFields = new []{new SortedField("__document_id"), }
-				});
+				}, CancellationToken.None);
 			} while (queryResultPageThree.IsStale);
 
 			// Page one

@@ -8,12 +8,14 @@ using System.IO;
 using Lucene.Net.Analysis;
 using Raven.Abstractions.Indexing;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs.Indexing
 {
-	public class ThrowingAnalyzer : LocalClientTest
+	public class ThrowingAnalyzer : RavenTest
 	{
 		[Fact]
 		public void Should_give_clear_error()
@@ -48,7 +50,7 @@ namespace Raven.Tests.Bugs.Indexing
 		{
 			public ThrowingAnalyzerImpl()
 			{
-				throw new InvalidOperationException("opps");
+				throw new InvalidOperationException("oops");
 			}
 
 			public override TokenStream TokenStream(string fieldName, TextReader reader)

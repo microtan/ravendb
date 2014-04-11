@@ -4,6 +4,8 @@ using Raven.Abstractions.Indexing;
 using Raven.Client.Indexes;
 using Raven.Client.Linq;
 using Raven.Database.Linq;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs.MapRedue
@@ -42,7 +44,7 @@ namespace Raven.Tests.Bugs.MapRedue
 		{
 			public IndexWithoutLet()
 			{
-				Map = calendwarWeeks => from calendarWeek in calendwarWeeks
+				Map = calendarWeeks => from calendarWeek in calendarWeeks
 										select new
 										{
 											calendarWeek.Owner.OwnerId,
@@ -65,7 +67,7 @@ namespace Raven.Tests.Bugs.MapRedue
 		{
 			public IndexWithLet()
 			{
-				Map = calendwarWeeks => from calendarWeek in calendwarWeeks
+				Map = calendarWeeks => from calendarWeek in calendarWeeks
 										select new
 										{
 											calendarWeek.Owner.OwnerId,
@@ -117,7 +119,7 @@ namespace Raven.Tests.Bugs.MapRedue
 		{
 			public GroupIndex2()
 			{
-				Map = calendwarWeeks => from calendarWeek in calendwarWeeks
+				Map = calendarWeeks => from calendarWeek in calendarWeeks
 										select new
 										{
 											calendarWeek.Owner.OwnerId,

@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Specialized;
+#if NETFX_CORE
+using Raven.Client.WinRT.Connection;
+#endif
 using System.Linq;
-using System.Net;
-using Newtonsoft.Json;
+using Raven.Imports.Newtonsoft.Json;
 using Raven.Abstractions.Data;
 using Raven.Client.Connection.Profiling;
 using Raven.Client.Document;
@@ -67,14 +69,15 @@ namespace Raven.Client.Connection
 		{
 			if (allRequestsCanBeServedFromAggressiveCache) // can be fully served from aggressive cache
 			{
-				jsonRequestFactory.InvokeLogRequest(holdProfilingInformation, new RequestResultArgs
+				jsonRequestFactory.InvokeLogRequest(holdProfilingInformation, () => new RequestResultArgs
 				{
 					DurationMilliseconds = httpJsonRequest.CalculateDuration(),
-					Method = httpJsonRequest.webRequest.Method,
+					Method = httpJsonRequest.Method,
 					HttpResult = 0,
-					Status = RequestStatus.AggresivelyCached,
+					Status = RequestStatus.AggressivelyCached,
 					Result = "",
-					Url = httpJsonRequest.webRequest.RequestUri.PathAndQuery,
+					Url = httpJsonRequest.Url.ToString(),
+					//TODO: check that is the same as: Url = httpJsonRequest.webRequest.RequestUri.PathAndQuery,
 					PostedData = postedData
 				});
 				return true;
@@ -92,14 +95,14 @@ namespace Raven.Client.Connection
 				{
 					hasCachedRequests = true;
 
-					requestStatuses[i] = responses[i] == null ? RequestStatus.AggresivelyCached : RequestStatus.Cached;
+					requestStatuses[i] = responses[i] == null ? RequestStatus.AggressivelyCached : RequestStatus.Cached;
 					responses[i] = responses[i] ?? new GetResponse { Status = 0 };
 
 					foreach (string header in cachedData[i].Headers)
 					{
 						responses[i].Headers[header] = cachedData[i].Headers[header];
 					}
-					responses[i].Result = cachedData[i].Data;
+					responses[i].Result = cachedData[i].Data.CloneToken();
 					jsonRequestFactory.IncrementCachedRequests();
 				}
 				else
@@ -115,7 +118,8 @@ namespace Raven.Client.Connection
 				}
 			}
 
-			if (hasCachedRequests == false || convention.DisableProfiling)
+			if (hasCachedRequests == false || convention.DisableProfiling ||
+                holdProfilingInformation.ProfilingInformation.Requests.Count == 0)
 				return responses;
 
 			var lastRequest = holdProfilingInformation.ProfilingInformation.Requests.Last();

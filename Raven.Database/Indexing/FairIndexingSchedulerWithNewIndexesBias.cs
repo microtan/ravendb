@@ -6,6 +6,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
+using Raven.Abstractions.Data;
 
 namespace Raven.Database.Indexing
 {
@@ -33,23 +35,27 @@ namespace Raven.Database.Indexing
 				return indexes;
 
 			var indexesByIndexedEtag = indexes
-				.GroupBy(x => x.LastIndexedEtag, new RoughGuidEqualityAndComparision())
-				.OrderBy(x => x.Key, new RoughGuidEqualityAndComparision())
+                .Where(x => x.Index.IsMapIndexingInProgress == false) // indexes with precomputed docs are processes separately
+				.GroupBy(x => x.LastIndexedEtag, new RoughEtagEqualityAndComparison())
+				.OrderBy(x => x.Key, new RoughEtagEqualityAndComparison())
 				.ToList();
+
+			if (indexesByIndexedEtag.Count == 0)
+				return Enumerable.Empty<IndexToWorkOn>().ToList();
 
 			if (indexesByIndexedEtag.Count == 1)
 			{
 				currentRepeated = 0;
 				current = 0;
 				activeFiltering = false;
-				return indexes; // they all have the same one, so there aren't any delayed / new indexes
+				return indexesByIndexedEtag[0].ToList(); // they all have the same one, so there aren't any delayed / new indexes
 			}
 
 			activeFiltering = true;
 
 			// we have indexes that haven't all caught up with up yet, so we need to start cycling through the 
 			// different levels, starting with the earliest ones, we are biased toward the first ones
-			// let us assume that we have 2 levels, which is likely to be the most comomn scenario
+			// let us assume that we have 2 levels, which is likely to be the most common scenario
 			// this would mean that the earliest one would be run twice for every later one run
 			if (currentRepeated >= (indexesByIndexedEtag.Count - current))
 			{
@@ -123,40 +129,39 @@ namespace Raven.Database.Indexing
 		// here we compare, but only up to the last 116 bits, not the full 128 bits
 		// this means that we can gather documents that are within 4K docs from one another, because
 		// at that point, it doesn't matter much, it would be gone within one or two indexing cycles
-		public class RoughGuidEqualityAndComparision : IEqualityComparer<Guid>, IComparer<Guid>
+		public class RoughEtagEqualityAndComparison : IEqualityComparer<Etag>, IComparer<Etag>
 		{
-			public bool Equals(Guid x, Guid y)
-			{
-				return Compare(x, y) == 0;
-			}
+		    public bool Equals(Etag x, Etag y)
+		    {
+		        return Compare(x, y) == 0;
+		    }
 
-			public int GetHashCode(Guid obj)
-			{
-				var start = 0;
-				var bytes = obj.ToByteArray();
-				for (var i = 0; i < 14; i++)
-				{
-					start = (start * 397) ^ bytes[i];
-				}
-				var last4Bits = bytes[15] >> 4;
-				start = (start * 397) ^ last4Bits;
-				return start;
-			}
+		    public int GetHashCode(Etag obj)
+		    {
+                var start = 0;
+                var bytes = obj.ToByteArray();
+                for (var i = 0; i < 14; i++)
+                {
+                    start = (start * 397) ^ bytes[i];
+                }
+                var last4Bits = bytes[15] >> 4;
+                start = (start * 397) ^ last4Bits;
+                return start;
+		    }
 
-			public int Compare(Guid x, Guid y)
-			{
-				var xBytes = x.ToByteArray();
-				var yBytes = y.ToByteArray();
+		    public int Compare(Etag x, Etag y)
+		    {
+               if (x.Restarts == y.Restarts)
+               {
+                   var delta = Math.Abs(x.Changes - y.Changes);
+                   if (delta <= 4096)
+                       return 0;
 
-				for (int i = 0; i < 14; i++)
-				{
-					if (xBytes[i] != yBytes[i])
-						return xBytes[i] - yBytes[i];
-				}
-				var xLast4Bits = xBytes[15] >> 4;
-				var yLast4Bits = yBytes[15] >> 4;
-				return xLast4Bits - yLast4Bits;
-			}
+                   return (int)(x.Changes - y.Changes);
+               }
+
+		        return (int) (x.Restarts - y.Restarts);
+		    }
 		}
 	}
 }

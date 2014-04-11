@@ -9,18 +9,20 @@ using Raven.Abstractions.Indexing;
 using Raven.Json.Linq;
 using Raven.Database.Data;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class CanSelectFieldsFromIndex : LocalClientTest
+	public class CanSelectFieldsFromIndex : RavenTest
 	{
 		[Fact]
 		public void SelectFieldsFromIndex()
 		{
 			using(var store = NewDocumentStore())
 			{
-				store.DocumentDatabase.Put("ayende", null,
+				store.DocumentDatabase.Documents.Put("ayende", null,
 										   RavenJObject.Parse(
 											   @"{
 	'name': 'ayende',

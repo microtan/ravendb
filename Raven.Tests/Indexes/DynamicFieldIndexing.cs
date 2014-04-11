@@ -1,6 +1,8 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Indexes
@@ -49,9 +51,42 @@ namespace Raven.Tests.Indexes
 
 				using (var s = store.OpenSession())
 				{
-					var items = s.Advanced.LuceneQuery<Item, WithDynamicIndex>()
+                    var items = s.Advanced.DocumentQuery<Item, WithDynamicIndex>()
 						.WaitForNonStaleResults()
 						.WhereEquals("Name", "Fitzchak")
+						.ToList();
+
+					Assert.NotEmpty(items);
+				}
+			}
+		}
+
+		[Fact]
+		public void CanSearchDynamicFieldWithSpaces()
+		{
+			using (var store = NewDocumentStore())
+			{
+				new WithDynamicIndex().Execute(store);
+
+				using (var s = store.OpenSession())
+				{
+					s.Store(new Item
+					{
+						Values = new Dictionary<string, string>
+					        	         {
+					        	         	{"First Name", "Fitzchak"},
+					        	         	{"User", "Admin"}
+					        	         }
+					});
+
+					s.SaveChanges();
+				}
+
+				using (var s = store.OpenSession())
+				{
+                    var items = s.Advanced.DocumentQuery<Item, WithDynamicIndex>()
+						.WaitForNonStaleResults()
+						.WhereEquals("First Name", "Fitzchak")
 						.ToList();
 
 					Assert.NotEmpty(items);

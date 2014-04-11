@@ -1,14 +1,16 @@
 using System.Linq;
 using Raven.Abstractions.Commands;
 using Raven.Abstractions.Data;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class BatchPatching : LocalClientTest
+	public class BatchPatching : RavenTest
 	{
 		[Fact]
-		public void CanSuccessulyPatchInBatches()
+		public void CanSuccessfullyPatchInBatches()
 		{
 			using(var store = NewDocumentStore())
 			{

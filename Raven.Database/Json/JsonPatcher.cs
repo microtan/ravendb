@@ -5,7 +5,7 @@
 //-----------------------------------------------------------------------
 using System;
 using System.Collections.Generic;
-using Newtonsoft.Json.Linq;
+using Raven.Imports.Newtonsoft.Json.Linq;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Exceptions;
 using Raven.Abstractions.Json;
@@ -36,7 +36,7 @@ namespace Raven.Database.Json
 		{
 			if (patchCmd.Name == null)
 				throw new InvalidOperationException("Patch property must have a name property");
-			foreach (var result in document.SelectTokenWithRavenSyntaxReturningFlatStructure( patchCmd.Name ))
+			foreach (var result in document.SelectTokenWithRavenSyntaxReturningFlatStructure( patchCmd.Name, true))
 			{
 			    var token = result.Item1;
 			    var parent = result.Item2;
@@ -153,16 +153,20 @@ namespace Raven.Database.Json
 				document[propName] = token;
 			}
 			var array = GetArray(token, propName);
+			array = new RavenJArray(array);
+			document[propName] = array;
 
 			var position = patchCmd.Position;
 			var value = patchCmd.Value;
 			if (position == null && (value == null || value.Type == JTokenType.Null))
-				throw new InvalidOperationException("Cannot remove value from  '" + propName + "' because position element does not exists or not an integer and no value was present");
+				throw new InvalidOperationException("Cannot remove value from  '" + propName +
+				                                    "' because position element does not exists or not an integer and no value was present");
 			if (position != null && value != null && value.Type != JTokenType.Null)
-				throw new InvalidOperationException("Cannot remove value from  '" + propName + "' because both a position and a value are set");
+				throw new InvalidOperationException("Cannot remove value from  '" + propName +
+				                                    "' because both a position and a value are set");
 			if (position != null && (position.Value < 0 || position.Value >= array.Length))
 				throw new IndexOutOfRangeException("Cannot remove value from  '" + propName +
-												   "' because position element is out of bound bounds");
+				                                   "' because position element is out of bounds");
 
 			if (value != null && value.Type != JTokenType.Null)
 			{
@@ -174,7 +178,7 @@ namespace Raven.Database.Json
 				return;
 			}
 
-			if(position!=null)
+			if (position != null)
 				array.RemoveAt(position.Value);
 		}
 
@@ -183,19 +187,21 @@ namespace Raven.Database.Json
 			EnsurePreviousValueMatchCurrentValue(patchCmd, property);
 			if (!(property is RavenJArray))
 			{
-				property = new RavenJArray();
-				document[propName] = property;
+			    property = new RavenJArray();
+			    document[propName] = property;
+			}
+			else if (property.IsSnapshot)
+			{
+			    document[propName] = property = property.CreateSnapshot();
 			}
 			var array = property as RavenJArray;
 			if (array == null)
-				throw new InvalidOperationException("Cannot remove value from '" + propName + "' because it is not an array");
-			var position = patchCmd.Position;
-			if (position == null)
-				throw new InvalidOperationException("Cannot remove value from '" + propName + "' because position element does not exists or not an integer");
-			if (position < 0 || position >= array.Length)
-				throw new IndexOutOfRangeException("Cannot remove value from '" + propName +
-												   "' because position element is out of bound bounds");
-			array.Insert(position.Value, patchCmd.Value);
+				throw new InvalidOperationException("Cannot insert value to '" + propName + "' because it is not an array");
+			var position = patchCmd.Position ?? array.Length;
+		    if (position < 0 || position > array.Length)
+				throw new IndexOutOfRangeException("Cannot insert value to '" + propName +
+												   "' because position element is out of bounds");
+			array.Insert(position, patchCmd.Value);
 		}
 
 		private void AddValue(PatchRequest patchCmd, string propName, RavenJToken token)
@@ -207,7 +213,8 @@ namespace Raven.Database.Json
 				document[propName] = token;
 			}
 			var array = GetArray(token, propName);
-
+			array = new RavenJArray(array);
+			document[propName] = array;
 			array.Add(patchCmd.Value);
 		}
 
@@ -221,6 +228,9 @@ namespace Raven.Database.Json
 
 		private static RavenJArray TryGetArray(RavenJToken token)
 		{
+			if(token == null || token.Type == JTokenType.Null || token.Type == JTokenType.Undefined)
+				return new RavenJArray();
+
 			var array = token as RavenJArray;
 			if (array != null)
 				return array;
@@ -264,15 +274,15 @@ namespace Raven.Database.Json
 				return;
 			}
 			if (val.Value == null || val.Type == JTokenType.Null)
-				val.Value = valToSet.Value<int>();
+				document[propName] = valToSet.Value<int>();
 			else
-				val.Value = RavenJToken.FromObject(val.Value<int>() + valToSet.Value<int>()).Value<int>();
+				document[propName] = RavenJToken.FromObject(val.Value<int>() + valToSet.Value<int>()).Value<int>();
 		}
 
 		private static void EnsurePreviousValueMatchCurrentValue(PatchRequest patchCmd, RavenJToken property)
 		{
 			var prevVal = patchCmd.PrevVal;
-			if (prevVal == null)
+            if (prevVal == null || prevVal.Type == JTokenType.Null)
 				return;
 			switch (prevVal.Type)
 			{

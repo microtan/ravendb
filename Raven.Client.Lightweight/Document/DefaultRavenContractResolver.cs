@@ -7,7 +7,9 @@ using System;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using Newtonsoft.Json.Serialization;
+using System.Threading;
+using Raven.Abstractions.Extensions;
+using Raven.Imports.Newtonsoft.Json.Serialization;
 
 namespace Raven.Client.Document
 {
@@ -19,12 +21,36 @@ namespace Raven.Client.Document
 		/// <summary>
 		/// Initializes a new instance of the <see cref="DefaultRavenContractResolver"/> class.
 		/// </summary>
-		/// <param name="shareCache">If set to <c>true</c> the <see cref="T:Newtonsoft.Json.Serialization.DefaultContractResolver"/> will use a cached shared with other resolvers of the same type.
+		/// <param name="shareCache">If set to <c>true</c> the <see cref="T:Raven.Imports.Newtonsoft.Json.Serialization.DefaultContractResolver"/> will use a cached shared with other resolvers of the same type.
 		/// Sharing the cache will significantly performance because expensive reflection will only happen once but could cause unexpected
 		/// behavior if different instances of the resolver are suppose to produce different results. When set to false it is highly
-		/// recommended to reuse <see cref="T:Newtonsoft.Json.Serialization.DefaultContractResolver"/> instances with the <see cref="T:Newtonsoft.Json.JsonSerializer"/>.</param>
+		/// recommended to reuse <see cref="T:Raven.Imports.Newtonsoft.Json.Serialization.DefaultContractResolver"/> instances with the <see cref="T:Raven.Imports.Newtonsoft.Json.JsonSerializer"/>.</param>
 		public DefaultRavenContractResolver(bool shareCache) : base(shareCache)
 		{
+			clearExtensionData = new DisposableAction(() => currentExtensionData = null);
+		}
+
+		[ThreadStatic]
+		private static ExtensionDataSetter currentExtensionData;
+		private readonly DisposableAction clearExtensionData;
+
+		public IDisposable RegisterForExtensionData(ExtensionDataSetter setter)
+		{
+			if (currentExtensionData != null)
+				throw new InvalidOperationException("Cannot add a data setter because on is already added");
+			currentExtensionData = setter;
+			return clearExtensionData;
+		}
+
+		protected override JsonObjectContract CreateObjectContract(Type objectType)
+		{
+			var jsonObjectContract = base.CreateObjectContract(objectType);
+			jsonObjectContract.ExtensionDataSetter += (o, key, value) =>
+			{
+				if (currentExtensionData != null)
+					currentExtensionData(o, key, value);
+			};
+			return jsonObjectContract;
 		}
 
 		/// <summary>
@@ -51,7 +77,7 @@ namespace Raven.Client.Document
 			var fieldInfo = info as FieldInfo;
 			if (fieldInfo != null && !fieldInfo.IsPublic)
 				return true;
-			return info.GetCustomAttributes(typeof(CompilerGeneratedAttribute),true).Length > 0;
+			return info.GetCustomAttributes(typeof(CompilerGeneratedAttribute),true).Any();
 		}
 	}
 }

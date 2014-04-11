@@ -6,9 +6,9 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Threading;
-using Newtonsoft.Json.Linq;
-using NLog;
+using Raven.Abstractions.Logging;
+using Raven.Database.Impl.DTC;
+using Raven.Imports.Newtonsoft.Json.Linq;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Indexing;
 using Raven.Abstractions.Linq;
@@ -26,27 +26,36 @@ namespace Raven.Database.Impl
 {
 	public class DocumentRetriever : ITranslatorDatabaseAccessor
 	{
-		private static Logger log = LogManager.GetCurrentClassLogger();
+		private static readonly ILog log = LogManager.GetCurrentClassLogger();
 
-		private readonly IDictionary<string, JsonDocument> cache = new Dictionary<string, JsonDocument>(StringComparer.InvariantCultureIgnoreCase);
-		private readonly HashSet<string> loadedIdsForRetrieval = new HashSet<string>(StringComparer.InvariantCultureIgnoreCase);
-		private readonly HashSet<string> loadedIdsForFilter = new HashSet<string>(StringComparer.InvariantCultureIgnoreCase);
+		private readonly IDictionary<string, JsonDocument> cache = new Dictionary<string, JsonDocument>(StringComparer.OrdinalIgnoreCase);
+		private readonly HashSet<string> loadedIdsForRetrieval = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		private readonly HashSet<string> loadedIdsForFilter = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		private readonly IStorageActionsAccessor actions;
 		private readonly OrderedPartCollection<AbstractReadTrigger> triggers;
-		private readonly HashSet<string> itemsToInclude;
+		private readonly InFlightTransactionalState inFlightTransactionalState;
+		private readonly Dictionary<string, RavenJToken> queryInputs;
+	    private readonly HashSet<string> itemsToInclude;
+		private bool disableCache;
 
-		public DocumentRetriever(IStorageActionsAccessor actions, OrderedPartCollection<AbstractReadTrigger> triggers,
-			HashSet<string> itemsToInclude = null)
+	    public Etag Etag = Etag.Empty;
+
+		public DocumentRetriever(IStorageActionsAccessor actions, OrderedPartCollection<AbstractReadTrigger> triggers, 
+			InFlightTransactionalState inFlightTransactionalState,
+            Dictionary<string, RavenJToken> queryInputs = null,
+            HashSet<string> itemsToInclude = null)
 		{
 			this.actions = actions;
 			this.triggers = triggers;
-			this.itemsToInclude = itemsToInclude ?? new HashSet<string>();
+			this.inFlightTransactionalState = inFlightTransactionalState;
+			this.queryInputs = queryInputs ?? new Dictionary<string, RavenJToken>();
+		    this.itemsToInclude = itemsToInclude ?? new HashSet<string>();
 		}
 
-		public JsonDocument RetrieveDocumentForQuery(IndexQueryResult queryResult, IndexDefinition indexDefinition, FieldsToFetch fieldsToFetch)
+		public JsonDocument RetrieveDocumentForQuery(IndexQueryResult queryResult, IndexDefinition indexDefinition, FieldsToFetch fieldsToFetch, bool skipDuplicateCheck)
 		{
 			return ExecuteReadTriggers(ProcessReadVetoes(
-				RetrieveDocumentInternal(queryResult, loadedIdsForRetrieval, fieldsToFetch, indexDefinition),
+				RetrieveDocumentInternal(queryResult, loadedIdsForRetrieval, fieldsToFetch, indexDefinition, skipDuplicateCheck),
 				null, ReadOperation.Query), null, ReadOperation.Query);
 		}
 
@@ -62,19 +71,39 @@ namespace Raven.Database.Impl
 			if (resultingDocument == null)
 				return null;
 
+			var doc = new JsonDocument
+			{
+				Key = resultingDocument.Key,
+				Etag = resultingDocument.Etag,
+				LastModified = resultingDocument.LastModified,
+				SerializedSizeOnDisk = resultingDocument.SerializedSizeOnDisk,
+				SkipDeleteFromIndex = resultingDocument.SkipDeleteFromIndex,
+				NonAuthoritativeInformation = resultingDocument.NonAuthoritativeInformation,
+				TempIndexScore = resultingDocument.TempIndexScore,
+				DataAsJson =
+					resultingDocument.DataAsJson.IsSnapshot
+						? (RavenJObject) resultingDocument.DataAsJson.CreateSnapshot()
+						: resultingDocument.DataAsJson,
+				Metadata =
+					resultingDocument.Metadata.IsSnapshot
+						? (RavenJObject) resultingDocument.Metadata.CreateSnapshot()
+						: resultingDocument.Metadata,
+			};
+
 			triggers.Apply(
 				trigger =>
-				trigger.OnRead(resultingDocument.Key, resultingDocument.DataAsJson, resultingDocument.Metadata, operation,
-				               transactionInformation));
-		
-			return resultingDocument;
+				trigger.OnRead(doc.Key, doc.DataAsJson, doc.Metadata, operation,
+							   transactionInformation));
+
+			return doc;
 		}
 
 		private JsonDocument RetrieveDocumentInternal(
 			IndexQueryResult queryResult,
 			HashSet<string> loadedIds,
-			FieldsToFetch fieldsToFetch, 
-			IndexDefinition indexDefinition)
+			FieldsToFetch fieldsToFetch,
+			IndexDefinition indexDefinition,
+			bool skipDuplicateCheck)
 		{
 			var queryScore = queryResult.Score;
 
@@ -84,57 +113,94 @@ namespace Raven.Database.Impl
 			if (queryResult.Projection == null)
 			{
 				// duplicate document, filter it out
-				if (loadedIds.Add(queryResult.Key) == false)
+				if (skipDuplicateCheck == false && loadedIds.Add(queryResult.Key) == false)
 					return null;
 				var document = GetDocumentWithCaching(queryResult.Key);
 				if (document != null)
-					document.Metadata[Constants.TemporaryScoreValue] = queryScore;
+				{
+					if(skipDuplicateCheck == false)
+						document.Metadata[Constants.TemporaryScoreValue] = queryScore;
+				}
 				return document;
 			}
 
-			if (fieldsToFetch.IsProjection)
-			{
-				if (indexDefinition.IsMapReduce == false)
-				{
-					bool hasStoredFields = false;
-					foreach (var fieldToFetch in fieldsToFetch)
-					{
-						FieldStorage value;
-						if (indexDefinition.Stores.TryGetValue(fieldToFetch, out value) == false &&
-							value != FieldStorage.No)
-							continue;
-						hasStoredFields = true;
-					}
-					if (hasStoredFields == false)
-					{
-						// duplicate document, filter it out
-						if (loadedIds.Add(queryResult.Key) == false)
-							return null;
-					}
-				}
-				var fieldsToFetchFromDocument = fieldsToFetch.Where(fieldToFetch => queryResult.Projection[fieldToFetch] == null).ToArray();
-				if (fieldsToFetchFromDocument.Length > 0)
-				{
-					var doc = GetDocumentWithCaching(queryResult.Key);
-					if (doc != null)
-					{
-						var result = doc.DataAsJson.SelectTokenWithRavenSyntax(fieldsToFetchFromDocument.ToArray());
-						foreach (var property in result)
-						{
-							if (property.Value == null || property.Value.Type == JTokenType.Null)
-								continue;
-							queryResult.Projection[property.Key] = property.Value;
-						}
-					}
-				}
-			}
+			JsonDocument doc = null;
 
+		    if (fieldsToFetch.IsProjection)
+		    {
+		        if (indexDefinition.IsMapReduce == false)
+		        {
+		            bool hasStoredFields = false;
+		            FieldStorage value;
+		            if (indexDefinition.Stores.TryGetValue(Constants.AllFields, out value))
+		            {
+		                hasStoredFields = value != FieldStorage.No;
+		            }
+		            foreach (var fieldToFetch in fieldsToFetch.Fields)
+		            {
+		                if (indexDefinition.Stores.TryGetValue(fieldToFetch, out value) == false && value != FieldStorage.No) continue;
+		                hasStoredFields = true;
+		            }
+		            if (hasStoredFields == false)
+		            {
+		                // duplicate document, filter it out
+		                if (loadedIds.Add(queryResult.Key) == false) return null;
+		            }
+		        }
+
+		        // We have to load the document if user explicitly asked for the id, since 
+		        // we normalize the casing for the document id on the index, and we need to return
+		        // the id to the user with the same casing they gave us.
+		        var fetchingId = fieldsToFetch.HasField(Constants.DocumentIdFieldName);
+		        var fieldsToFetchFromDocument = fieldsToFetch.Fields.Where(fieldToFetch => queryResult.Projection[fieldToFetch] == null).ToArray();
+		        if (fieldsToFetchFromDocument.Length > 0 || fetchingId)
+		        {
+		            doc = GetDocumentWithCaching(queryResult.Key);
+		            if (doc != null)
+		            {
+		                if (fetchingId)
+		                {
+		                    queryResult.Projection[Constants.DocumentIdFieldName] = doc.Key;
+		                }
+
+		                var result = doc.DataAsJson.SelectTokenWithRavenSyntax(fieldsToFetchFromDocument.ToArray());
+		                foreach (var property in result)
+		                {
+		                    if (property.Value == null || property.Value.Type == JTokenType.Null) continue;
+		                    queryResult.Projection[property.Key] = property.Value;
+		                }
+		            }
+		        }
+		    }
+			else if (fieldsToFetch.FetchAllStoredFields && string.IsNullOrEmpty(queryResult.Key) == false)
+		    {
+                // duplicate document, filter it out
+                if (loadedIds.Add(queryResult.Key) == false)
+                    return null;
+
+                doc = GetDocumentWithCaching(queryResult.Key);
+		    }
+
+			var metadata = GetMetadata(doc);
+			metadata.Remove("@id");
+			metadata[Constants.TemporaryScoreValue] = queryScore;
 			return new JsonDocument
 			{
 				Key = queryResult.Key,
 				DataAsJson = queryResult.Projection,
-				Metadata = new RavenJObject{{Constants.TemporaryScoreValue, queryScore}}
+				Metadata = metadata
 			};
+		}
+
+		private static RavenJObject GetMetadata(JsonDocument doc)
+		{
+			if (doc == null)
+				return new RavenJObject();
+
+			if (doc.Metadata.IsSnapshot)
+				return (RavenJObject) doc.Metadata.CreateSnapshot();
+
+			return doc.Metadata;
 		}
 
 
@@ -143,25 +209,41 @@ namespace Raven.Database.Impl
 			if (key == null)
 				return null;
 			JsonDocument doc;
-			if (cache.TryGetValue(key, out doc))
+			if (disableCache == false && cache.TryGetValue(key, out doc))
 				return doc;
 			doc = actions.Documents.DocumentByKey(key, null);
 			EnsureIdInMetadata(doc);
-			cache[key] = doc;
+			var nonAuthoritativeInformationBehavior = inFlightTransactionalState.GetNonAuthoritativeInformationBehavior<JsonDocument>(null, key);
+			if (nonAuthoritativeInformationBehavior != null)
+				doc = nonAuthoritativeInformationBehavior(doc);
+			if(disableCache == false)
+				cache[key] = doc;
+			if (cache.Count > 2048)
+			{
+				// we are probably doing a stream here, no point in trying to cache things, we might be
+				// going through the entire db here!
+				disableCache = true;
+				cache.Clear();
+			}
 			return doc;
 		}
 
-	    public static void EnsureIdInMetadata(IJsonDocumentMetadata doc)
-	    {
+		public static void EnsureIdInMetadata(IJsonDocumentMetadata doc)
+		{
 			if (doc == null || doc.Metadata == null)
 				return;
 
-			doc.Metadata["@id"] = new RavenJValue(doc.Key);
-	    }
+			if (doc.Metadata.IsSnapshot)
+			{
+				doc.Metadata = (RavenJObject)doc.Metadata.CreateSnapshot();
+			}
 
-	    public bool ShouldIncludeResultInQuery(IndexQueryResult arg, IndexDefinition indexDefinition, FieldsToFetch fieldsToFetch)
+			doc.Metadata["@id"] = doc.Key;
+		}
+
+		public bool ShouldIncludeResultInQuery(IndexQueryResult arg, IndexDefinition indexDefinition, FieldsToFetch fieldsToFetch, bool skipDuplicateCheck)
 		{
-			var doc = RetrieveDocumentInternal(arg, loadedIdsForFilter, fieldsToFetch, indexDefinition);
+			var doc = RetrieveDocumentInternal(arg, loadedIdsForFilter, fieldsToFetch, indexDefinition, skipDuplicateCheck);
 			if (doc == null)
 				return false;
 			doc = ProcessReadVetoes(doc, null, ReadOperation.Query);
@@ -172,7 +254,7 @@ namespace Raven.Database.Impl
 			where T : class, IJsonDocumentMetadata, new()
 		{
 			if (document == null)
-				return document;
+				return null;
 			foreach (var readTrigger in triggers)
 			{
 				var readVetoResult = readTrigger.Value.AllowRead(document.Key, document.Metadata, operation, transactionInformation);
@@ -182,10 +264,11 @@ namespace Raven.Database.Impl
 						break;
 					case ReadVetoResult.ReadAllow.Deny:
 						return new T
-						       	{
-									Etag = Guid.Empty,
+								{
+									Etag = Etag.Empty,
 									LastModified = DateTime.MinValue,
-						       		NonAuthoritativeInformation = false,
+									NonAuthoritativeInformation = false,
+									Key = document.Key,
 									Metadata = new RavenJObject
 						       		           	{
 						       		           		{
@@ -196,9 +279,9 @@ namespace Raven.Database.Impl
 						       		           			                   	}
 						       		           			}
 						       		           	}
-						       	};
+								};
 					case ReadVetoResult.ReadAllow.Ignore:
-						log.Debug("Triggered {0} asked us to ignore {1}", readTrigger.Value, document.Key);
+						log.Debug("Trigger {0} asked us to ignore {1}", readTrigger.Value, document.Key);
 						return null;
 					default:
 						throw new ArgumentOutOfRangeException(readVetoResult.Veto.ToString());
@@ -231,7 +314,7 @@ namespace Raven.Database.Impl
 			itemsToInclude.Add(id);
 			return new DynamicNullObject();
 		}
-		
+
 		public dynamic Include(IEnumerable<string> ids)
 		{
 			foreach (var id in ids)
@@ -244,15 +327,22 @@ namespace Raven.Database.Impl
 		public dynamic Load(string id)
 		{
 			var document = GetDocumentWithCaching(id);
-			if(document == null)
-				return new DynamicNullObject();
+			if (document == null)
+			{
+			    Etag = Etag.HashWith(Etag.Empty);
+			    return new DynamicNullObject();
+			}
+		    Etag = Etag.HashWith(document.Etag);
 			return new DynamicJsonObject(document.ToJson());
 		}
 
 		public dynamic Load(object maybeId)
 		{
 			if (maybeId == null || maybeId is DynamicNullObject)
-				return new DynamicNullObject();
+			{
+			    Etag = Etag.HashWith(Etag.Empty);
+			    return new DynamicNullObject();
+			}
 			var id = maybeId as string;
 			if (id != null)
 				return Load(id);
@@ -265,7 +355,9 @@ namespace Raven.Database.Impl
 			{
 				items.Add(Load(itemId));
 			}
-			return new DynamicList(items.Select(x => (object) x).ToArray());
+			return new DynamicList(items.Select(x => (object)x).ToArray());
 		}
+
+        public Dictionary<string, RavenJToken> QueryInputs { get { return this.queryInputs; } } 
 	}
 }

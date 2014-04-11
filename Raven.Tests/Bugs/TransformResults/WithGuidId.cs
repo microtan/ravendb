@@ -2,11 +2,13 @@ using System;
 using System.Linq;
 using Raven.Client;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs.TransformResults
 {
-	public class WithGuidId : LocalClientTest
+	public class WithGuidId : RavenTest
 	{
 		[Fact]
 		public void CanBeUsedForTransformResultsWithDocumentId()

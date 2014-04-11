@@ -4,86 +4,84 @@
 // </copyright>
 //-----------------------------------------------------------------------
 using System;
-#if !SILVERLIGHT
-using System.Transactions;
-#endif
+using System.Threading.Tasks;
+using Raven.Abstractions.Data;
 using Raven.Client.Connection;
-using Raven.Json.Linq;
+using Raven.Client.Connection.Async;
+using Raven.Client.Document;
+using Raven.Client.Indexes;
 
 namespace Raven.Client.Extensions
 {
-#if !NET_3_5
-	using Raven.Client.Connection.Async;
-	using System.Threading.Tasks;
+    ///<summary>
+    /// Extension methods to create multitenant databases
+    ///</summary>
+    public static class MultiTenancyExtensions
+    {
+#if !NETFX_CORE
+        ///<summary>
+        /// Ensures that the database exists, creating it if needed
+        ///</summary>
+        /// <remarks>
+        /// This operation happens _outside_ of any transaction
+        /// </remarks>
+        public static void EnsureDatabaseExists(this IGlobalAdminDatabaseCommands self, string name, bool ignoreFailures = false)
+        {
+            var serverClient = self.Commands.ForSystemDatabase() as ServerClient;
+            if (serverClient == null)
+                throw new InvalidOperationException("Multiple databases are not supported in the embedded API currently");
+
+            serverClient.ForceReadFromMaster();
+
+            var doc = MultiDatabase.CreateDatabaseDocument(name);
+
+            try
+            {
+                if (serverClient.Get(doc.Id) != null)
+                    return;
+
+                serverClient.GlobalAdmin.CreateDatabase(doc);
+            }
+            catch (Exception)
+            {
+                if (ignoreFailures == false)
+                    throw;
+            }
+
+            try
+            {
+                new RavenDocumentsByEntityName().Execute(serverClient.ForDatabase(name), new DocumentConvention());
+            }
+            catch (Exception)
+            {
+                // we really don't care if this fails, and it might, if the user doesn't have permissions on the new db
+            }
+        }
+
+        [Obsolete("The method was moved to be under the Admin property. Use the store.DatabaseCommands.GlobalAdmin.EnsureDatabaseExists instead.")]
+        public static void EnsureDatabaseExists(this IDatabaseCommands self, string name, bool ignoreFailures = false)
+        {
+            self.GlobalAdmin.EnsureDatabaseExists(name, ignoreFailures);
+        }
+
+        [Obsolete("The method was moved to be under the Admin property. Use the store.DatabaseCommands.Admin.CreateDatabase instead.")]
+        public static void CreateDatabase(this IDatabaseCommands self, DatabaseDocument databaseDocument)
+        {
+            self.GlobalAdmin.CreateDatabase(databaseDocument);
+        }
 
 #endif
 
-	///<summary>
-	/// Extension methods to create mutli tenants databases
-	///</summary>
-	public static class MultiTenancyExtensions
-	{
-#if !SILVERLIGHT
-		///<summary>
-		/// Ensures that the database exists, creating it if needed
-		///</summary>
-		/// <remarks>
-		/// This operation happens _outside_ of any transaction
-		/// </remarks>
-		public static void EnsureDatabaseExists(this IDatabaseCommands self, string name, bool ignoreFailures = false)
-		{
-			self = self.ForDefaultDatabase();
-			var doc = MultiDatabase.CreateDatabaseDocument(name);
-			var docId = "Raven/Databases/" + name;
-			
-			using (new TransactionScope(TransactionScopeOption.Suppress))
-			{
-				try
-				{
-					if (self.Get(docId) != null)
-						return;
+        [Obsolete("The method was moved to be under the Admin property. Use the store.DatabaseCommands.GlobalAdmin.EnsureDatabaseExists instead.")]
+        public static Task EnsureDatabaseExists(this IAsyncDatabaseCommands self, string name, bool ignoreFailures = false)
+        {
+            return self.GlobalAdmin.EnsureDatabaseExistsAsync(name, ignoreFailures);
+        }
 
-					self.Put(docId, null, doc, new RavenJObject());
-				}
-				catch (Exception)
-				{
-					if (ignoreFailures == false)
-						throw;
-
-				}
-			}
-		}
-#endif
-
-#if !NET_3_5
-		///<summary>
-		/// Ensures that the database exists, creating it if needed
-		///</summary>
-		public static Task EnsureDatabaseExistsAsync(this IAsyncDatabaseCommands self, string name, bool ignoreFailures = false)
-		{
-			self = self.ForDefaultDatabase();
-			var doc = MultiDatabase.CreateDatabaseDocument(name);
-			var docId = "Raven/Databases/" + name;
-
-			return self.GetAsync(docId)
-				.ContinueWith(get =>
-				{
-					if (get.Result != null)
-						return get;
-
-					return (Task)self.PutAsync(docId, null, doc, new RavenJObject());
-				})
-				.Unwrap()
-				.ContinueWith(x=>
-				{
-					if (ignoreFailures == false)
-						x.Wait(); // will throw on error
-
-					var observedException = x.Exception;
-					GC.KeepAlive(observedException);
-				});
-		}
-
-#endif
-	}
+        [Obsolete("The method was moved to be under the Admin property. Use the store.AsyncDatabaseCommands.Admin.CreateDatabaseAsync instead.")]
+        public static Task CreateDatabaseAsync(this IAsyncDatabaseCommands self, DatabaseDocument databaseDocument)
+        {
+            return self.GlobalAdmin.CreateDatabaseAsync(databaseDocument);
+        }
+    }
 }

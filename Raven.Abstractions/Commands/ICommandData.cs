@@ -3,7 +3,6 @@
 //     Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 // </copyright>
 //-----------------------------------------------------------------------
-using System;
 using Raven.Abstractions.Data;
 using Raven.Json.Linq;
 
@@ -30,7 +29,7 @@ namespace Raven.Abstractions.Commands
 		/// Gets the etag.
 		/// </summary>
 		/// <value>The etag.</value>
-		Guid? Etag { get; }
+		Etag Etag { get; }
 
 		/// <summary>
 		/// Gets the transaction information.
@@ -43,6 +42,12 @@ namespace Raven.Abstractions.Commands
 		/// </summary>
 		/// <value>The metadata.</value>
 		RavenJObject Metadata { get; }
+
+		/// <summary>
+		/// Gets the Additional Data.
+		/// </summary>
+		/// <value>The Additional Data.</value>
+		RavenJObject AdditionalData { get; set; }
 
 		/// <summary>
 		/// Translate this instance to a Json object.

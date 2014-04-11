@@ -7,11 +7,13 @@ using System.Collections.Generic;
 using System.Linq;
 using Raven.Abstractions.Indexing;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class LinqGitHub147 : LocalClientTest
+	public class LinqGitHub147 : RavenTest
 	{
 		public class Order
 		{

@@ -2,7 +2,11 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using Raven.Json.Utilities;
+
+using Raven.Abstractions;
+using Raven.Abstractions.Json;
+using Raven.Imports.Newtonsoft.Json.Linq;
+using Raven.Imports.Newtonsoft.Json.Utilities;
 
 namespace Raven.Json.Linq
 {
@@ -17,11 +21,6 @@ namespace Raven.Json.Linq
 		public static U Value<U>(this IEnumerable<RavenJToken> value)
 		{
 			return value.Value<RavenJToken, U>();
-		}
-
-		public static U Value<U>(this RavenJToken value)
-		{
-			return value.Convert<U>();
 		}
 
 		/// <summary>
@@ -130,7 +129,7 @@ namespace Raven.Json.Linq
 				// HACK
 				return (U)(object)token;
 			}
-			if (token == null)
+			if (token == null || token.Type == JTokenType.Null)
 				return default(U);
 
 			var value = token as RavenJValue;
@@ -142,7 +141,7 @@ namespace Raven.Json.Linq
 
 			Type targetType = typeof(U);
 
-			if (targetType.IsGenericType && targetType.GetGenericTypeDefinition() == typeof(Nullable<>))
+			if (targetType.IsGenericType() && targetType.GetGenericTypeDefinition() == typeof(Nullable<>))
 			{
 				if (value.Value == null)
 					return default(U);
@@ -161,7 +160,60 @@ namespace Raven.Json.Linq
 					return default(U);
 				return (U)(object)value.Value.ToString();
 			}
-			return (U)System.Convert.ChangeType(value.Value, targetType, CultureInfo.InvariantCulture);
+			if (targetType == typeof(DateTime))
+			{
+				var s = value.Value as string;
+				if (s != null)
+				{
+					DateTime dateTime;
+					if (DateTime.TryParseExact(s, Default.DateTimeFormatsToRead, CultureInfo.InvariantCulture,
+						DateTimeStyles.RoundtripKind, out dateTime))
+						return (U) (object) dateTime;
+
+					dateTime = RavenJsonTextReader.ParseDateMicrosoft(s);
+					return (U) (object) dateTime;
+				}
+				if (value.Value is DateTimeOffset)
+				{
+					return (U)(object)((DateTimeOffset) value.Value).UtcDateTime;
+				}
+			}
+			if (targetType == typeof(DateTimeOffset))
+			{
+				var s = value.Value as string;
+				if (s != null)
+				{
+					DateTimeOffset dateTimeOffset;
+					if (DateTimeOffset.TryParseExact(s, Default.DateTimeFormatsToRead, CultureInfo.InvariantCulture,
+						DateTimeStyles.RoundtripKind, out dateTimeOffset))
+						return (U) (object) dateTimeOffset;
+
+					return default(U);
+				}
+				if (value.Value is DateTime)
+				{
+					return (U) (object) (new DateTimeOffset((DateTime) value.Value));
+				}
+			}
+            if (targetType == typeof(byte[]) && value.Value is string)
+            {
+                return (U)(object)System.Convert.FromBase64String((string)value.Value);
+            }
+
+			if (value.Value == null && typeof(U).IsValueType)
+				throw new InvalidOperationException("value.Value == null and conversion target type is not nullable");
+
+			try
+			{
+				return (U) System.Convert.ChangeType(value.Value, targetType, CultureInfo.InvariantCulture);
+			}
+			catch (Exception e)
+			{
+				if (value.Value != null)
+					throw new InvalidOperationException(string.Format("Unable to find suitable conversion for {0} since it is not predefined and does not implement IConvertible. ", value.Value.GetType()),e);
+				
+				throw new InvalidOperationException(string.Format("Unable to find suitable conversion for {0} since it is not predefined ", value),e);
+			}
 		}
 	}
 }

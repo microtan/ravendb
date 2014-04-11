@@ -3,11 +3,13 @@ using System.Collections.Generic;
 using Raven.Client;
 using Raven.Client.Document;
 using Raven.Client.Shard;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Shard.BlogModel
 {
-	public class ShardedDocumentStoreTest
+	public class ShardedDocumentStoreTest : NoDisposalNeeded
 	{
 		[Fact]
 		public void WillThrowIsThereIsNoShards()
@@ -55,11 +57,9 @@ namespace Raven.Tests.Shard.BlogModel
 			using (var shardedDocumentStore = GetDocumentStore().Initialize())
 			using (var session = (ShardedDocumentSession)shardedDocumentStore.OpenSession())
 			{
-				var txId = Guid.NewGuid();
+				var txId = Guid.NewGuid().ToString();
 				Assert.Throws<NotSupportedException>(() => session.Commit(txId));
 				Assert.Throws<NotSupportedException>(() => session.Rollback(txId));
-				Assert.Throws<NotSupportedException>(() => session.PromoteTransaction(txId));
-				Assert.Throws<NotSupportedException>(() => session.StoreRecoveryInformation(Guid.NewGuid(), txId, new byte[0]));
 			}
 		}
 	}

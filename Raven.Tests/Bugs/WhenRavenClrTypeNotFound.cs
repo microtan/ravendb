@@ -5,12 +5,14 @@
 //-----------------------------------------------------------------------
 using System;
 using Raven.Client.Document;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs
 {
-	public class WhenRavenClrTypeNotFound : LocalClientTest
+	public class WhenRavenClrTypeNotFound : RavenTest
 	{
 		[Fact]
 		public void WillStillBeAbleToDeserialize()

@@ -3,11 +3,13 @@
 //     Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 // </copyright>
 //-----------------------------------------------------------------------
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class EntityWithoutId : LocalClientTest
+	public class EntityWithoutId : RavenTest
 	{
 		[Fact]
 		public void CanBeSaved()

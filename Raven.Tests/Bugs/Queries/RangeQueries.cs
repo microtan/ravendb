@@ -1,14 +1,81 @@
 using System;
+using System.Collections;
 using System.Linq;
 using Raven.Abstractions.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Collections.Generic;
 using Raven.Database.Indexing;
 
 namespace Raven.Tests.Bugs.Queries
 {
-	public class RangeQueries : LocalClientTest
+	public class RangeQueries : RavenTest
 	{
+		[Fact]
+		public void LinqTranslateCorrectly()
+		{
+			using (var store = NewDocumentStore())
+			{
+				using (var session = store.OpenSession())
+				{
+					var str = session.Query<WithInteger>()
+						.Where(x => x.Sequence < 300 && x.Sequence > 150 )
+						.ToString();
+
+					Assert.Equal("Sequence_Range:{Ix150 TO Ix300}", str);
+				}
+			}
+		}
+
+		[Fact]
+		public void LinqTranslateCorrectly_Reverse()
+		{
+			using (var store = NewDocumentStore())
+			{
+				using (var session = store.OpenSession())
+				{
+					var str = session.Query<WithInteger>()
+						.Where(x => 150 > x.Sequence && x.Sequence < 300)
+						.ToString();
+
+					Assert.Equal("Sequence_Range:{Ix150 TO Ix300}", str);
+				}
+			}
+		}
+
+		[Fact]
+		public void LinqTranslateCorrectly_Reverse2()
+		{
+			using (var store = NewDocumentStore())
+			{
+				using (var session = store.OpenSession())
+				{
+					var str = session.Query<WithInteger>()
+						.Where(x => 150 > x.Sequence && 300 < x.Sequence)
+						.ToString();
+
+					Assert.Equal("Sequence_Range:{Ix150 TO Ix300}", str);
+				}
+			}
+		}
+
+		[Fact]
+		public void LinqTranslateCorrectlyEquals()
+		{
+			using (var store = NewDocumentStore())
+			{
+				using (var session = store.OpenSession())
+				{
+					var str = session.Query<WithInteger>()
+						.Where(x => x.Sequence >= 150 && x.Sequence <= 300)
+						.ToString();
+
+					Assert.Equal("Sequence_Range:[Ix150 TO Ix300]", str);
+				}
+			}
+		}
+
 		[Fact]
 		public void CanQueryOnRangeEqualsInt()
 		{
@@ -146,7 +213,7 @@ namespace Raven.Tests.Bugs.Queries
 
 				using (var s = store.OpenSession())
 				{
-					var users = s.Advanced.LuceneQuery<UserWithIDictionary>("SimpleIndex")
+                    var users = s.Advanced.DocumentQuery<UserWithIDictionary>("SimpleIndex")
 						.WaitForNonStaleResults(TimeSpan.FromMinutes(5))
 						.WhereEquals("Key", "Color")
 						.AndAlso()

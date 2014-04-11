@@ -5,12 +5,14 @@
 //-----------------------------------------------------------------------
 using Raven.Abstractions.Indexing;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs
 {
-	public class AccurateCount : LocalClientTest
+	public class AccurateCount : RavenTest
 	{
 		[Fact]
 		public void QueryableCountIsAccurate()

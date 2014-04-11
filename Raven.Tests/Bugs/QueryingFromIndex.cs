@@ -6,12 +6,13 @@
 using System.Linq;
 using Raven.Abstractions.Indexing;
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
 using Raven.Tests.Document;
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class QueryingFromIndex : LocalClientTest
+	public class QueryingFromIndex : RavenTest
 	{
 		[Fact]
 		public void LuceneQueryWithIndexIsCaseInsensitive()
@@ -40,7 +41,7 @@ namespace Raven.Tests.Bugs
 					session.SaveChanges();
 
 					var company =
-						session.Advanced.LuceneQuery<Company>("CompanyByName")
+                        session.Advanced.DocumentQuery<Company>("CompanyByName")
 							.Where("Name:Google")
 							.WaitForNonStaleResults()
 							.FirstOrDefault();

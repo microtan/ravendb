@@ -8,12 +8,14 @@ using System;
 using Raven.Abstractions.Indexing;
 using Raven.Database.Indexing;
 using Raven.Database.Indexing.Collation.Cultures;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs
 {
-	public class UsingSwedishCollation : LocalClientTest
+	public class UsingSwedishCollation : RavenTest
 	{
 		[Fact]
 		public void Can_sort_according_to_swedish_sorting_rules()

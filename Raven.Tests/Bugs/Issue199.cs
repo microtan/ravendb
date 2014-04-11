@@ -6,12 +6,14 @@
 using Lucene.Net.Analysis;
 using Raven.Abstractions.Indexing;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs
 {
-	public class Issue199 : LocalClientTest
+	public class Issue199 : RavenTest
 	{
 		[Fact]
 		public void CanQueryStartingInH()
@@ -20,7 +22,7 @@ namespace Raven.Tests.Bugs
 			{
 				using (var session = store.OpenSession())
 				{
-					session.Advanced.DatabaseCommands.PutIndex("test", new IndexDefinition
+					store.DatabaseCommands.PutIndex("test", new IndexDefinition
 					{
 						Map = @"from s in docs.Softs
 						select new { s.f_platform, s.f_name, s.f_alias,s.f_License,s.f_totaldownload}",
@@ -60,9 +62,9 @@ namespace Raven.Tests.Bugs
 					session.SaveChanges();
 
 					Assert.NotEmpty(
-						session.Advanced.LuceneQuery<dynamic>("test").
+                        session.Advanced.DocumentQuery<dynamic>("test").
 						WaitForNonStaleResults().
-						Where("f_platform:1 AND (f_name:*H* OR f_alias:*H*)")
+						Where("f_platform:1 AND (f_name:*h* OR f_alias:*h*)")
 						.OrderBy(new[] { "-f_License", "f_totaldownload" })
 						.ToList()
 						);

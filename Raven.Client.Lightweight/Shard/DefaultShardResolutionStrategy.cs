@@ -8,7 +8,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Text.RegularExpressions;
-using System.Threading;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Extensions;
 
@@ -22,10 +21,9 @@ namespace Raven.Client.Shard
 
 		protected readonly List<string> ShardIds;
 
-		private int currentShardCounter;
 		private readonly Dictionary<Type, Regex> regexToCaptureShardIdFromQueriesByType = new Dictionary<Type, Regex>();
 
-		private readonly Dictionary<Type, Func<object,string>> shardResultToStringByType = new Dictionary<Type, Func<object, string>>();
+		private readonly Dictionary<Type, Func<object, string>> shardResultToStringByType = new Dictionary<Type, Func<object, string>>();
 		private readonly Dictionary<Type, Func<string, string>> queryResultToStringByType = new Dictionary<Type, Func<string, string>>();
 
 		public DefaultShardResolutionStrategy(IEnumerable<string> shardIds, ShardStrategy shardStrategy)
@@ -50,23 +48,23 @@ namespace Raven.Client.Shard
 			                                      	{
 														if (ReferenceEquals(result, null))
 															throw new InvalidOperationException("Got null for the shard id in the value translator for " +
-															                                    typeof (TEntity) + " using " + shardingProperty +
+														typeof(TEntity) + " using " + shardingProperty +
 															                                    ", no idea how to get the shard id from null.");
 
 														// by default we assume that if you have a separator in the value we got back
 														// the shard id is the very first value up until the first separator
 			                                      		var str = result.ToString();
-														var start = str.IndexOf(shardStrategy.Conventions.IdentityPartsSeparator, StringComparison.InvariantCultureIgnoreCase);
+														var start = str.IndexOf(shardStrategy.Conventions.IdentityPartsSeparator, StringComparison.OrdinalIgnoreCase);
 														if (start == -1)
 															return str;
 			                                      		return str.Substring(0, start);
 			                                      	});
 
-			queryTranslator = queryTranslator ?? (result => valueTranslator((TResult) Convert.ChangeType(result, typeof (TResult))));
+			queryTranslator = queryTranslator ?? (result => valueTranslator((TResult)Convert.ChangeType(result, typeof(TResult))));
 
 			var shardFieldForQuerying = shardingProperty.ToPropertyPath();
 
-			if(shardStrategy.Conventions.FindIdentityProperty(shardingProperty.ToProperty()))
+			if (shardStrategy.Conventions.FindIdentityProperty(shardingProperty.ToProperty()))
 			{
 				shardFieldForQuerying = Constants.DocumentIdFieldName;
 			}
@@ -75,25 +73,28 @@ namespace Raven.Client.Shard
 {0}: \s* (?<Open>"")(?<shardId>[^""]+)(?<Close-Open>"") |
 {0}: \s* (?<shardId>[^""][^\s]*)", Regex.Escape(shardFieldForQuerying));
 
-			regexToCaptureShardIdFromQueriesByType[typeof (TEntity)] = new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnorePatternWhitespace);
+			regexToCaptureShardIdFromQueriesByType[typeof(TEntity)] = new Regex(pattern,
+#if !NETFX_CORE
+				RegexOptions.Compiled |
+#endif			
+				RegexOptions.IgnorePatternWhitespace);
 
 			var compiled = shardingProperty.Compile();
 
 			shardResultToStringByType[typeof(TEntity)] = o => valueTranslator(compiled((TEntity)o));
-			queryResultToStringByType[typeof (TEntity)] = o => queryTranslator(o);
+			queryResultToStringByType[typeof(TEntity)] = o => queryTranslator(o);
 		}
 
 
 		/// <summary>
 		///  Generate a shard id for the specified entity
 		///  </summary>
-		public virtual string GenerateShardIdFor(object entity)
+		public virtual string GenerateShardIdFor(object entity, ITransactionalDocumentSession sessionMetadata)
 		{
 			if (shardResultToStringByType.Count == 0)
 			{ 
-				// default, round robin scenario
-				var increment = Interlocked.Increment(ref currentShardCounter);
-				return ShardIds[increment%ShardIds.Count];
+				// one shard per session
+				return ShardIds[sessionMetadata.GetHashCode() % ShardIds.Count];
 			}
 
 			Func<object, string> func;
@@ -133,13 +134,13 @@ namespace Raven.Client.Shard
 
 				var potentialShardsFor = collection.Cast<Match>().Select(match => translateQueryValueToShardId(match.Groups["shardId"].Value)).ToList();
 
-				if (potentialShardsFor.Any(queryShardId => ShardIds.Contains(queryShardId, StringComparer.InvariantCultureIgnoreCase)) == false)
+				if (potentialShardsFor.Any(queryShardId => ShardIds.Contains(queryShardId, StringComparer.OrdinalIgnoreCase)) == false)
 					return null; // we couldn't find the shard ids here, maybe there is something wrong in the query, sending to all shards
 
 				return potentialShardsFor;
 			}
 
-			if(requestData.Keys.Count == 0) // we are only optimized for keys
+			if (requestData.Keys.Count == 0) // we are only optimized for keys
 				return null;
 
 
@@ -148,13 +149,13 @@ namespace Raven.Client.Shard
 			var list = new List<string>();
 			foreach (var key in requestData.Keys)
 			{
-				var start = key.IndexOf(shardStrategy.Conventions.IdentityPartsSeparator, StringComparison.InvariantCultureIgnoreCase);
+				var start = key.IndexOf(shardStrategy.Conventions.IdentityPartsSeparator, StringComparison.OrdinalIgnoreCase);
 				if (start == -1)
 					return null; // if we couldn't figure it out, select from all
 
 				var maybeShardId = key.Substring(0, start);
 
-				if (ShardIds.Any(x => string.Equals(maybeShardId, x, StringComparison.InvariantCultureIgnoreCase)))
+				if (ShardIds.Any(x => string.Equals(maybeShardId, x, StringComparison.OrdinalIgnoreCase)))
 					list.Add(maybeShardId);
 				else
 					return null; // we couldn't find it there, select from all

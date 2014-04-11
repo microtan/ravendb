@@ -13,14 +13,16 @@ using Raven.Client.Document;
 using Raven.Database.Indexing;
 using Raven.Database.Server;
 using Raven.Json.Linq;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class MultipleResultsPerDocumentAndPaging : LocalClientTest
+	public class MultipleResultsPerDocumentAndPaging : RavenTest
 	{
 		[Fact]
-		public void WhenOutputingMultipleResultsPerDocAndPagingWillGetCorrectSize()
+		public void WhenOutputtingMultipleResultsPerDocAndPagingWillGetCorrectSize()
 		{
 			using (var store = NewDocumentStore())
 			{
@@ -54,7 +56,7 @@ select new { Actor = actor, Name = movie.Name }",
 
 				using (var s2 = store.OpenSession())
 				{
-					var movies = s2.Advanced.LuceneQuery<Movie>("Movies/ByActor")
+                    var movies = s2.Advanced.DocumentQuery<Movie>("Movies/ByActor")
 						.WhereEquals("Actor", "Bond")
 						.Take(2)
 						.WaitForNonStaleResults(TimeSpan.FromMinutes(5))

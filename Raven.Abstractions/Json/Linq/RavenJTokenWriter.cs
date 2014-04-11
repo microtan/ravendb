@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using Raven.Imports.Newtonsoft.Json;
+using Raven.Imports.Newtonsoft.Json.Linq;
 
 namespace Raven.Json.Linq
 {
@@ -45,7 +45,7 @@ namespace Raven.Json.Linq
 			base.WritePropertyName(name);
 
 			if (_tempPropName != null)
-				throw new JsonWriterException("Was not expecting a propery name here");
+				throw new JsonWriterException("Was not expecting a property name here");
 
 			_tempPropName = name;
 		}
@@ -132,6 +132,11 @@ namespace Raven.Json.Linq
 			}
 		}
 
+		public override void WriteRaw(string json)
+		{
+			throw new NotSupportedException();
+		}
+
 		#region WriteValue methods
 		/// <summary>
 		/// Writes a null value.
@@ -182,9 +187,7 @@ namespace Raven.Json.Linq
 		/// Writes a <see cref="UInt32"/> value.
 		/// </summary>
 		/// <param name="value">The <see cref="UInt32"/> value to write.</param>
-#if !SILVERLIGHT
 		[CLSCompliant(false)]
-#endif
 		public override void WriteValue(uint value)
 		{
 			base.WriteValue(value);
@@ -205,9 +208,7 @@ namespace Raven.Json.Linq
 		/// Writes a <see cref="UInt64"/> value.
 		/// </summary>
 		/// <param name="value">The <see cref="UInt64"/> value to write.</param>
-#if !SILVERLIGHT
 		[CLSCompliant(false)]
-#endif
 		public override void WriteValue(ulong value)
 		{
 			base.WriteValue(value);
@@ -258,9 +259,7 @@ namespace Raven.Json.Linq
 		/// Writes a <see cref="UInt16"/> value.
 		/// </summary>
 		/// <param name="value">The <see cref="UInt16"/> value to write.</param>
-#if !SILVERLIGHT
 		[CLSCompliant(false)]
-#endif
 		public override void WriteValue(ushort value)
 		{
 			base.WriteValue(value);
@@ -291,9 +290,7 @@ namespace Raven.Json.Linq
 		/// Writes a <see cref="SByte"/> value.
 		/// </summary>
 		/// <param name="value">The <see cref="SByte"/> value to write.</param>
-#if !SILVERLIGHT
 		[CLSCompliant(false)]
-#endif
 		public override void WriteValue(sbyte value)
 		{
 			base.WriteValue(value);

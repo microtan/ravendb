@@ -37,12 +37,15 @@ namespace Raven.VisualHost
 			for (int i = 0; i < NumberOfServers.Value; i++)
 			{
 				var port = 8079 - i;
+				NonAdminHttp.EnsureCanListenToWhenInNonAdminContext(port);
 				var ravenDbServer = new RavenDbServer(new RavenConfiguration
 				{
 					Port = port,
 					//DataDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Server-" + port, "Data"),
 					RunInMemory = true,
-					AnonymousUserAccessMode = AnonymousUserAccessMode.All
+                    AnonymousUserAccessMode = AnonymousUserAccessMode.Admin,
+					ServerName = "DB-" + (i + 1).ToString("X2"),
+					ClusterName = "Visual Host Servers",
 				});
 
 				var serverLog = new ServerLog
@@ -184,7 +187,7 @@ namespace Raven.VisualHost
 			MessageBox.Show("Setup replication between all servers (Master/Slave)");
 		}
 
-		private void setupDatbasesToolStripMenuItem_Click(object sender, EventArgs e)
+		private void setupDatabasesToolStripMenuItem_Click(object sender, EventArgs e)
 		{
 			foreach (var ravenDbServer in servers)
 			{
@@ -211,6 +214,22 @@ namespace Raven.VisualHost
 					docStore.DatabaseCommands.Put("Raven/Replication/Destinations", null, doc, new RavenJObject());
 				}
 			}
+		}
+
+		private void sToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			var stoppedWorkers = ((ToolStripMenuItem)sender).Checked;
+			foreach (var ravenDbServer in servers)
+			{
+				ravenDbServer.Server.ForAllDatabases(database =>
+				{
+					if (stoppedWorkers)
+						database.SpinBackgroundWorkers();
+					else
+						database.StopBackgroundWorkers();
+				});
+			}
+			((ToolStripMenuItem) sender).Checked = !stoppedWorkers;
 		}
 	}
 }

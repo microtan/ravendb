@@ -5,11 +5,12 @@
 //-----------------------------------------------------------------------
 using System;
 using System.Collections.Generic;
-#if !NET_3_5
-using System.Threading.Tasks;
-#endif
+using System.Linq.Expressions;
 using Raven.Abstractions.Data;
 using Raven.Client.Linq;
+using Raven.Client.Spatial;
+using Raven.Json.Linq;
+using System.Threading.Tasks;
 
 namespace Raven.Client
 {
@@ -18,7 +19,6 @@ namespace Raven.Client
 	/// </summary>
 	public interface IDocumentQuery<T> : IEnumerable<T>, IDocumentQueryBase<T, IDocumentQuery<T>>
 	{
-
 		/// <summary>
 		/// Selects the specified fields directly from the index
 		/// </summary>
@@ -26,17 +26,32 @@ namespace Raven.Client
 		/// <param name="fields">The fields.</param>
 		IDocumentQuery<TProjection> SelectFields<TProjection>(params string[] fields);
 
+		/// <summary>
+		/// Selects the specified fields directly from the index
+		/// </summary>
+		/// <typeparam name="TProjection">The type of the projection.</typeparam>
+		IDocumentQuery<TProjection> SelectFields<TProjection>(string[] fields, string[] projections);
 
-#if !SILVERLIGHT
+		/// <summary>
+		/// Selects the projection fields directly from the index
+		/// </summary>
+		/// <typeparam name="TProjection">The type of the projection.</typeparam>
+		IDocumentQuery<TProjection> SelectFields<TProjection>();
+
+		/// <summary>
+		/// Sets user defined inputs to the query
+		/// </summary>
+		/// <param name="queryInputs"></param>
+		void SetQueryInputs(Dictionary<string, RavenJToken> queryInputs);
+
 		/// <summary>
 		/// Gets the query result
 		/// Execute the query the first time that this is called.
 		/// </summary>
 		/// <value>The query result.</value>
 		QueryResult QueryResult { get; }
-#endif
+		bool IsDistinct { get; }
 
-#if !NET_3_5
 		/// <summary>
 		/// Register the query as a lazy query in the session and return a lazy
 		/// instance that will evaluate the query only when needed
@@ -49,6 +64,31 @@ namespace Raven.Client
 		/// Also provide a function to execute when the value is evaluated
 		/// </summary>
 		Lazy<IEnumerable<T>> Lazily(Action<IEnumerable<T>> onEval);
-#endif
-	}
+
+		/// <summary>
+		/// Register the query as a lazy-count query in the session and return a lazy
+		/// instance that will evaluate the query only when needed.
+		/// </summary>
+		Lazy<int> CountLazily();
+
+		/// <summary>
+		/// Create the index query object for this query
+		/// </summary>
+		IndexQuery GetIndexQuery(bool isAsync);
+
+		IDocumentQuery<T> Spatial(Expression<Func<T, object>> path, Func<SpatialCriteriaFactory, SpatialCriteria> clause);
+
+		IDocumentQuery<T> Spatial(string name, Func<SpatialCriteriaFactory, SpatialCriteria> clause);
+
+		/// <summary>
+		/// Get the facets as per the specified doc with the given start and pageSize
+		/// </summary>
+		FacetResults GetFacets(string facetSetupDoc, int facetStart, int? facetPageSize);
+
+		/// <summary>
+		/// Get the facets as per the specified facets with the given start and pageSize
+		/// </summary>
+		FacetResults GetFacets(List<Facet> facets, int facetStart, int? facetPageSize);
+
+    }
 }

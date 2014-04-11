@@ -4,16 +4,18 @@
 // </copyright>
 //-----------------------------------------------------------------------
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Indexes
 {
-	public class ExpressionOperatorPrecedenceTest
+	public class ExpressionOperatorPrecedenceTest : NoDisposalNeeded
 	{
 		[Fact]
-		public void operators_of_same_precedence_dont_need_parenthesis()
+		public void operators_of_same_precedence_do_need_parenthesis()
 		{
-			Assert.False(ExpressionOperatorPrecedence.Multiplicative.NeedsParenthesisFor(ExpressionOperatorPrecedence.Multiplicative));
+			Assert.True(ExpressionOperatorPrecedence.Multiplicative.NeedsParenthesisFor(ExpressionOperatorPrecedence.Multiplicative));
 		}
 
 		[Fact]

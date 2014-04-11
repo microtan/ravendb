@@ -1,31 +1,54 @@
 ﻿using System;
-#if !SILVERLIGHT
+using System.Threading.Tasks;
 using System.Collections.Specialized;
-#endif
-using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Configuration;
 using System.Linq;
-using System.Net;
-using Raven.Abstractions.Extensions;
+using Raven.Abstractions.Data;
+using Raven.Client.Changes;
 using Raven.Client.Connection;
 using Raven.Client.Connection.Profiling;
+using Raven.Client.Document.DTC;
 using Raven.Client.Indexes;
 using Raven.Client.Listeners;
 using Raven.Client.Document;
-#if SILVERLIGHT
-using Raven.Client.Silverlight.Connection;
+#if NETFX_CORE
+using Raven.Client.WinRT.Connection;
+#else
+using Raven.Abstractions.Util.Encryptors;
 #endif
-#if !NET_3_5
 using Raven.Client.Connection.Async;
-#endif
+using Raven.Client.Util;
 
 namespace Raven.Client
 {
+	using System.Collections.Generic;
+
+	using Raven.Abstractions.Util.Encryptors;
+
 	/// <summary>
 	/// Contains implementation of some IDocumentStore operations shared by DocumentStore implementations
 	/// </summary>
 	public abstract class DocumentStoreBase : IDocumentStore
 	{
-		public abstract void Dispose();
+		protected DocumentStoreBase()
+		{
+			InitializeEncryptor();
+
+			LastEtagHolder = new GlobalLastEtagHolder();
+			TransactionRecoveryStorage = new VolatileOnlyTransactionRecoveryStorage();
+		}
+
+	    public DocumentSessionListeners Listeners
+	    {
+	        get { return listeners; }
+	    }
+	    public void SetListeners(DocumentSessionListeners newListeners)
+	    {
+            this.listeners = newListeners;
+	    }
+
+	    public abstract void Dispose();
 		
 		/// <summary>
 		/// 
@@ -37,10 +60,19 @@ namespace Raven.Client
 		/// </summary>
 		public bool WasDisposed { get; protected set; }
 
-		public abstract IDisposable AggressivelyCacheFor(TimeSpan cahceDuration);
+		/// <summary>
+		/// Subscribe to change notifications from the server
+		/// </summary>
+
+		public abstract IDisposable AggressivelyCacheFor(TimeSpan cacheDuration);
+
+		public abstract IDatabaseChanges Changes(string database = null);
+
 		public abstract IDisposable DisableAggressiveCaching();
-		
-#if !SILVERLIGHT
+
+		public abstract IDisposable SetRequestsTimeoutFor(TimeSpan timeout);
+
+#if !NETFX_CORE
 		/// <summary>
 		/// Gets the shared operations headers.
 		/// </summary>
@@ -50,20 +82,20 @@ namespace Raven.Client
 		public virtual IDictionary<string,string> SharedOperationsHeaders { get; protected set; }
 #endif
 
+		public abstract bool HasJsonRequestFactory { get; }
 		public abstract HttpJsonRequestFactory JsonRequestFactory { get; }
 		public abstract string Identifier { get; set; }
 		public abstract IDocumentStore Initialize();
-#if !NET_3_5
 		public abstract IAsyncDatabaseCommands AsyncDatabaseCommands { get; }
 		public abstract IAsyncDocumentSession OpenAsyncSession();
 		public abstract IAsyncDocumentSession OpenAsyncSession(string database);
-#endif
-#if !SILVERLIGHT
+
+#if !NETFX_CORE
 		public abstract IDocumentSession OpenSession();
 		public abstract IDocumentSession OpenSession(string database);
 		public abstract IDocumentSession OpenSession(OpenSessionOptions sessionOptions);
 		public abstract IDatabaseCommands DatabaseCommands { get; }
-
+        
 		/// <summary>
 		/// Executes the index creation.
 		/// </summary>
@@ -71,6 +103,24 @@ namespace Raven.Client
 		{
 			indexCreationTask.Execute(DatabaseCommands, Conventions);
 		}
+
+	    public Task ExecuteIndexAsync(AbstractIndexCreationTask indexCreationTask)
+	    {
+	        return indexCreationTask.ExecuteAsync(AsyncDatabaseCommands, Conventions);
+	    }
+
+	    /// <summary>
+		/// Executes the transformer creation
+		/// </summary>
+		public virtual void ExecuteTransformer(AbstractTransformerCreationTask transformerCreationTask)
+		{
+			transformerCreationTask.Execute(DatabaseCommands, Conventions);
+		}
+
+	    public Task ExecuteTransformerAsync(AbstractTransformerCreationTask transformerCreationTask)
+	    {
+	        return transformerCreationTask.ExecuteAsync(AsyncDatabaseCommands, Conventions);
+	    }
 #endif
 
 		private DocumentConvention conventions;
@@ -96,6 +146,17 @@ namespace Raven.Client
 			set { url = value.EndsWith("/") ? value.Substring(0, value.Length - 1) : value; }
 		}
 
+		/// <summary>
+		/// Failover servers used by replication informers when cannot fetch the list of replication 
+		/// destinations if a master server is down.
+		/// </summary>
+		public FailoverServers FailoverServers { get; set; }
+
+		/// <summary>
+		/// Whenever or not we will use FIPS compliant encryption algorithms (must match server settings).
+		/// </summary>
+		public bool UseFipsEncryptionAlgorithms { get; set; }
+
 		///<summary>
 		/// Whatever or not we will automatically enlist in distributed transactions
 		///</summary>
@@ -111,73 +172,22 @@ namespace Raven.Client
 		/// </summary>
 		public Guid ResourceManagerId { get; set; }
 
-		private class EtagHolder
-		{
-			public Guid Etag;
-			public byte[] Bytes;
-		}
-
-		private volatile EtagHolder lastEtag;
-		protected readonly object lastEtagLocker = new object();
+		
 		protected bool initialized;
 
-		internal void UpdateLastWrittenEtag(Guid? etag)
-		{
-			if (etag == null)
-				return;
-
-			var newEtag = etag.Value.ToByteArray();
-
-			if (lastEtag == null)
-			{
-				lock (lastEtagLocker)
-				{
-					if (lastEtag == null)
-					{
-						lastEtag = new DocumentStore.EtagHolder
-						{
-							Bytes = newEtag,
-							Etag = etag.Value
-						};
-						return;
-					}
-				}
-			}
-
-			// not the most recent etag
-			if (Buffers.Compare(lastEtag.Bytes, newEtag) >= 0)
-			{
-				return;
-			}
-
-			lock (lastEtagLocker)
-			{
-				// not the most recent etag
-				if (Buffers.Compare(lastEtag.Bytes, newEtag) >= 0)
-				{
-					return;
-				}
-
-				lastEtag = new DocumentStore.EtagHolder
-				{
-					Etag = etag.Value,
-					Bytes = newEtag
-				};
-			}
-		}
 
 		///<summary>
 		/// Gets the etag of the last document written by any session belonging to this 
 		/// document store
 		///</summary>
-		public virtual Guid? GetLastWrittenEtag()
+		public virtual Etag GetLastWrittenEtag()
 		{
-			var etagHolder = lastEtag;
-			if (etagHolder == null)
-				return null;
-			return etagHolder.Etag;
+			return LastEtagHolder.GetLastWrittenEtag();
 		}
 
+#if !NETFX_CORE
+		public abstract BulkInsertOperation BulkInsert(string database = null, BulkInsertOptions options = null);
+#endif
 		protected void EnsureNotClosed()
 		{
 			if (WasDisposed)
@@ -190,29 +200,10 @@ namespace Raven.Client
 				throw new InvalidOperationException("You cannot open a session or access the database commands before initializing the document store. Did you forget calling Initialize()?");
 		}
 
-		protected readonly DocumentSessionListeners listeners = new DocumentSessionListeners();
+		private DocumentSessionListeners listeners = new DocumentSessionListeners();
 
 		/// <summary>
-		/// Registers the delete listener.
-		/// </summary>
-		/// <param name="deleteListener">The delete listener.</param>
-		/// <returns></returns>
-		public DocumentStoreBase RegisterListener(IDocumentDeleteListener deleteListener)
-		{
-			listeners.DeleteListeners = listeners.DeleteListeners.Concat(new[] { deleteListener }).ToArray();
-			return this;
-		}
-
-		/// <summary>
-		/// Registers the query listener.
-		/// </summary>
-		public DocumentStoreBase RegisterListener(IDocumentQueryListener queryListener)
-		{
-			listeners.QueryListeners = listeners.QueryListeners.Concat(new[] { queryListener }).ToArray();
-			return this;
-		}
-		/// <summary>
-		/// Registers the convertion listener.
+		/// Registers the conversion listener.
 		/// </summary>
 		public DocumentStoreBase RegisterListener(IDocumentConversionListener conversionListener)
 		{
@@ -220,7 +211,96 @@ namespace Raven.Client
 			return this;
 		}
 
-		protected void AfterSessionCreated(InMemoryDocumentSessionOperations session)
+		/// <summary>
+		/// Registers the extended conversion listener.
+		/// </summary>
+		public DocumentStoreBase RegisterListener(IExtendedDocumentConversionListener conversionListener)
+		{
+			listeners.ExtendedConversionListeners = listeners.ExtendedConversionListeners.Concat(new[] { conversionListener, }).ToArray();
+			return this;
+		}
+
+		/// <summary>
+		/// Registers the query listener.
+		/// </summary>
+		/// <param name="queryListener">The query listener.</param>
+		public DocumentStoreBase RegisterListener(IDocumentQueryListener queryListener)
+		{
+			listeners.QueryListeners = listeners.QueryListeners.Concat(new[] { queryListener }).ToArray();
+			return this;
+		}
+		
+		/// <summary>
+		/// Registers the store listener.
+		/// </summary>
+		/// <param name="documentStoreListener">The document store listener.</param>
+		public IDocumentStore RegisterListener(IDocumentStoreListener documentStoreListener)
+		{
+			listeners.StoreListeners = listeners.StoreListeners.Concat(new[] { documentStoreListener }).ToArray();
+			return this;
+		}
+
+		/// <summary>
+		/// Registers the delete listener.
+		/// </summary>
+		/// <param name="deleteListener">The delete listener.</param>
+		public DocumentStoreBase RegisterListener(IDocumentDeleteListener deleteListener)
+		{
+			listeners.DeleteListeners = listeners.DeleteListeners.Concat(new[] { deleteListener }).ToArray();
+			return this;
+		}
+
+		/// <summary>
+		/// Registers the conflict listener.
+		/// </summary>
+		/// <param name="conflictListener">The conflict listener.</param>
+		public DocumentStoreBase RegisterListener(IDocumentConflictListener conflictListener)
+		{
+			listeners.ConflictListeners = listeners.ConflictListeners.Concat(new[] { conflictListener }).ToArray();
+			return this;
+		}
+
+		/// <summary>
+		/// Gets a read-only collection of the registered conversion listeners.
+		/// </summary>
+		public ReadOnlyCollection<IDocumentConversionListener> RegisteredConversionListeners
+		{
+			get { return new ReadOnlyCollection<IDocumentConversionListener>(listeners.ConversionListeners); }
+		}
+
+		/// <summary>
+		/// Gets a read-only collection of the registered query listeners.
+		/// </summary>
+		public ReadOnlyCollection<IDocumentQueryListener> RegisteredQueryListeners
+		{
+			get { return new ReadOnlyCollection<IDocumentQueryListener>(listeners.QueryListeners); }
+		}
+
+		/// <summary>
+		/// Gets a read-only collection of the registered store listeners.
+		/// </summary>
+		public ReadOnlyCollection<IDocumentStoreListener> RegisteredStoreListeners
+		{
+			get { return new ReadOnlyCollection<IDocumentStoreListener>(listeners.StoreListeners); }
+		}
+
+		/// <summary>
+		/// Gets a read-only collection of the registered delete listeners.
+		/// </summary>
+		public ReadOnlyCollection<IDocumentDeleteListener> RegisteredDeleteListeners
+		{
+			get { return new ReadOnlyCollection<IDocumentDeleteListener>(listeners.DeleteListeners); }
+		}
+
+		/// <summary>
+		/// Gets a read-only collection of the registered conflict listeners.
+		/// </summary>
+		public ReadOnlyCollection<IDocumentConflictListener> RegisteredConflictListeners
+		{
+			get { return new ReadOnlyCollection<IDocumentConflictListener>(listeners.ConflictListeners); }
+		}
+
+		protected virtual void AfterSessionCreated(InMemoryDocumentSessionOperations session)
 		{
 			var onSessionCreatedInternal = SessionCreatedInternal;
 			if (onSessionCreatedInternal != null)
@@ -232,31 +312,44 @@ namespace Raven.Client
 		///</summary>
 		public event Action<InMemoryDocumentSessionOperations> SessionCreatedInternal;
 
-#if !NET_3_5
 		protected readonly ProfilingContext profilingContext = new ProfilingContext();
-#endif
 
-		/// <summary>
-		/// Registers the store listener.
-		/// </summary>
-		/// <param name="documentStoreListener">The document store listener.</param>
-		/// <returns></returns>
-		public IDocumentStore RegisterListener(IDocumentStoreListener documentStoreListener)
-		{
-			listeners.StoreListeners = listeners.StoreListeners.Concat(new[] { documentStoreListener }).ToArray();
-			return this;
-		}
+		public ILastEtagHolder LastEtagHolder { get; set; }
+		public ITransactionRecoveryStorage TransactionRecoveryStorage { get; set; }
 
 		/// <summary>
 		///  Get the profiling information for the given id
 		/// </summary>
 		public ProfilingInformation GetProfilingInformationFor(Guid id)
 		{
-#if !NET_3_5
 			return profilingContext.TryGet(id);
-#else
-			return null;
-#endif
 		}
-	}
+
+		/// <summary>
+		/// Setup the context for aggressive caching.
+		/// </summary>
+		public IDisposable AggressivelyCache()
+		{
+			return AggressivelyCacheFor(TimeSpan.FromDays(1));
+		}
+
+#if !NETFX_CORE
+		protected void InitializeEncryptor()
+		{
+			var setting = ConfigurationManager.AppSettings["Raven/Encryption/FIPS"];
+
+			bool fips;
+			if (string.IsNullOrEmpty(setting) || !bool.TryParse(setting, out fips))
+				fips = UseFipsEncryptionAlgorithms;
+
+			Encryptor.Initialize(fips);
+		}
+#else
+		protected void InitializeEncryptor()
+		{
+			Encryptor.Initialize(UseFipsEncryptionAlgorithms);
+		}
+#endif
+
+    }
 }

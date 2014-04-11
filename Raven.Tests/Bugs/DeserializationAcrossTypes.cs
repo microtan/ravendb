@@ -1,8 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using Raven.Json.Linq;
+﻿using Raven.Json.Linq;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
@@ -15,7 +13,7 @@ namespace Raven.Tests.Bugs
 		}
 	}
 
-	public class DeserializationAcrossTypes : LocalClientTest
+	public class DeserializationAcrossTypes : RavenTest
 	{
 		[Fact]
 		public void can_deserialize_across_types_when_origin_type_doesnt_exist()

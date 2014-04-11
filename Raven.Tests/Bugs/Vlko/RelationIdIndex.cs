@@ -2,11 +2,13 @@ using System;
 using System.Linq;
 using Raven.Client;
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs.Vlko
 {
-	public class RelationIdIndex : LocalClientTest
+	public class RelationIdIndex : RavenTest
 	{
 		[Fact]
 		public void CanBeUsedForTransformResultsWithDocumentId()

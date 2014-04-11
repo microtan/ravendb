@@ -4,27 +4,21 @@
 // </copyright>
 //-----------------------------------------------------------------------
 using System;
+using System.Collections.Generic;
 using Raven.Client.Document;
-#if !NET_3_5
 using Raven.Client.Document.Batches;
-#endif
 
 namespace Raven.Client
 {
 	/// <summary>
 	/// Interface for document session which holds the internal operations
 	/// </summary>
-	internal interface IDocumentSessionImpl : IDocumentSession
-#if !NET_3_5
-	                                          , ILazySessionOperations, IEagerSessionOperations
-#endif
+	internal interface IDocumentSessionImpl : IDocumentSession, ILazySessionOperations, IEagerSessionOperations
 	{
 		DocumentConvention Conventions { get; }
-		T[] LoadInternal<T>(string[] ids);
-		T[] LoadInternal<T>(string[] ids, string[] includes);
 
-#if !NET_3_5
-		Lazy<T[]> LazyLoadInternal<T>(string[] ids, string[] includes, Action<T[]> onEval);
-#endif
+		T[] LoadInternal<T>(string[] ids);
+		T[] LoadInternal<T>(string[] ids, KeyValuePair<string, Type>[] includes);
+		Lazy<T[]> LazyLoadInternal<T>(string[] ids, KeyValuePair<string, Type>[] includes, Action<T[]> onEval);
 	}
 }

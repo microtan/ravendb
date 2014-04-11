@@ -4,8 +4,10 @@
 // </copyright>
 //-----------------------------------------------------------------------
 using System;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using System.Threading;
+using Raven.Database.Extensions;
+using Raven.Imports.Newtonsoft.Json;
+using Raven.Imports.Newtonsoft.Json.Linq;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Extensions;
 using Raven.Abstractions.Json;
@@ -19,18 +21,22 @@ namespace Raven.Database.Impl
 	{
 		private readonly DocumentDatabase database;
 		private readonly TransactionInformation transactionInformation;
+		private readonly CancellationToken token;
+		private readonly CancellationTokenSourceExtensions.CancellationTimeout timeout;
 
-		public DatabaseBulkOperations(DocumentDatabase database, TransactionInformation transactionInformation)
+		public DatabaseBulkOperations(DocumentDatabase database, TransactionInformation transactionInformation, CancellationToken token, CancellationTokenSourceExtensions.CancellationTimeout timeout)
 		{
 			this.database = database;
 			this.transactionInformation = transactionInformation;
+			this.token = token;
+			this.timeout = timeout;
 		}
 
 		public RavenJArray DeleteByIndex(string indexName, IndexQuery queryToDelete, bool allowStale)
 		{
 			return PerformBulkOperation(indexName, queryToDelete, allowStale, (docId, tx) =>
 			{
-				database.Delete(docId, null, tx);
+				database.Documents.Delete(docId, null, tx);
 				return new { Document = docId, Deleted = true };
 			});
 		}
@@ -39,8 +45,17 @@ namespace Raven.Database.Impl
 		{
 			return PerformBulkOperation(indexName, queryToUpdate, allowStale, (docId, tx) =>
 			{
-				var patchResult = database.ApplyPatch(docId, null, patchRequests, tx);
+				var patchResult = database.Patches.ApplyPatch(docId, null, patchRequests, tx);
 				return new { Document = docId, Result = patchResult };
+			});
+		}
+
+		public RavenJArray UpdateByIndex(string indexName, IndexQuery queryToUpdate, ScriptedPatchRequest patch, bool allowStale)
+		{
+			return PerformBulkOperation(indexName, queryToUpdate, allowStale, (docId, tx) =>
+			{
+				var patchResult = database.Patches.ApplyPatch(docId, null, patch, tx);
+				return new { Document = docId, Result = patchResult.Item1, Debug = patchResult.Item2 };
 			});
 		}
 
@@ -52,13 +67,18 @@ namespace Raven.Database.Impl
 				Query = indexQuery.Query,
 				Start = indexQuery.Start,
 				Cutoff = indexQuery.Cutoff,
+                WaitForNonStaleResultsAsOfNow = indexQuery.WaitForNonStaleResultsAsOfNow,
 				PageSize = int.MaxValue,
 				FieldsToFetch = new[] { Constants.DocumentIdFieldName },
-				SortedFields = indexQuery.SortedFields
+				SortedFields = indexQuery.SortedFields,
+				HighlighterPreTags = indexQuery.HighlighterPreTags,
+				HighlighterPostTags = indexQuery.HighlighterPostTags,
+				HighlightedFields = indexQuery.HighlightedFields,
+				SortHints = indexQuery.SortHints
 			};
 
 			bool stale;
-			var queryResults = database.QueryDocumentIds(index, bulkIndexQuery, out stale);
+			var queryResults = database.Queries.QueryDocumentIds(index, bulkIndexQuery, token, out stale);
 
 			if (stale && allowStale == false)
 			{
@@ -71,6 +91,8 @@ namespace Raven.Database.Impl
 			{
 				while (true)
 				{
+					if (timeout != null)
+						timeout.Delay();
 					var batchCount = 0;
 					database.TransactionalStorage.Batch(actions =>
 					{
@@ -78,7 +100,7 @@ namespace Raven.Database.Impl
 						{
 							batchCount++;
 							var result = batchOperation(enumerator.Current, transactionInformation);
-							array.Add(RavenJObject.FromObject(result, JsonExtensions.CreateDefaultJsonSerializer()));
+							array.Add(RavenJObject.FromObject(result));
 						}
 					});
 					if (batchCount < batchSize) break;
@@ -86,7 +108,5 @@ namespace Raven.Database.Impl
 			}
 			return array;
 		}
-
-
 	}
 }

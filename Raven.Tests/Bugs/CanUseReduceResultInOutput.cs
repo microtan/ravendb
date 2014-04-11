@@ -1,13 +1,14 @@
 using System.Linq;
 using Raven.Abstractions.Indexing;
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
 	public class CanUseReduceResultInOutput : RavenTest
 	{
-
 		public class CalendarWeek
 		{
 			public Owner Owner { get; set; }
@@ -39,7 +40,7 @@ namespace Raven.Tests.Bugs
 
 			public MyIndex()
 			{
-				Map = calendwarWeeks => from calendarWeek in calendwarWeeks
+				Map = calendarWeeks => from calendarWeek in calendarWeeks
 										select new ReduceResult
 										{
 											OwnerId = calendarWeek.Owner.OwnerId,

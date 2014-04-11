@@ -1,33 +1,21 @@
 ﻿using System.Threading.Tasks;
-using Newtonsoft.Json;
+using Raven.Imports.Newtonsoft.Json;
 using Raven.Json.Linq;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Json
 {
-	public class CloningTests
+	public class CloningTests : NoDisposalNeeded
 	{
-
-
 		public class Blog
 		{
-			public string Title
-			{
-				get;
-				set;
-			}
+			public string Title { get; set; }
 
-			public string Category
-			{
-				get;
-				set;
-			}
+			public string Category { get; set; }
 
-			public BlogTag[] Tags
-			{
-				get;
-				set;
-			}
+			public BlogTag[] Tags { get; set; }
 		}
 
 		public class BlogTag
@@ -38,10 +26,10 @@ namespace Raven.Tests.Json
 		[Fact]
 		public void WhenCloningWillRetainAllValues()
 		{
-			var newBlog = new Blog()
+			var newBlog = new Blog
 			{
 				Tags = new[]{
-			          new BlogTag() { Name = "SuperCallaFragalisticExpealadocious" }
+			          new BlogTag { Name = "SuperCallaFragalisticExpealadocious" }
 			     }
 			};
 
@@ -102,6 +90,7 @@ namespace Raven.Tests.Json
 			Assert.Equal(3, obj3.Value<RavenJObject>("Me").Value<int>("ObjectID"));
 		}
 
+        [Fact]
 		public void ShouldNotFail()
 		{
 			var root = new RavenJObject();

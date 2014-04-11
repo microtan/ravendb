@@ -1,29 +1,20 @@
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class ResettingIndex : LocalClientTest
+	public class ResettingIndex : RavenTest
 	{
 		[Fact]
-		public void CanResetIndexInMuninStorage()
+		public void CanResetIndex()
 		{
-			using (var store = NewDocumentStore("munin", false))
+			using (var store = NewDocumentStore())
 			{
 				var ravenDocumentsByEntityName = new RavenDocumentsByEntityName();
 				ravenDocumentsByEntityName.Execute(store);
-				store.DocumentDatabase.ResetIndex(ravenDocumentsByEntityName.IndexName);
-			}
-		}
-
-		[Fact]
-		public void CanResetIndexInEsentStorage()
-		{
-			using (var store = NewDocumentStore("esent", false))
-			{
-				var ravenDocumentsByEntityName = new RavenDocumentsByEntityName();
-				ravenDocumentsByEntityName.Execute(store);
-				store.DocumentDatabase.ResetIndex(ravenDocumentsByEntityName.IndexName);
+				store.DocumentDatabase.Indexes.ResetIndex(ravenDocumentsByEntityName.IndexName);
 			}
 		}
 	}

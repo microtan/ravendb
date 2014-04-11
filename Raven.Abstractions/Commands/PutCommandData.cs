@@ -3,7 +3,6 @@
 //     Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 // </copyright>
 //-----------------------------------------------------------------------
-using System;
 using Raven.Abstractions.Data;
 using Raven.Json.Linq;
 
@@ -33,8 +32,8 @@ namespace Raven.Abstractions.Commands
 		/// Gets or sets the etag.
 		/// </summary>
 		/// <value>The etag.</value>
-		public virtual Guid? Etag { get; set; }
-		
+		public virtual Etag Etag { get; set; }
+
 		/// <summary>
 		/// Gets or sets the document.
 		/// </summary>
@@ -52,6 +51,7 @@ namespace Raven.Abstractions.Commands
 		/// </summary>
 		/// <value>The metadata.</value>
 		public virtual RavenJObject Metadata { get; set; }
+		public RavenJObject AdditionalData { get; set; }
 
 		/// <summary>
 		/// Translate this instance to a Json object.
@@ -59,12 +59,13 @@ namespace Raven.Abstractions.Commands
 		public RavenJObject ToJson()
 		{
 			var ret = new RavenJObject
-			          	{
-			          		{"Key", Key},
-							{"Method", Method},
-							{"Document", Document},
-							{"Metadata", Metadata}
-			          	};
+			{
+				{"Key", Key},
+				{"Method", Method},
+				{"Document", Document},
+				{"Metadata", Metadata},
+				{"AdditionalData", AdditionalData}
+			};
 			if (Etag != null)
 				ret.Add("Etag", Etag.ToString());
 			return ret;

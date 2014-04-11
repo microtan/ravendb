@@ -1,14 +1,15 @@
 ﻿using Raven.Client.Document;
+using Raven.Tests.Common;
 using Raven.Tests.Linq;
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.MultiGet
 {
-	public class MultiGetMultiGet : RemoteClientTest
+	public class MultiGetMultiGet : RavenTest
 	{
 		[Fact]
-		public void MulityGetShouldBehaveTheSameForLazyAndNotLazy()
+		public void MultiGetShouldBehaveTheSameForLazyAndNotLazy()
 		{
 			using (GetNewServer())
 			using (var store = new DocumentStore { Url = "http://localhost:8079" }.Initialize())
@@ -25,7 +26,7 @@ namespace Raven.Tests.MultiGet
 		}
 
 		[Fact]
-		public void UnlessAccessedLazyOpertionsAreNoOp()
+		public void UnlessAccessedLazyOperationsAreNoOp()
 		{
 			using(GetNewServer())
 			using(var store = new DocumentStore{Url = "http://localhost:8079"}.Initialize())
@@ -74,6 +75,7 @@ namespace Raven.Tests.MultiGet
 					session.Store(new User());
 					session.SaveChanges();
 				}
+
 				using (var session = store.OpenSession())
 				{
 					var result1 = session.Advanced.Lazily.Load<User>("users/1", "users/2");
@@ -88,7 +90,6 @@ namespace Raven.Tests.MultiGet
 						Assert.NotNull(session.Advanced.GetMetadataFor(user));
 					}
 				}
-
 			}
 		}
 

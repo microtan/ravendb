@@ -1,8 +1,14 @@
-﻿namespace Raven.Bundles.UniqueConstraints
+﻿using System.Collections.Generic;
+using System.Linq;
+using Raven.Imports.Newtonsoft.Json.Linq;
+
+namespace Raven.Bundles.UniqueConstraints
 {
 	using Abstractions.Data;
 	using Database.Plugins;
 	using Json.Linq;
+	using Raven.Database.Extensions;
+	using System;
 
 	public class UniqueConstraintsDeleteTrigger : AbstractDeleteTrigger
 	{
@@ -11,7 +17,7 @@
 			if (key.StartsWith("Raven"))
 				return;
 
-			var doc = Database.Get(key, transactionInformation);
+			var doc = Database.Documents.Get(key, transactionInformation);
 
 			if (doc == null)
 				return;
@@ -27,10 +33,66 @@
 
 			foreach (var property in uniqueConstraits)
 			{
-				var checkKey = "UniqueConstraints/" + entityName  + property + "/" + doc.DataAsJson.Value<string>(property.Value<string>());
+			    var constraint = Util.GetConstraint(property);
+                var prefix = "UniqueConstraints/" + entityName + constraint.PropName+ "/"; // UniqueConstraints/EntityNamePropertyName/
+                var prop = doc.DataAsJson[constraint.PropName];
 
-				Database.Delete(checkKey, null, transactionInformation);
+			    string[] uniqueValues;
+                if (!Util.TryGetUniqueValues(prop, out uniqueValues))
+                    continue;
+
+				foreach (var uniqueValue in uniqueValues)
+				{
+                    var escapedUniqueValue = Util.EscapeUniqueValue(uniqueValue, constraint.CaseInsensitive);
+                    var uniqueConstraintsDocumentKey = prefix + escapedUniqueValue;
+                    var uniqueConstraintsDocument = Database.Documents.Get(uniqueConstraintsDocumentKey, transactionInformation);
+
+                    if (uniqueConstraintsDocument == null)
+                        continue;
+
+				    var removed = RemoveConstraintFromUniqueConstraintDocument(uniqueConstraintsDocument, escapedUniqueValue);
+
+                    if (ShouldRemoveUniqueConstraintDocument(uniqueConstraintsDocument))
+                    {
+                        Database.Documents.Delete(uniqueConstraintsDocumentKey, null, transactionInformation);
+                    }
+                    else if (removed)
+                    {
+                        Database.Documents.Put(
+                            uniqueConstraintsDocumentKey,
+                            null,
+                            uniqueConstraintsDocument.DataAsJson,
+                            uniqueConstraintsDocument.Metadata,
+                            transactionInformation);
+                    }
+				}
 			}
 		}
+
+	    private static bool ShouldRemoveUniqueConstraintDocument(JsonDocument uniqueConstraintsDocument)
+	    {
+            if (!uniqueConstraintsDocument.DataAsJson.ContainsKey("Constraints"))
+                return true;
+
+            if (uniqueConstraintsDocument.DataAsJson.Keys.Count == 0)
+                return true;
+
+            var constraints = (RavenJObject)uniqueConstraintsDocument.DataAsJson["Constraints"];
+
+            if (constraints.Keys.Count == 0)
+                return true;
+
+	        return false;
+	    }
+
+	    private static bool RemoveConstraintFromUniqueConstraintDocument(JsonDocument uniqueConstraintsDocument, string escapedUniqueValue)
+        {
+            if (!uniqueConstraintsDocument.DataAsJson.ContainsKey("Constraints"))
+                return false;
+
+            var constraints = (RavenJObject)uniqueConstraintsDocument.DataAsJson["Constraints"];
+
+            return constraints.Remove(escapedUniqueValue);
+        }
 	}
 }

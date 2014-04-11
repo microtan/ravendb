@@ -1,12 +1,14 @@
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs.Vlko
 {
-	public class QueryWithMultipleWhere : LocalClientTest
+	public class QueryWithMultipleWhere : RavenTest
 	{
 		[Fact]
-		public void ShouldGenerateProperPrecedance()
+		public void ShouldGenerateProperPrecedence()
 		{
 			using(var store = NewDocumentStore())
 			{

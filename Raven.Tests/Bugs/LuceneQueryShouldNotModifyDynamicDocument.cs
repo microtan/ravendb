@@ -1,9 +1,12 @@
 using System.Linq;
+
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class LuceneQueryShouldNotModifyDynamicDocument : LocalClientTest
+	public class LuceneQueryShouldNotModifyDynamicDocument : RavenTest
 	{
 		[Fact]
 		public void CanCustomizeEntityName()
@@ -23,7 +26,7 @@ namespace Raven.Tests.Bugs
 
 				using (var session = store.OpenSession())
 				{
-					var doc = session.Advanced.LuceneQuery<dynamic>().WaitForNonStaleResults().First();
+                    var doc = session.Advanced.DocumentQuery<dynamic>().WaitForNonStaleResults().First();
 					Assert.Equal("Test", doc.Property);
 					session.SaveChanges();
 				}

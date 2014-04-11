@@ -1,16 +1,19 @@
 ﻿using System;
 using System.Collections.Specialized;
+using Raven.Json.Linq;
 
 namespace Raven.Client.Connection
 {
-	internal class CachedRequest
+	public class CachedRequest
 	{
-		public string Data;
+		public RavenJToken Data { get; set; }
 		public DateTimeOffset Time;
 		public NameValueCollection Headers;
+		public string Database;
+		public bool ForceServerCheck;
 	}
 
-	internal class CachedRequestOp
+	public class CachedRequestOp
 	{
 		public CachedRequest CachedRequest;
 		public bool SkipServerCheck;

@@ -6,7 +6,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Newtonsoft.Json;
+using Raven.Abstractions.Data;
+using Raven.Imports.Newtonsoft.Json;
 
 namespace Raven.Abstractions.Indexing
 {
@@ -16,15 +17,44 @@ namespace Raven.Abstractions.Indexing
 	public class IndexDefinition
 	{
 		/// <summary>
-		/// Get or set the name of the index
+		/// Initializes a new instance of the <see cref="IndexDefinition"/> class.
+		/// </summary>
+		public IndexDefinition()
+		{
+			Maps = new HashSet<string>();
+           
+			Indexes = new Dictionary<string, FieldIndexing>();
+			Stores = new Dictionary<string, FieldStorage>();
+			Analyzers = new Dictionary<string, string>();
+			SortOptions = new Dictionary<string, SortOptions>();
+			Suggestions = new Dictionary<string, SuggestionOptions>();
+			TermVectors = new Dictionary<string, FieldTermVector>();
+			SpatialIndexes = new Dictionary<string, SpatialOptions>();
+
+
+            Fields = new List<string>();
+        }
+
+		/// <summary>
+		/// Get or set the id of this index
+		/// </summary>
+		public int IndexId { get; set; }
+
+        /// <summary>
+        /// This is the means by which the outside world refers to this index defiintion
 		/// </summary>
 		public string Name { get; set; }
+
+		/// <summary>
+		/// Get or set the index lock mode
+		/// </summary>
+		public IndexLockMode LockMode { get; set; }
 
 		/// <summary>
 		/// Gets or sets the map function, if there is only one
 		/// </summary>
 		/// <remarks>
-		/// This property only exists for backward compatability purposes
+		/// This property only exists for backward compatibility purposes
 		/// </remarks>
 		public string Map
 		{
@@ -53,6 +83,7 @@ namespace Raven.Abstractions.Indexing
 		/// <summary>
 		/// Gets or sets the translator function
 		/// </summary>
+		[Obsolete("Use Result Transformers instead.")]
 		public string TransformResults { get; set; }
 
 		/// <summary>
@@ -67,11 +98,6 @@ namespace Raven.Abstractions.Indexing
 		}
 
 		public bool IsCompiled { get; set; }
-
-		/// <summary>
-		/// Returns a boolean value indicating whether this IndexDefinition is of a temporary index
-		/// </summary>
-		public bool IsTemp { get { return !string.IsNullOrEmpty(Name) && Name.StartsWith("Temp/", StringComparison.InvariantCultureIgnoreCase); } }
 
 		/// <summary>
 		/// Gets or sets the stores options
@@ -103,17 +129,35 @@ namespace Raven.Abstractions.Indexing
 		public IList<string> Fields { get; set; }
 
 		/// <summary>
-		/// Initializes a new instance of the <see cref="IndexDefinition"/> class.
+		/// Gets or sets the suggest options
 		/// </summary>
-		public IndexDefinition()
-		{
-			Maps = new HashSet<string>();
-			Indexes = new Dictionary<string, FieldIndexing>();
-			Stores = new Dictionary<string, FieldStorage>();
-			Analyzers = new Dictionary<string, string>();
-			SortOptions = new Dictionary<string, SortOptions>();
-			Fields = new List<string>();
-		}
+		/// <value>The suggest options.</value>
+		public IDictionary<string, SuggestionOptions> Suggestions { get; set; }
+
+		/// <summary>
+		/// Gets or sets the term vectors options
+		/// </summary>
+		/// <value>The term vectors.</value>
+		public IDictionary<string, FieldTermVector> TermVectors { get; set; }
+
+		/// <summary>
+		/// Gets or sets the spatial options
+		/// </summary>
+		/// <value>The spatial options.</value>
+		public IDictionary<string, SpatialOptions> SpatialIndexes { get; set; }
+
+		/// <summary>
+        /// Internal map of field names to expressions generating them
+        /// Only relevant for auto indexes and only used internally
+        /// </summary>
+        public IDictionary<string, string> InternalFieldsMapping { get; set; }
+
+		/// <summary>
+		/// Index specific setting that limits the number of map outputs that an index is allowed to create for a one source document. If a map operation applied to
+		/// the one document produces more outputs than this number then an index definition will be considered as a suspicious and the index will be marked as errored.
+		/// Default value: null means that the global value from Raven configuration will be taken to detect if number of outputs was exceeded.
+		/// </summary>
+		public int? MaxIndexOutputsPerDocument { get; set; }
 
 		/// <summary>
 		/// Equals the specified other.
@@ -122,16 +166,21 @@ namespace Raven.Abstractions.Indexing
 		/// <returns></returns>
 		public bool Equals(IndexDefinition other)
 		{
-			if (ReferenceEquals(null, other)) return false;
-			if (ReferenceEquals(this, other)) return true;
+			if (ReferenceEquals(null, other))
+				return false;
+			if (ReferenceEquals(this, other))
+				return true;
 			return Maps.SequenceEqual(other.Maps) &&
-				Equals(other.Name, Name) &&
-				Equals(other.Reduce, Reduce) &&
-				Equals(other.TransformResults, TransformResults) &&
-				DictionaryEquals(other.Stores, Stores) &&
-				DictionaryEquals(other.Indexes, Indexes) &&
-				DictionaryEquals(other.Analyzers, Analyzers) &&
-				DictionaryEquals(other.SortOptions, SortOptions);
+					Equals(other.IndexId, IndexId) &&
+					Equals(other.Reduce, Reduce) &&
+					Equals(other.TransformResults, TransformResults) &&
+					DictionaryEquals(other.Stores, Stores) &&
+					DictionaryEquals(other.Indexes, Indexes) &&
+					DictionaryEquals(other.Analyzers, Analyzers) &&
+					DictionaryEquals(other.SortOptions, SortOptions) &&
+					DictionaryEquals(other.Suggestions, Suggestions) &&
+					DictionaryEquals(other.TermVectors, TermVectors) &&
+					DictionaryEquals(other.SpatialIndexes, SpatialIndexes);
 		}
 
 		private static bool DictionaryEquals<TKey, TValue>(IDictionary<TKey, TValue> x, IDictionary<TKey, TValue> y)
@@ -169,8 +218,10 @@ namespace Raven.Abstractions.Indexing
 		/// </returns>
 		public override bool Equals(object obj)
 		{
-			if (ReferenceEquals(null, obj)) return false;
-			if (ReferenceEquals(this, obj)) return true;
+			if (ReferenceEquals(null, obj))
+				return false;
+			if (ReferenceEquals(this, obj))
+				return true;
 			return Equals(obj as IndexDefinition);
 		}
 
@@ -210,6 +261,9 @@ namespace Raven.Abstractions.Indexing
 				result = (result * 397) ^ DictionaryHashCode(Indexes);
 				result = (result * 397) ^ DictionaryHashCode(Analyzers);
 				result = (result * 397) ^ DictionaryHashCode(SortOptions);
+				result = (result * 397) ^ DictionaryHashCode(Suggestions);
+				result = (result * 397) ^ DictionaryHashCode(TermVectors);
+				result = (result * 397) ^ DictionaryHashCode(SpatialIndexes);
 				return result;
 			}
 		}
@@ -219,20 +273,27 @@ namespace Raven.Abstractions.Indexing
 			get
 			{
 				var name = Name ?? string.Empty;
-				if (name.StartsWith("Temp")) return "Temp";
-				if (name.StartsWith("Auto")) return "Auto";
-				if (IsCompiled) return "Compiled";
-				if (IsMapReduce) return "MapReduce";
+				if (name.StartsWith("Auto/", StringComparison.OrdinalIgnoreCase))
+					return "Auto";
+				if (IsCompiled)
+					return "Compiled";
+				if (IsMapReduce)
+					return "MapReduce";
 				return "Map";
 			}
 		}
+
+		/// <summary>
+		/// Prevent index from being kept in memory. Default: false
+		/// </summary>
+		public bool DisableInMemoryIndexing { get; set; }
 
 		/// <summary>
 		/// Remove the default values that we don't actually need
 		/// </summary>
 		public void RemoveDefaultValues()
 		{
-			var defaultStorage = IsMapReduce ? FieldStorage.Yes : FieldStorage.No;
+			const FieldStorage defaultStorage = FieldStorage.No;
 			foreach (var toRemove in Stores.Where(x => x.Value == defaultStorage).ToArray())
 			{
 				Stores.Remove(toRemove);
@@ -249,6 +310,52 @@ namespace Raven.Abstractions.Indexing
 			{
 				Analyzers.Remove(toRemove);
 			}
+			foreach (var toRemove in Suggestions.Where(x => x.Value.Distance == StringDistanceTypes.None).ToArray())
+			{
+				Suggestions.Remove(toRemove);
+			}
+			foreach (var toRemove in TermVectors.Where(x => x.Value == FieldTermVector.No).ToArray())
+			{
+				TermVectors.Remove(toRemove);
+			}
+		}
+
+		public override string ToString()
+		{
+			return Name ?? Map;
+		}
+
+		public IndexDefinition Clone()
+		{
+			var indexDefinition = new IndexDefinition
+			{
+				IndexId = IndexId,
+				Name = Name,
+				Reduce = Reduce,
+				TransformResults = TransformResults,
+                MaxIndexOutputsPerDocument = MaxIndexOutputsPerDocument,
+				cachedHashCodeAsBytes = cachedHashCodeAsBytes
+			};
+
+			if (Maps != null)
+				indexDefinition.Maps = new HashSet<string>(Maps);
+			if (Analyzers != null)
+				indexDefinition.Analyzers = new Dictionary<string, string>(Analyzers);
+			if (Fields != null)
+				indexDefinition.Fields = new List<string>(Fields);
+			if (Indexes != null)
+				indexDefinition.Indexes = new Dictionary<string, FieldIndexing>(Indexes);
+			if (SortOptions != null)
+				indexDefinition.SortOptions = new Dictionary<string, SortOptions>(SortOptions);
+			if (Stores != null)
+				indexDefinition.Stores = new Dictionary<string, FieldStorage>(Stores);
+			if (Suggestions != null)
+				indexDefinition.Suggestions = new Dictionary<string, SuggestionOptions>(Suggestions);
+			if (TermVectors != null)
+				indexDefinition.TermVectors = new Dictionary<string, FieldTermVector>(TermVectors);
+			if (SpatialIndexes != null)
+				indexDefinition.SpatialIndexes = new Dictionary<string, SpatialOptions>(SpatialIndexes);
+			return indexDefinition;
 		}
 	}
 }

@@ -1,9 +1,8 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using Raven.Abstractions.Extensions;
+using Raven.Client;
 using Xunit;
-using Raven.Client.Linq;
 
 namespace Raven.Tests.Shard.BlogModel
 {
@@ -33,7 +32,7 @@ namespace Raven.Tests.Shard.BlogModel
 				.ForEach(server =>
 				         	{
 				         		AssertNumberOfRequests(server.Value, 1);
-				         		Assert.Equal(2, server.Value.Database.Statistics.CountOfDocuments);
+				         		Assert.Equal(2, server.Value.SystemDatabase.Statistics.CountOfDocuments);
 				         	});
 			Servers.Where(server => server.Key != "Users")
 				.ForEach(server => AssertNumberOfRequests(server.Value, 0));
@@ -54,7 +53,7 @@ namespace Raven.Tests.Shard.BlogModel
 		}
 
 		[Fact]
-		public void UnlessAccessedLazyOpertionsAreNoOp()
+		public void UnlessAccessedLazyOperationsAreNoOp()
 		{
 			using (var session = ShardedDocumentStore.OpenSession())
 			{

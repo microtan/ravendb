@@ -4,21 +4,26 @@
 // </copyright>
 //-----------------------------------------------------------------------
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Bson;
-using Newtonsoft.Json.Linq;
+using System.Web;
+using Raven.Abstractions.Json;
+using Raven.Abstractions.Util;
+using Raven.Imports.Newtonsoft.Json;
+using Raven.Imports.Newtonsoft.Json.Bson;
+using Raven.Imports.Newtonsoft.Json.Linq;
 using Raven.Abstractions;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Extensions;
-using Raven.Database.Exceptions;
+using Raven.Abstractions.Exceptions;
 using Raven.Database.Server.Abstractions;
 using Raven.Json.Linq;
+using System.Linq;
 
 namespace Raven.Database.Extensions
 {
@@ -27,7 +32,7 @@ namespace Raven.Database.Extensions
 		static readonly Regex findCharset = new Regex(@"charset=([\w-]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
 		private static readonly string EmbeddedLastChangedDate =
-			File.GetLastWriteTime(typeof(HttpExtensions).Assembly.Location).Ticks.ToString("G");
+			File.GetLastWriteTime(AssemblyHelper.GetAssemblyLocationFor(typeof(HttpExtensions))).Ticks.ToString("G");
 
 		private static readonly Encoding defaultEncoding = new UTF8Encoding(false);
 
@@ -46,7 +51,7 @@ namespace Raven.Database.Extensions
 		public static RavenJObject ReadJson(this IHttpContext context)
 		{
 			using (var streamReader = new StreamReader(context.Request.InputStream, GetRequestEncoding(context)))
-			using (var jsonReader = new JsonTextReader(streamReader))
+			using (var jsonReader = new RavenJsonTextReader(streamReader))
 				return RavenJObject.Load(jsonReader);
 		}
 
@@ -55,7 +60,7 @@ namespace Raven.Database.Extensions
 			using (var streamReader = new StreamReader(context.Request.InputStream, GetRequestEncoding(context)))
 			{
 				var readToEnd = streamReader.ReadToEnd();
-				using (var jsonReader = new JsonTextReader(new StringReader(readToEnd)))
+				using (var jsonReader = new RavenJsonTextReader(new StringReader(readToEnd)))
 				{
 					var result = JsonExtensions.CreateDefaultJsonSerializer();
 
@@ -67,7 +72,7 @@ namespace Raven.Database.Extensions
 		public static RavenJArray ReadJsonArray(this IHttpContext context)
 		{
 			using (var streamReader = new StreamReader(context.Request.InputStream, GetRequestEncoding(context)))
-			using (var jsonReader = new JsonTextReader(streamReader))
+			using (var jsonReader = new RavenJsonTextReader(streamReader))
 				return RavenJArray.Load(jsonReader);
 		}
 
@@ -88,11 +93,17 @@ namespace Raven.Database.Extensions
 
 		public static void WriteJson(this IHttpContext context, object obj)
 		{
-			WriteJson(context, RavenJToken.FromObject(obj, JsonExtensions.CreateDefaultJsonSerializer()));
+			WriteJson(context, RavenJToken.FromObject(obj));
 		}
 
 		public static void WriteJson(this IHttpContext context, RavenJToken obj)
 		{
+			if (context.Request.HttpMethod == "HEAD")
+				return;
+
+			bool minimal;
+			bool.TryParse(context.Request.QueryString["metadata-only"], out minimal);
+
 			var streamWriter = new StreamWriter(context.Response.OutputStream, defaultEncoding);
 			var jsonp = context.Request.QueryString["jsonp"];
 			if (string.IsNullOrEmpty(jsonp) == false)
@@ -104,7 +115,11 @@ namespace Raven.Database.Extensions
 			else
 			{
 				context.Response.AddHeader("Content-Type", "application/json; charset=utf-8");
+			}
 
+			if (minimal)
+			{
+				obj = MinimizeToken(obj);
 			}
 
 			var jsonTextWriter = new JsonTextWriter(streamWriter)
@@ -117,11 +132,48 @@ namespace Raven.Database.Extensions
 			{
 				streamWriter.Write(");");
 			}
-
 			streamWriter.Flush();
 		}
 
-		public static void WriteData(this IHttpContext context, RavenJObject data, RavenJObject headers, Guid etag)
+		public static RavenJToken MinimizeToken(RavenJToken obj, int depth = 0)
+		{
+			switch (obj.Type)
+			{
+				case JTokenType.Array:
+					var array = new RavenJArray();
+					foreach (var item in ((RavenJArray)obj))
+					{
+						array.Add(MinimizeToken(item, depth + 1));
+					}
+					return array;
+				case JTokenType.Object:
+					var ravenJObject = ((RavenJObject)obj);
+					if (ravenJObject.ContainsKey(Constants.Metadata) == false)
+					{
+						// this might be a wrapper object, let check for first level arrays
+						if (depth == 0)
+						{
+							var newRootObj = new RavenJObject();
+
+							foreach (var prop in ravenJObject)
+							{
+								newRootObj[prop.Key] = prop.Value.Type == JTokenType.Array ?
+									MinimizeToken(prop.Value, depth + 1) :
+									prop.Value;
+							}
+							return newRootObj;
+						}
+						return obj;
+					}
+					var newObj = new RavenJObject();
+					newObj[Constants.Metadata] = ravenJObject[Constants.Metadata];
+					return newObj;
+				default:
+					return obj;
+			}
+		}
+
+		public static void WriteData(this IHttpContext context, RavenJObject data, RavenJObject headers, Etag etag)
 		{
 			var str = data.ToString(Formatting.None);
 			var jsonp = context.Request.QueryString["jsonp"];
@@ -137,27 +189,40 @@ namespace Raven.Database.Extensions
 			WriteData(context, defaultEncoding.GetBytes(str), headers, etag);
 		}
 
-		public static void WriteData(this IHttpContext context, byte[] data, RavenJObject headers, Guid etag)
+		public static void WriteData(this IHttpContext context, byte[] data, RavenJObject headers, Etag etag)
 		{
 			context.WriteHeaders(headers, etag);
 			context.Response.OutputStream.Write(data, 0, data.Length);
 		}
 
-		public static void WriteHeaders(this IHttpContext context, RavenJObject headers, Guid etag)
+		public static void WriteHeaders(this IHttpContext context, RavenJObject headers, Etag etag = null)
 		{
 			foreach (var header in headers)
 			{
 				if (header.Key.StartsWith("@"))
 					continue;
 
-				var value = GetHeaderValue(header.Value);
 				switch (header.Key)
 				{
 					case "Content-Type":
-						context.Response.ContentType = value;
+						context.Response.ContentType = header.Value.Value<string>();
 						break;
 					default:
-						context.Response.AddHeader(header.Key, value);
+						if (header.Value.Type == JTokenType.Date)
+						{
+							var rfc1123 = GetDateString(header.Value, "r");
+							var iso8601 = GetDateString(header.Value, "o");
+							context.Response.AddHeader(header.Key, rfc1123);
+							if (header.Key.StartsWith("Raven-") == false)
+							{
+								context.Response.AddHeader("Raven-" + header.Key, iso8601);
+							}
+						}
+						else
+						{
+							var value = UnescapeStringIfNeeded(header.Value.ToString(Formatting.None));
+							context.Response.AddHeader(header.Key, value);
+						}
 						break;
 				}
 			}
@@ -166,23 +231,37 @@ namespace Raven.Database.Extensions
 				context.Response.StatusCode = headers.Value<int>("@Http-Status-Code");
 				context.Response.StatusDescription = headers.Value<string>("@Http-Status-Description");
 			}
-			context.Response.AddHeader("ETag", etag.ToString());
+
+			if (etag != null)
+				context.WriteETag(etag);
 		}
 
-		private static string GetHeaderValue(RavenJToken header)
+		private static string GetDateString(RavenJToken token, string format)
 		{
-			if (header.Type == JTokenType.Date)
-			{
-				return header.Value<DateTime>().ToString("r");
-			}
+			var value = token as RavenJValue;
+			if (value == null)
+				return token.ToString();
 
-			return StripQuotesIfNeeded(header.ToString(Formatting.None));
+			var obj = value.Value;
+
+			if (obj is DateTime)
+				return ((DateTime)obj).ToString(format, CultureInfo.InvariantCulture);
+
+			if (obj is DateTimeOffset)
+				return ((DateTimeOffset)obj).ToString(format, CultureInfo.InvariantCulture);
+
+			return obj.ToString();
 		}
 
-		private static string StripQuotesIfNeeded(string str)
+		private static string UnescapeStringIfNeeded(string str)
 		{
 			if (str.StartsWith("\"") && str.EndsWith("\""))
-				return str.Substring(1, str.Length - 2);
+				str =  Regex.Unescape(str.Substring(1, str.Length - 2));
+			if (str.Any(ch => ch > 127))
+			{
+				// contains non ASCII chars, needs encoding
+				return Uri.EscapeDataString(str);
+			}
 			return str;
 		}
 
@@ -191,14 +270,6 @@ namespace Raven.Database.Extensions
 			context.Response.StatusCode = 204;
 			context.Response.StatusDescription = "No Content";
 		}
-
-		public static void SetStatusToCreated(this IHttpContext context, string location)
-		{
-			context.Response.StatusCode = 201;
-			context.Response.StatusDescription = "Created";
-			context.Response.AddHeader("Location", context.Configuration.GetFullUrl(location));
-		}
-
 
 		public static void SetStatusToWriteConflict(this IHttpContext context)
 		{
@@ -230,10 +301,22 @@ namespace Raven.Database.Extensions
 			context.Response.StatusDescription = "Bad Request";
 		}
 
+		public static void SetStatusToPreconditionFailed(this IHttpContext context)
+		{
+			context.Response.StatusCode = 412;
+			context.Response.StatusDescription = "Precondition Failed";
+		}
+
 		public static void SetStatusToUnauthorized(this IHttpContext context)
 		{
 			context.Response.StatusCode = 401;
 			context.Response.StatusDescription = "Unauthorized";
+		}
+
+		public static void SetStatusToNotAvailable(this IHttpContext context)
+		{
+			context.Response.StatusCode = 503;
+			context.Response.StatusDescription = "Service Unavailable";
 		}
 
 		public static void SetStatusToForbidden(this IHttpContext context)
@@ -256,6 +339,15 @@ namespace Raven.Database.Extensions
 			return Math.Max(0, start);
 		}
 
+        public static int GetNextPageStart(this IHttpContext context)
+        {
+            bool isNextPage;
+            if (bool.TryParse(context.Request.QueryString["next-page"], out isNextPage) && isNextPage)
+                return GetStart(context);
+
+            return 0;
+        }
+
 		public static bool GetAllowStale(this IHttpContext context)
 		{
 			bool stale;
@@ -272,27 +364,48 @@ namespace Raven.Database.Extensions
 
 		public static void RemoveFromRequestUrl(this IHttpRequest self, string token)
 		{
-			if (self.Url.LocalPath.StartsWith(token, StringComparison.InvariantCultureIgnoreCase))
+			if (self.Url.LocalPath.StartsWith(token, StringComparison.OrdinalIgnoreCase))
 			{
 				self.Url = new UriBuilder(self.Url)
 				{
 					Path = self.Url.LocalPath.Substring(token.Length)
 				}.Uri;
 			}
-			if (self.RawUrl.StartsWith(token, StringComparison.InvariantCultureIgnoreCase))
+			if (self.RawUrl.StartsWith(token, StringComparison.OrdinalIgnoreCase))
 			{
 				self.RawUrl = self.RawUrl.Substring(token.Length);
-				if(string.IsNullOrEmpty(self.RawUrl))
+				if (string.IsNullOrEmpty(self.RawUrl))
 				{
 					self.RawUrl = "/";
 				}
 			}
 		}
 
+        public static bool GetWaitForNonStaleResultsAsOfNow(this IHttpContext context)
+        {
+            bool result;
+            bool.TryParse(context.Request.QueryString["waitForNonStaleResultsAsOfNow"], out result);
+            return result;
+        }
+
 		public static bool GetSkipTransformResults(this IHttpContext context)
 		{
 			bool result;
 			bool.TryParse(context.Request.QueryString["skipTransformResults"], out result);
+			return result;
+		}
+
+		public static bool GetOverwriteExisting(this IHttpContext context)
+		{
+			bool result;
+			bool.TryParse(context.Request.QueryString["overwriteExisting"], out result);
+			return result;
+		}
+
+		public static bool GetCheckReferencesInIndexes(this IHttpContext context)
+		{
+			bool result;
+			bool.TryParse(context.Request.QueryString["checkReferencesInIndexes"], out result);
 			return result;
 		}
 
@@ -306,15 +419,22 @@ namespace Raven.Database.Extensions
 			return pageSize;
 		}
 
-		public static AggregationOperation GetAggregationOperation(this IHttpContext context)
+		public static bool IsDistinct(this IHttpContext context)
 		{
-			var aggAsString = context.Request.QueryString["aggregation"];
+			var distinct = context.Request.QueryString["distinct"];
+			if (string.Equals("true", distinct, StringComparison.OrdinalIgnoreCase))
+				return true;
+			var aggAsString = context.Request.QueryString["aggregation"]; // 2.x legacy support
 			if (aggAsString == null)
-			{
-				return AggregationOperation.None;
-			}
+				return false;
 
-			return (AggregationOperation)Enum.Parse(typeof(AggregationOperation), aggAsString, true);
+			if (string.Equals("Distinct", aggAsString, StringComparison.OrdinalIgnoreCase))
+				return true;
+
+			if (string.Equals("None", aggAsString, StringComparison.OrdinalIgnoreCase))
+				return false;
+
+			throw new NotSupportedException("AggregationOperation (except Distinct) is no longer supported");
 		}
 
 		public static DateTime? GetCutOff(this IHttpContext context)
@@ -332,29 +452,30 @@ namespace Raven.Database.Extensions
 			return null;
 		}
 
-		public static Guid? GetCutOffEtag(this IHttpContext context)
+		public static Etag GetCutOffEtag(this IHttpContext context)
 		{
 			var etagAsString = context.Request.QueryString["cutOffEtag"];
 			if (etagAsString != null)
 			{
 				etagAsString = Uri.UnescapeDataString(etagAsString);
 
-				Guid result;
-				if (Guid.TryParse(etagAsString, out result))
-					return result;
-				throw new BadRequestException("Could not parse cut off etag query parameter as guid");
+				return Etag.Parse(etagAsString);
 			}
 			return null;
 		}
 
 
-		public static Guid? GetEtag(this IHttpContext context)
+		public static Etag GetEtag(this IHttpContext context)
 		{
 			var etagAsString = context.Request.Headers["If-None-Match"] ?? context.Request.Headers["If-Match"];
 			if (etagAsString != null)
 			{
-				Guid result;
-				if (Guid.TryParse(etagAsString, out result))
+				// etags are usually quoted
+				if (etagAsString.StartsWith("\"") && etagAsString.EndsWith("\""))
+					etagAsString = etagAsString.Substring(1, etagAsString.Length - 2);
+
+				Etag result;
+				if (Etag.TryParse(etagAsString, out result))
 					return result;
 				throw new BadRequestException("Could not parse If-None-Match or If-Match header as Guid");
 			}
@@ -382,22 +503,58 @@ namespace Raven.Database.Extensions
 			return radius;
 		}
 
-		public static Guid? GetEtagFromQueryString(this IHttpContext context)
+		public static IEnumerable<HighlightedField> GetHighlightedFields(this IHttpContext context)
+		{
+			var highlightedFieldStrings = context.Request.QueryString.GetValues("highlight").EmptyIfNull();
+			var fields = new HashSet<string>();
+
+			foreach (var highlightedFieldString in highlightedFieldStrings)
+			{
+				HighlightedField highlightedField;
+				if (HighlightedField.TryParse(highlightedFieldString, out highlightedField))
+				{
+					if (!fields.Add(highlightedField.Field))
+						throw new BadRequestException("Duplicate highlighted field has found: " + highlightedField.Field);
+
+					yield return highlightedField;
+				} else
+					throw new BadRequestException(
+						"Could not parse hightlight query parameter as field highlight options");
+			}
+		}
+
+		public static bool GetExplainScores(this IHttpContext context)
+		{
+			bool result;
+			bool.TryParse(context.Request.QueryString["explainScores"], out result);
+			return result;
+		}
+
+		public static Etag GetEtagFromQueryString(this IHttpContext context)
 		{
 			var etagAsString = context.Request.QueryString["etag"];
 			if (etagAsString != null)
 			{
-				Guid result;
-				if (Guid.TryParse(etagAsString, out result))
-					return result;
-				throw new BadRequestException("Could not parse etag query parameter as Guid");
+				return Etag.Parse(etagAsString);
 			}
 			return null;
 		}
 
-		public static bool MatchEtag(this IHttpContext context, Guid etag)
+		public static bool MatchEtag(this IHttpContext context, Etag etag)
 		{
-			return context.Request.Headers["If-None-Match"] == etag.ToString();
+			return EtagHeaderToEtag(context) == etag;
+		}
+
+		internal static Etag EtagHeaderToEtag(IHttpContext context)
+		{
+			var responseHeader = context.Request.Headers["If-None-Match"];
+			if (string.IsNullOrEmpty(responseHeader))
+				return Etag.InvalidEtag;
+
+			if (responseHeader[0] == '\"')
+				return Etag.Parse(responseHeader.Substring(1, responseHeader.Length - 2));
+
+			return Etag.Parse(responseHeader);
 		}
 
 		public static void WriteEmbeddedFile(this IHttpContext context, string ravenPath, string docPath)
@@ -431,45 +588,38 @@ namespace Raven.Database.Extensions
 				}
 				bytes = resource.ReadData();
 			}
-			context.Response.AddHeader("ETag", currentFileEtag);
+			context.WriteETag(currentFileEtag);
 			context.Response.OutputStream.Write(bytes, 0, bytes.Length);
 		}
 
 		public static void WriteFile(this IHttpContext context, string filePath)
 		{
 			var etagValue = context.Request.Headers["If-None-Match"] ?? context.Request.Headers["If-None-Match"];
-			var fileEtag = File.GetLastWriteTimeUtc(filePath).ToString("G");
+			var fileEtag = File.GetLastWriteTimeUtc(filePath).ToString("G", CultureInfo.InvariantCulture);
 			if (etagValue == fileEtag)
 			{
 				context.SetStatusToNotModified();
 				return;
 			}
-			context.Response.AddHeader("ETag", fileEtag);
+			context.WriteETag(fileEtag);
 			context.Response.WriteFile(filePath);
 		}
 
-		public static bool IsAdministrator(this IPrincipal principal)
+
+		public static void WriteETag(this IHttpContext context, Etag etag)
 		{
-			if (principal == null)
-				return false;
-
-			var windowsPrincipal = principal as WindowsPrincipal;
-			if (windowsPrincipal != null)
+			context.WriteETag(etag.ToString());
+		}
+		public static void WriteETag(this IHttpContext context, string etag)
+		{
+			var clientVersion = context.Request.Headers[Constants.RavenClientVersion];
+			if (string.IsNullOrEmpty(clientVersion))
 			{
-				if (windowsPrincipal.IsInRole(WindowsBuiltInRole.Administrator))
-					return true;
-
-				var applicationIdentity = WindowsIdentity.GetCurrent();
-
-				if (applicationIdentity != null)
-				{
-					// if the auth user and the app are the same, consider him an admin
-					if (applicationIdentity.User == ((WindowsIdentity) windowsPrincipal.Identity).User)
-						return true;
-				}
+				context.Response.AddHeader("ETag", etag);
+				return;
 			}
 
-			return principal.IsInRole("Administrators");
+			context.Response.AddHeader("ETag", "\"" + etag + "\"");
 		}
 
 		private static string GetContentType(string docPath)

@@ -6,11 +6,13 @@
 using Raven.Abstractions.Data;
 using Raven.Json.Linq;
 using Raven.Database.Data;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class OrderOfInsertionDoesNotAffectQuerying : LocalClientTest
+	public class OrderOfInsertionDoesNotAffectQuerying : RavenTest
 	{
 		[Fact]
 		public void Works()

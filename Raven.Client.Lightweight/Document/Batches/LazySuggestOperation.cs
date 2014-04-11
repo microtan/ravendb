@@ -1,18 +1,13 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Security.Policy;
 using Raven.Abstractions.Data;
-using Raven.Abstractions.Extensions;
 using Raven.Client.Connection;
 using Raven.Client.Shard;
 using Raven.Json.Linq;
 
 namespace Raven.Client.Document.Batches
 {
-#if !NET_3_5
-
 	public class LazySuggestOperation : ILazyOperation
 	{
 		private readonly string index;
@@ -24,31 +19,39 @@ namespace Raven.Client.Document.Batches
 			this.suggestionQuery = suggestionQuery;
 		}
 
-		public GetRequest CraeteRequest()
+		public GetRequest CreateRequest()
 		{
+			var query = string.Format(
+				"term={0}&field={1}&max={2}",
+				suggestionQuery.Term,
+				suggestionQuery.Field,
+				suggestionQuery.MaxSuggestions);
+
+			if (suggestionQuery.Accuracy.HasValue)
+				query += "&accuracy=" + suggestionQuery.Accuracy.Value.ToString(CultureInfo.InvariantCulture);
+
+			if (suggestionQuery.Distance.HasValue)
+				query += "&distance=" + suggestionQuery.Distance;
+
 			return new GetRequest
 			{
 				Url = "/suggest/" + index,
-				Query = string.Format("term={0}&field={1}&max={2}&distance={3}&accuracy={4}",
-									  suggestionQuery.Term,
-									  suggestionQuery.Field,
-									  suggestionQuery.MaxSuggestions,
-									  suggestionQuery.Distance,
-									  suggestionQuery.Accuracy.ToString(CultureInfo.InvariantCulture))
+				Query = query
 			};
 		}
 
 		public object Result { get; private set; }
+		public QueryResult QueryResult { get; set; }
 		public bool RequiresRetry { get; private set; }
 		public void HandleResponse(GetResponse response)
 		{
-			if (response.Status != 200)
+			if (response.Status != 200 && response.Status != 304)
 			{
 				throw new InvalidOperationException("Got an unexpected response code for the request: " + response.Status + "\r\n" +
 													response.Result);
 			}
 
-			var result = RavenJObject.Parse(response.Result);
+			var result = (RavenJObject)response.Result;
 			Result = new SuggestionQueryResult
 			{
 				Suggestions = ((RavenJArray)result["Suggestions"]).Select(x => x.Value<string>()).ToArray(),
@@ -59,17 +62,18 @@ namespace Raven.Client.Document.Batches
 		{
 			var result = new SuggestionQueryResult
 			{
-				Suggestions = responses
-					.Select(item => RavenJObject.Parse(item.Result))
-					.SelectMany(data => ((RavenJArray) data["Suggestions"]).Select(x => x.Value<string>()))
-					.Distinct()
-					.ToArray()
+				Suggestions = (from item in responses
+							   let data = (RavenJObject)item.Result
+							   from suggestion in (RavenJArray)data["Suggestions"]
+							   select suggestion.Value<string>())
+							  .Distinct()
+							  .ToArray()
 			};
 
 			Result = result;
 		}
 
-		public IDisposable EnterContext()
+        public IDisposable EnterContext()
 		{
 			return null;
 		}
@@ -84,5 +88,4 @@ namespace Raven.Client.Document.Batches
 			Result = result;
 		}
 	}
-#endif
 }

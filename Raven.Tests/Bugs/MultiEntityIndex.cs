@@ -5,13 +5,14 @@
 //-----------------------------------------------------------------------
 using Raven.Abstractions.Indexing;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
 using Raven.Tests.Document;
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs
 {
-	public class MultiEntityIndex : LocalClientTest
+	public class MultiEntityIndex : RavenTest
 	{
 		[Fact]
 		public void CanCreateIndexOnMultipleEntities()

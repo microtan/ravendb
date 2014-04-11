@@ -1,11 +1,13 @@
 using Raven.Abstractions.Indexing;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs.Indexing
 {
-	public class FilterOnMissingProperty : LocalClientTest
+	public class FilterOnMissingProperty : RavenTest
 	{
 		[Fact]
 		public void CanFilter()
@@ -18,18 +20,18 @@ namespace Raven.Tests.Bugs.Indexing
 				                                		Map = "from doc in docs where doc.Valid select new { doc.Name }"
 				                                	});
 
-				using(var sesion = store.OpenSession())
+				using(var session = store.OpenSession())
 				{
-					sesion.Store(new { Valid = true, Name = "Oren"});
+					session.Store(new { Valid = true, Name = "Oren"});
 
-					sesion.Store(new { Name = "Ayende "});
+					session.Store(new { Name = "Ayende "});
 
-					sesion.SaveChanges();
+					session.SaveChanges();
 				}
 
-				using (var sesion = store.OpenSession())
+				using (var session = store.OpenSession())
 				{
-					sesion.Advanced.LuceneQuery<dynamic>("test").WaitForNonStaleResults().ToArray();
+                    session.Advanced.DocumentQuery<dynamic>("test").WaitForNonStaleResults().ToArray();
 				}
 
 				Assert.Empty(store.DocumentDatabase.Statistics.Errors);

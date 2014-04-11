@@ -20,8 +20,7 @@ namespace Raven.Database.Server.Abstractions
 		    this.request = request;
 		    Url = this.request.Url;
 	        RawUrl = this.request.RawUrl;
-			this.queryString = System.Web.HttpUtility.ParseQueryString(Uri.UnescapeDataString(request.Url.Query));
-	       
+			queryString = HttpRequestHelper.ParseQueryStringWithLegacySupport(request.Headers["Raven-Client-Version"], request.Url.Query);
 		}
 
 		public bool IsLocal
@@ -33,9 +32,34 @@ namespace Raven.Database.Server.Abstractions
 			get { return request.Headers; }
 		}
 
+		public Stream GetBufferLessInputStream()
+		{
+			return request.GetBufferlessInputStream();
+		}
+
+		public bool HasCookie(string name)
+		{
+			return request.Cookies[name] != null;
+		}
+
+		public string GetCookie(string name)
+		{
+			var cookie = request.Cookies[name];
+			if (cookie == null)
+			{
+				return null;
+			}
+			return cookie.Value;
+		}
+
 		public Stream InputStream
 		{
 			get { return request.InputStream; }
+		}
+
+		public long ContentLength
+		{
+			get { return request.ContentLength; }
 		}
 
 		public NameValueCollection QueryString

@@ -1,9 +1,10 @@
 ﻿using System.Linq;
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
 
 namespace Raven.Tests.Indexes
 {
-	public class AnalyzerResolution : LocalClientTest
+	public class AnalyzerResolution : RavenTest
 	{
 		public void can_resolve_internal_analyzer()
 		{

@@ -5,11 +5,13 @@
 //-----------------------------------------------------------------------
 using System;
 using Raven.Abstractions;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs.Metadata
 {
-	public class LastModifiedLocal : LocalClientTest
+	public class LastModifiedLocal : RavenTest
 	{
 		[Fact]
 		public void CanAccessLastModifiedAsMetadata()
@@ -33,9 +35,11 @@ namespace Raven.Tests.Bugs.Metadata
 					var user = session.Load<User>("users/1");
 					var lastModified = session.Advanced.GetMetadataFor(user).Value<DateTime>("Last-Modified");
 					Assert.NotNull(lastModified);
-					Assert.InRange(lastModified.ToUniversalTime(), before, after);
-					Assert.Equal(DateTimeKind.Local, lastModified.Kind);
+					Assert.InRange(lastModified, before, after);
+					Assert.Equal(DateTimeKind.Utc, lastModified.Kind);
 				}
+
+				WaitForUserToContinueTheTest(store);
 			}
 		}
 	}

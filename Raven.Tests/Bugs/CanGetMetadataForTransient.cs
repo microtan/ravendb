@@ -3,11 +3,13 @@
 //     Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 // </copyright>
 //-----------------------------------------------------------------------
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class CanGetMetadataForTransient : LocalClientTest
+	public class CanGetMetadataForTransient : RavenTest
 	{
 		[Fact]
 		public void GetMetadataForTransient()
@@ -26,7 +28,8 @@ namespace Raven.Tests.Bugs
 				using (var s = store.OpenSession())
 				{
 					var entity = new User{Id = "users/1"};
-					Assert.True(s.Advanced.GetMetadataFor(entity).Value<bool>("admin"));
+					var metadata = s.Advanced.GetMetadataFor(entity);
+					Assert.True(metadata.Value<bool>("Admin")); // metadata values are uppercased
 				}
 			}
 		}

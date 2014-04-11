@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using Newtonsoft.Json;
+using Raven.Imports.Newtonsoft.Json;
 
 namespace Raven.Abstractions.Data
 {
@@ -25,7 +25,7 @@ namespace Raven.Abstractions.Data
 
 		public GetRequest()
 		{
-			Headers = new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase);
+			Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 		}
 	}
 }

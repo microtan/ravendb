@@ -5,21 +5,26 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 [assembly: AssemblyCompany("Hibernating Rhinos")]
-[assembly: AssemblyCopyright("© Hibernating Rhinos 2004 - 2012. All rights reserved.")]
+[assembly: AssemblyCopyright("© Hibernating Rhinos 2004 - 2.13. All rights reserved.")]
 [assembly: AssemblyTrademark("")]
 [assembly: ComVisible(false)]
 
-[assembly: AssemblyVersion("1.0.0")]
-[assembly: AssemblyFileVersion("1.0.13.0")]
-[assembly: AssemblyInformationalVersion("1.0.0 / {commit}")]
-[assembly: AssemblyProduct("RavenDB")]
-[assembly: AssemblyDescription("A second generation LINQ enabled document database for .NET")]
-
-#if SILVERLIGHT
-[assembly: CLSCompliant(false)]
+#if NETFX_CORE
+[assembly: AssemblyTitle("RavenDB (for WinRT)")]
 #else
-[assembly: SuppressIldasm()]
+[assembly: AssemblyTitle("RavenDB (for .NET 4.5)")]
+#endif
+
+[assembly: AssemblyVersion("3.0.0")]
+[assembly: AssemblyFileVersion("3.0.13.0")]
+[assembly: AssemblyInformationalVersion("3.0.0 / 6dce79a")]
+[assembly: AssemblyProduct("RavenDB")]
+[assembly: AssemblyDescription("RavenDB is a second generation LINQ enabled document database for .NET")]
+
 [assembly: CLSCompliant(true)]
+
+#if !NETFX_CORE
+[assembly: SuppressIldasm()]
 #endif
 
 #if DEBUG

@@ -7,36 +7,39 @@ using System;
 using System.Threading;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Indexing;
+using Raven.Client.Embedded;
 using Raven.Json.Linq;
 using Raven.Database;
 using Raven.Database.Config;
 using Raven.Database.Data;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
 using Raven.Tests.Storage;
 using Xunit;
 
 namespace Raven.Tests.Indexes
 {
-	public class DocumentsToIndex : AbstractDocumentStorageTest
+	public class DocumentsToIndex : RavenTest
 	{
+		private readonly EmbeddableDocumentStore store;
 		private readonly DocumentDatabase db;
 
 		public DocumentsToIndex()
 		{
-			db = new DocumentDatabase(new RavenConfiguration {DataDirectory = DataDir, RunInUnreliableYetFastModeThatIsNotSuitableForProduction = true});
-			db.SpinBackgroundWorkers();
+			store = NewDocumentStore();
+			db = store.DocumentDatabase;
 		}
 
 		public override void Dispose()
 		{
-			db.Dispose();
+			store.Dispose();
 			base.Dispose();
 		}
 
 		[Fact]
 		public void Can_Read_values_from_index()
 		{
-			db.PutIndex("pagesByTitle2",
+			db.Indexes.PutIndex("pagesByTitle2",
 					   new IndexDefinition
 					   {
 						   Map = @"
@@ -45,9 +48,9 @@ namespace Raven.Tests.Indexes
 					select new { doc.some };
 				"
 					   });
-			db.Put("1", Guid.Empty,
-			       RavenJObject.Parse(
-			       	@"{
+			db.Documents.Put("1", Etag.Empty,
+				   RavenJObject.Parse(
+					@"{
 				type: 'page', 
 				some: 'val', 
 				other: 'var', 
@@ -61,12 +64,12 @@ namespace Raven.Tests.Indexes
 			QueryResult docs;
 			do
 			{
-				docs = db.Query("pagesByTitle2", new IndexQuery
+				docs = db.Queries.Query("pagesByTitle2", new IndexQuery
 				{
 					Query = "some:val",
 					Start = 0,
 					PageSize = 10
-				});
+				}, CancellationToken.None);
 				if (docs.IsStale)
 					Thread.Sleep(100);
 			} while (docs.IsStale);
@@ -76,7 +79,7 @@ namespace Raven.Tests.Indexes
 		[Fact]
 		public void Can_update_values_in_index_with_where_clause()
 		{
-			db.PutIndex("pagesByTitle2",
+			db.Indexes.PutIndex("pagesByTitle2",
 					   new IndexDefinition
 					   {
 						   Map = @"
@@ -85,36 +88,36 @@ namespace Raven.Tests.Indexes
 					select new { doc.name };
 				"
 					   });
-			 db.Put("1", null,
-				   RavenJObject.Parse(
-					@"{ type: 'page', name: 'ayende' }"),
-				   new RavenJObject(), null);
+			db.Documents.Put("1", null,
+				  RavenJObject.Parse(
+				   @"{ type: 'page', name: 'ayende' }"),
+				  new RavenJObject(), null);
 
 			QueryResult docs;
 			do
 			{
-				docs = db.Query("pagesByTitle2", new IndexQuery
+				docs = db.Queries.Query("pagesByTitle2", new IndexQuery
 				{
 					Start = 0,
 					PageSize = 10
-				});
+				}, CancellationToken.None);
 				if (docs.IsStale)
 					Thread.Sleep(100);
 			} while (docs.IsStale);
 			Assert.Equal(1, docs.Results.Count);
 
-			db.Put("1", null,
+			db.Documents.Put("1", null,
 				   RavenJObject.Parse(
 					@"{ type: 'bar', name: 'ayende' }"),
 				   new RavenJObject(), null);
 
 			do
 			{
-				docs = db.Query("pagesByTitle2", new IndexQuery
+				docs = db.Queries.Query("pagesByTitle2", new IndexQuery
 				{
 					Start = 0,
 					PageSize = 10
-				});
+				}, CancellationToken.None);
 				if (docs.IsStale)
 					Thread.Sleep(100);
 			} while (docs.IsStale);
@@ -124,7 +127,7 @@ namespace Raven.Tests.Indexes
 		[Fact]
 		public void Can_Read_Values_Using_Deep_Nesting()
 		{
-			db.PutIndex(@"DocsByProject",
+			db.Indexes.PutIndex(@"DocsByProject",
 						new IndexDefinition
 						{
 							Map = @"
@@ -137,17 +140,17 @@ select new{project_name = prj.name}
 			var document =
 				RavenJObject.Parse(
 					"{'name':'ayende','email':'ayende@ayende.com','projects':[{'name':'raven'}], '@metadata': { '@id': 1}}");
-			db.Put("1", Guid.Empty, document, new RavenJObject(), null);
+			db.Documents.Put("1", Etag.Empty, document, new RavenJObject(), null);
 
 			QueryResult docs;
 			do
 			{
-				docs = db.Query("DocsByProject", new IndexQuery
+				docs = db.Queries.Query("DocsByProject", new IndexQuery
 				{
 					Query = "project_name:raven",
 					Start = 0,
 					PageSize = 10
-				});
+				}, CancellationToken.None);
 				if (docs.IsStale)
 					Thread.Sleep(100);
 			} while (docs.IsStale);
@@ -159,7 +162,7 @@ select new{project_name = prj.name}
 		[Fact]
 		public void Can_Read_Values_Using_MultipleValues_From_Deep_Nesting()
 		{
-			db.PutIndex(@"DocsByProject",
+			db.Indexes.PutIndex(@"DocsByProject",
 						new IndexDefinition
 						{
 							Map = @"
@@ -171,17 +174,17 @@ select new{project_name = prj.name, project_num = prj.num}
 			var document =
 				RavenJObject.Parse(
 					"{'name':'ayende','email':'ayende@ayende.com','projects':[{'name':'raven', 'num': 5}, {'name':'crow', 'num': 6}], '@metadata': { '@id': 1}}");
-			db.Put("1", Guid.Empty, document, new RavenJObject(), null);
+			db.Documents.Put("1", Etag.Empty, document, new RavenJObject(), null);
 
 			QueryResult docs;
 			do
 			{
-				docs = db.Query("DocsByProject", new IndexQuery
+				docs = db.Queries.Query("DocsByProject", new IndexQuery
 				{
 					Query = "+project_name:raven +project_num:6",
 					Start = 0,
 					PageSize = 10
-				});
+				}, CancellationToken.None);
 				if (docs.IsStale)
 					Thread.Sleep(100);
 			} while (docs.IsStale);
@@ -191,7 +194,7 @@ select new{project_name = prj.name, project_num = prj.num}
 		[Fact]
 		public void Can_Read_values_when_two_indexes_exist()
 		{
-			db.PutIndex("pagesByTitle",
+			db.Indexes.PutIndex("pagesByTitle",
 						new IndexDefinition
 						{
 							Map = @" 
@@ -200,7 +203,7 @@ select new{project_name = prj.name, project_num = prj.num}
 	select new { doc.other};
 "
 						});
-			db.PutIndex("pagesByTitle2",
+			db.Indexes.PutIndex("pagesByTitle2",
 					   new IndexDefinition
 					   {
 						   Map = @"
@@ -209,21 +212,21 @@ select new{project_name = prj.name, project_num = prj.num}
 	select new { doc.some };
 "
 					   });
-			db.Put("1", Guid.Empty,
-			       RavenJObject.Parse(
-			       	"{type: 'page', some: 'val', other: 'var', content: 'this is the content', title: 'hello world', size: 5}"),
+			db.Documents.Put("1", Etag.Empty,
+				   RavenJObject.Parse(
+					"{type: 'page', some: 'val', other: 'var', content: 'this is the content', title: 'hello world', size: 5}"),
 				   new RavenJObject(), null);
 
 
 			QueryResult docs;
 			do
 			{
-				docs = db.Query("pagesByTitle2", new IndexQuery
+				docs = db.Queries.Query("pagesByTitle2", new IndexQuery
 				{
 					Query = "some:val",
 					Start = 0,
 					PageSize = 10
-				});
+				}, CancellationToken.None);
 				if (docs.IsStale)
 					Thread.Sleep(100);
 			} while (docs.IsStale);
@@ -233,7 +236,7 @@ select new{project_name = prj.name, project_num = prj.num}
 		[Fact]
 		public void Updating_an_index_will_result_in_new_values()
 		{
-			db.PutIndex("pagesByTitle",
+			db.Indexes.PutIndex("pagesByTitle",
 					   new IndexDefinition
 					   {
 						   Map = @"
@@ -242,7 +245,7 @@ select new{project_name = prj.name, project_num = prj.num}
 	select new { doc.other};
 "
 					   });
-			db.PutIndex("pagesByTitle",
+			db.Indexes.PutIndex("pagesByTitle",
 					   new IndexDefinition
 					   {
 						   Map = @"
@@ -251,21 +254,21 @@ select new{project_name = prj.name, project_num = prj.num}
 	select new { doc.other };
 "
 					   });
-			db.Put("1", Guid.Empty,
-			       RavenJObject.Parse(
-			       	"{type: 'page', some: 'val', other: 'var', content: 'this is the content', title: 'hello world', size: 5}"),
+			db.Documents.Put("1", Etag.Empty,
+				   RavenJObject.Parse(
+					"{type: 'page', some: 'val', other: 'var', content: 'this is the content', title: 'hello world', size: 5}"),
 				   new RavenJObject(), null);
 
 
 			QueryResult docs;
 			do
 			{
-				docs = db.Query("pagesByTitle", new IndexQuery
+				docs = db.Queries.Query("pagesByTitle", new IndexQuery
 				{
 					Query = "other:var",
 					Start = 0,
 					PageSize = 10
-				});
+				}, CancellationToken.None);
 				if (docs.IsStale)
 					Thread.Sleep(100);
 			} while (docs.IsStale);
@@ -275,12 +278,12 @@ select new{project_name = prj.name, project_num = prj.num}
 		[Fact]
 		public void Can_read_values_from_index_of_documents_already_in_db()
 		{
-			db.Put("1", Guid.Empty,
-			       RavenJObject.Parse(
-			       	"{type: 'page', some: 'val', other: 'var', content: 'this is the content', title: 'hello world', size: 5}"),
+			db.Documents.Put("1", Etag.Empty,
+				   RavenJObject.Parse(
+					"{type: 'page', some: 'val', other: 'var', content: 'this is the content', title: 'hello world', size: 5}"),
 				   new RavenJObject(), null);
 
-			db.PutIndex("pagesByTitle",
+			db.Indexes.PutIndex("pagesByTitle",
 					   new IndexDefinition
 					   {
 						   Map = @"
@@ -292,12 +295,12 @@ select new{project_name = prj.name, project_num = prj.num}
 			QueryResult docs;
 			do
 			{
-				docs = db.Query("pagesByTitle", new IndexQuery
+				docs = db.Queries.Query("pagesByTitle", new IndexQuery
 				{
 					Query = "other:var",
 					Start = 0,
 					PageSize = 10
-				});
+				}, CancellationToken.None);
 				if (docs.IsStale)
 					Thread.Sleep(100);
 			} while (docs.IsStale);
@@ -307,16 +310,16 @@ select new{project_name = prj.name, project_num = prj.num}
 		[Fact]
 		public void Can_read_values_from_indexes_of_documents_already_in_db_when_multiple_docs_exists()
 		{
-			db.Put(null, Guid.Empty,
-			       RavenJObject.Parse(
-			       	"{type: 'page', some: 'val', other: 'var', content: 'this is the content', title: 'hello world', size: 5}"),
+			db.Documents.Put(null, Etag.Empty,
+				   RavenJObject.Parse(
+					"{type: 'page', some: 'val', other: 'var', content: 'this is the content', title: 'hello world', size: 5}"),
 				   new RavenJObject(), null);
-			db.Put(null, Guid.Empty,
-			       RavenJObject.Parse(
-			       	"{type: 'page', some: 'val', other: 'var', content: 'this is the content', title: 'hello world', size: 5}"),
+			db.Documents.Put(null, Etag.Empty,
+				   RavenJObject.Parse(
+					"{type: 'page', some: 'val', other: 'var', content: 'this is the content', title: 'hello world', size: 5}"),
 				   new RavenJObject(), null);
 
-			db.PutIndex("pagesByTitle",
+			db.Indexes.PutIndex("pagesByTitle",
 						new IndexDefinition
 						{
 							Map = @"
@@ -328,12 +331,12 @@ select new{project_name = prj.name, project_num = prj.num}
 			QueryResult docs;
 			do
 			{
-				docs = db.Query("pagesByTitle", new IndexQuery
+				docs = db.Queries.Query("pagesByTitle", new IndexQuery
 				{
 					Query = "other:var",
 					Start = 0,
 					PageSize = 10
-				});
+				}, CancellationToken.None);
 				if (docs.IsStale)
 					Thread.Sleep(100);
 			} while (docs.IsStale);
@@ -343,16 +346,16 @@ select new{project_name = prj.name, project_num = prj.num}
 		[Fact]
 		public void Can_query_by_stop_words()
 		{
-			db.PutIndex("regionIndex", new IndexDefinition
+			db.Indexes.PutIndex("regionIndex", new IndexDefinition
 			{
 				Map = @"
 					from doc in docs 
 					select new { doc.Region };
 					",
-				Indexes = {{"Region", FieldIndexing.NotAnalyzed}}
+				Indexes = { { "Region", FieldIndexing.NotAnalyzed } }
 			});
 
-			db.Put("1", Guid.Empty, RavenJObject.Parse(
+			db.Documents.Put("1", Etag.Empty, RavenJObject.Parse(
 			@"{
 				Region: 'A', 
 			}"),
@@ -361,12 +364,12 @@ select new{project_name = prj.name, project_num = prj.num}
 			QueryResult docs;
 			do
 			{
-				docs = db.Query("regionIndex", new IndexQuery
+				docs = db.Queries.Query("regionIndex", new IndexQuery
 				{
 					Query = "Region:[[A]]",
 					Start = 0,
 					PageSize = 10
-				});
+				}, CancellationToken.None);
 				if (docs.IsStale)
 					Thread.Sleep(100);
 			} while (docs.IsStale);

@@ -8,11 +8,13 @@ using System;
 using Raven.Client;
 using Raven.Client.Listeners;
 using Raven.Json.Linq;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs.Metadata
 {
-	public class MetadataPropertyInEntity : LocalClientTest
+	public class MetadataPropertyInEntity : RavenTest
 	{
 		public class Account
 		{
@@ -52,7 +54,7 @@ namespace Raven.Tests.Bugs.Metadata
 			/// <summary>
 			/// Called when converting an entity to a document and metadata
 			/// </summary>
-			public void EntityToDocument(object entity, RavenJObject document, RavenJObject metadata)
+			public void EntityToDocument(string key, object entity, RavenJObject document, RavenJObject metadata)
 			{
 				if (entity is Account == false)
 					return;
@@ -62,7 +64,7 @@ namespace Raven.Tests.Bugs.Metadata
 			/// <summary>
 			/// Called when converting a document and metadata to an entity
 			/// </summary>
-			public void DocumentToEntity(object entity, RavenJObject document, RavenJObject metadata)
+			public void DocumentToEntity(string key, object entity, RavenJObject document, RavenJObject metadata)
 			{
 				if (entity is Account == false)
 					return;
@@ -105,7 +107,7 @@ namespace Raven.Tests.Bugs.Metadata
 			/// <summary>
 			/// Called when converting an entity to a document and metadata
 			/// </summary>
-			public void EntityToDocument(object entity, RavenJObject document, RavenJObject metadata)
+			public void EntityToDocument(string key, object entity, RavenJObject document, RavenJObject metadata)
 			{
 				if (entity is Account == false)
 					return;
@@ -115,7 +117,7 @@ namespace Raven.Tests.Bugs.Metadata
 			/// <summary>
 			/// Called when converting a document and metadata to an entity
 			/// </summary>
-			public void DocumentToEntity(object entity, RavenJObject document, RavenJObject metadata)
+			public void DocumentToEntity(string key, object entity, RavenJObject document, RavenJObject metadata)
 			{
 				if (entity is Account == false)
 					return;

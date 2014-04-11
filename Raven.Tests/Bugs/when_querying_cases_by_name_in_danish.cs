@@ -2,23 +2,21 @@ using System;
 using System.Linq;
 using Raven.Client.Embedded;
 using Raven.Client.Linq;
+using Raven.Tests.Common;
+using Raven.Tests.Common.Util;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class when_querying_cases_by_name_in_danish : IDisposable
+	public class when_querying_cases_by_name_in_danish : RavenTest
 	{
 		private readonly EmbeddableDocumentStore store;
 		private readonly IDisposable cultureReset = new TemporaryCulture("da");
 
 		public when_querying_cases_by_name_in_danish()
 		{
-			store = new EmbeddableDocumentStore
-			{
-				RunInMemory = true
-			};
-			store.Initialize();
-
+			store = NewDocumentStore();
 			using (var session = store.OpenSession())
 			{
 				session.Store(new Case { Name = "bcda" });
@@ -43,10 +41,11 @@ namespace Raven.Tests.Bugs
 				var cases = session.Query<Case>()
 					.Customize(x => x.WaitForNonStaleResultsAsOfLastWrite(TimeSpan.FromMinutes(5)))
 					.Where(x => x.Name.StartsWith("da"))
+					.OrderBy(x => x.Name)
 					.ToList();
 
 				Assert.Equal(4, cases.Count);
-				Assert.Equal(new[] { "dacb", "daab", "dacb", "dada" }, cases.Select(x => x.Name).ToArray());
+				Assert.Equal(new[] { "daab", "dacb", "dacb", "dada" }, cases.Select(x => x.Name).ToArray());
 			}
 		}
 
@@ -72,10 +71,12 @@ namespace Raven.Tests.Bugs
 			{
 				var cases = session.Query<Case>()
 					.Customize(x => x.WaitForNonStaleResultsAsOfLastWrite())
-					.Where(x => x.Name.StartsWith("aa")).ToList();
+					.Where(x => x.Name.StartsWith("aa"))
+					.OrderBy(x=>x.Name)
+					.ToList();
 
 				Assert.Equal(3, cases.Count);
-				Assert.Equal(new[] { "aacb", "aaac", "aaaa" }, cases.Select(x => x.Name).ToArray());
+				Assert.Equal(new[] { "aaaa", "aaac",  "aacb"}, cases.Select(x => x.Name).ToArray());
 			}
 		}
 
@@ -86,24 +87,24 @@ namespace Raven.Tests.Bugs
 			{
 				var cases = session.Query<Case>()
 					.Customize(x => x.WaitForNonStaleResultsAsOfLastWrite())
-					.Where(x => x.Name.StartsWith("bc")).ToList();
+					.Where(x => x.Name.StartsWith("bc"))
+					.OrderBy(x=>x.Name)
+					.ToList();
 
 				Assert.Equal(2, cases.Count);
-				Assert.Equal(new[] { "bcda", "bcbb" }, cases.Select(x => x.Name).ToArray());
+				Assert.Equal(new[] { "bcbb", "bcda" }, cases.Select(x => x.Name).ToArray());
 			}
 		}
 
-		public void Dispose()
+		public override void Dispose()
 		{
-			store.Dispose();
+			base.Dispose();
 			cultureReset.Dispose();
 		}
 
 		public class Case
 		{
 			public string Name { get; set; }
-
 		}
-		
 	}
 }

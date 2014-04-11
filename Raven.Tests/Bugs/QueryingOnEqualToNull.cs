@@ -3,13 +3,14 @@
 //     Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 // </copyright>
 //-----------------------------------------------------------------------
+using Raven.Tests.Common;
 using Raven.Tests.Document;
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs
 {
-	public class QueryingOnEqualToNull : LocalClientTest
+	public class QueryingOnEqualToNull : RavenTest
 	{
 		[Fact]
 		public void QueryingOnEqNull()

@@ -6,27 +6,27 @@ using Raven.Database.Impl;
 
 namespace Raven.Database.Indexing
 {
-	public class FieldsToFetch : IEnumerable<string>
+	public class FieldsToFetch
 	{
+		private readonly bool isDistinct;
 		private readonly string additionalField;
 		private readonly HashSet<string> fieldsToFetch;
-		private readonly AggregationOperation aggregationOperation;
 		private HashSet<string > ensuredFieldNames;
+		public bool FetchAllStoredFields { get; set; }
 
-		public FieldsToFetch(string[] fieldsToFetch, AggregationOperation aggregationOperation, string additionalField)
+		public FieldsToFetch(string[] fieldsToFetch, bool isDistinct, string additionalField)
 		{
+			this.isDistinct = isDistinct;
 			this.additionalField = additionalField;
 			if (fieldsToFetch != null)
+			{
 				this.fieldsToFetch = new HashSet<string>(fieldsToFetch);
-			this.aggregationOperation = aggregationOperation.RemoveOptionals();
+				FetchAllStoredFields = this.fieldsToFetch.Remove(Constants.AllFields);
+			}
 
-			if (this.aggregationOperation != AggregationOperation.None)
-				EnsureHasField(this.aggregationOperation.ToString());
+			IsDistinctQuery = isDistinct && fieldsToFetch != null && fieldsToFetch.Length > 0;
 			
-			IsDistinctQuery = aggregationOperation.HasFlag(AggregationOperation.Distinct) &&
-							  fieldsToFetch != null && fieldsToFetch.Length > 0;
-			
-			IsProjection = fieldsToFetch != null && fieldsToFetch.Length != 0;
+			IsProjection = this.fieldsToFetch != null && this.fieldsToFetch.Count > 0;
 		
 			if(IsProjection && IsDistinctQuery == false)
 				EnsureHasField(additionalField);
@@ -36,18 +36,24 @@ namespace Raven.Database.Indexing
 
 		public bool IsProjection { get; private set; }
 
-		public IEnumerator<string> GetEnumerator()
-		{
-			HashSet<string> fieldsWeMustReturn = ensuredFieldNames == null ? new HashSet<string>() : new HashSet<string>(ensuredFieldNames);
-			foreach (var fieldToReturn in GetFieldsToReturn())
-			{
-				fieldsWeMustReturn.Remove(fieldToReturn);
-				yield return fieldToReturn;
-			}
 
-			foreach (var field in fieldsWeMustReturn)
+		public IEnumerable<string> Fields
+		{
+			get
 			{
-				yield return field;
+				HashSet<string> fieldsWeMustReturn = ensuredFieldNames == null
+				                                     	? new HashSet<string>()
+				                                     	: new HashSet<string>(ensuredFieldNames);
+				foreach (var fieldToReturn in GetFieldsToReturn())
+				{
+					fieldsWeMustReturn.Remove(fieldToReturn);
+					yield return fieldToReturn;
+				}
+
+				foreach (var field in fieldsWeMustReturn)
+				{
+					yield return field;
+				}
 			}
 		}
 
@@ -61,14 +67,10 @@ namespace Raven.Database.Indexing
 			}
 		}
 
-		IEnumerator IEnumerable.GetEnumerator()
-		{
-			return GetEnumerator();
-		}
 
 		public FieldsToFetch CloneWith(string[] newFieldsToFetch)
 		{
-			return new FieldsToFetch(newFieldsToFetch, aggregationOperation, additionalField);
+			return new FieldsToFetch(newFieldsToFetch, isDistinct, additionalField);
 		}
 
 		public void EnsureHasField(string ensuredFieldName)
@@ -76,6 +78,11 @@ namespace Raven.Database.Indexing
 			if (ensuredFieldNames == null)
 				ensuredFieldNames = new HashSet<string>();
 			ensuredFieldNames.Add(ensuredFieldName);
+		}
+
+		public bool HasField(string name)
+		{
+			return fieldsToFetch.Contains(name);
 		}
 	}
 }

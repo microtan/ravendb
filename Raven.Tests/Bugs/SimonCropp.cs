@@ -4,11 +4,13 @@ using System.Linq;
 using System.Text;
 using Raven.Client;
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class SimonCropp : LocalClientTest
+	public class SimonCropp : RavenTest
 	{
 		public class WorkflowItem
 		{

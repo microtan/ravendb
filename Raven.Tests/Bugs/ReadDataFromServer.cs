@@ -6,19 +6,18 @@
 using System.IO;
 using System.Net;
 using Raven.Json.Linq;
-using Raven.Database.Config;
-using Raven.Server;
-using Raven.Tests.Storage;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class ReadDataFromServer : AbstractDocumentStorageTest
+	public class ReadDataFromServer : RavenTest
 	{
 		[Fact]
 		public void CanReadDataProperly()
 		{
-			using(new RavenDbServer(new RavenConfiguration {DataDirectory = DataDir, RunInUnreliableYetFastModeThatIsNotSuitableForProduction = true, Port = 8079}))
+			using(GetNewServer())
 			{
 				using (var webClient = new WebClient())
 				{

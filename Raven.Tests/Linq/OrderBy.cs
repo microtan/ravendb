@@ -1,9 +1,12 @@
 ﻿using System.Linq;
+
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Linq
 {
-	public class OrderBy : LocalClientTest
+	public class OrderBy : RavenTest
 	{
 		public class Section
 		{

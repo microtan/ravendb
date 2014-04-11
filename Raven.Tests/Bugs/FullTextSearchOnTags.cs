@@ -1,5 +1,9 @@
 using System.Collections.Generic;
+using Raven.Abstractions.Data;
 using Raven.Abstractions.Indexing;
+using Raven.Client;
+using Raven.Tests.Common;
+
 using Xunit;
 using Raven.Client.Linq;
 using System.Linq;
@@ -123,7 +127,7 @@ namespace Raven.Tests.Bugs
 		}
 
 		[Fact]
-		public void SearchCanUseOr()
+		public void StandardSearchWillProduceExpectedResult()
 		{
 			using (var store = NewDocumentStore())
 			{
@@ -135,7 +139,7 @@ namespace Raven.Tests.Bugs
 						.Where(x => x.Name == "User");
 
 
-					Assert.Equal("Tags:<<i love cats>> Name:User", ravenQueryable.ToString());
+					Assert.Equal("Tags:(i love cats) AND (Name:User)", ravenQueryable.ToString());
 				}
 			}
 		}
@@ -153,7 +157,7 @@ namespace Raven.Tests.Bugs
 						.Search(x => x.Tags, "i love cats", options: SearchOptions.And);
 
 
-					Assert.Equal("Name:User AND Tags:<<i love cats>>", ravenQueryable.ToString());
+					Assert.Equal("Name:User AND Tags:(i love cats)", ravenQueryable.ToString());
 				}
 			}
 		}
@@ -171,7 +175,44 @@ namespace Raven.Tests.Bugs
 						.Where(x => x.Name == "User");
 
 
-					Assert.Equal("Tags:<<i love cats>> AND (Name:User)", ravenQueryable.ToString());
+					Assert.Equal("Tags:(i love cats) AND (Name:User)", ravenQueryable.ToString());
+				}
+			}
+		}
+
+		[Fact]
+		public void SearchCanUseOr()
+		{
+			using (var store = NewDocumentStore())
+			{
+				using (var session = store.OpenSession())
+				{
+					var ravenQueryable = session.Query<Image>("test")
+						.Customize(x => x.WaitForNonStaleResults())
+						.Search(x => x.Tags, "i love cats", options: SearchOptions.Or)
+						.Where(x => x.Name == "User");
+
+
+					Assert.Equal("Tags:(i love cats) Name:User", ravenQueryable.ToString());
+				}
+			}
+		}
+
+		[Fact]
+		public void SearchWillUseGuessByDefault()
+		{
+			using (var store = NewDocumentStore())
+			{
+				using (var session = store.OpenSession())
+				{
+					var ravenQueryable = session.Query<Image>("test")
+						.Customize(x => x.WaitForNonStaleResults())
+						.Search(x => x.Tags, "i love cats")
+						.Search(x => x.Users, "i love cats")
+						.Where(x => x.Name == "User");
+
+
+					Assert.Equal("( Tags:(i love cats) Users:(i love cats)) AND (Name:User)", ravenQueryable.ToString());
 				}
 			}
 		}
@@ -206,7 +247,7 @@ namespace Raven.Tests.Bugs
 						.Where(x => x.Name == "User");
 
 
-					Assert.Equal("-Tags:<<i love cats>> AND (Name:User)", ravenQueryable.ToString());
+					Assert.Equal("-Tags:(i love cats) AND (Name:User)", ravenQueryable.ToString());
 
 					Assert.Equal(1, ravenQueryable.Count());
 				}
@@ -226,7 +267,7 @@ namespace Raven.Tests.Bugs
 						.Where(x => x.Name == "User");
 
 
-					Assert.Equal("-Tags:<<i love cats>> Name:User", ravenQueryable.ToString());
+					Assert.Equal("-Tags:(i love cats) Name:User", ravenQueryable.ToString());
 				}
 			}
 		}
@@ -244,7 +285,7 @@ namespace Raven.Tests.Bugs
 						.Where(x => x.Name == "User");
 
 
-					Assert.Equal("-Tags:<<i love cats>> AND (Name:User)", ravenQueryable.ToString());
+					Assert.Equal("-Tags:(i love cats) AND (Name:User)", ravenQueryable.ToString());
 				}
 			}
 		}
@@ -282,7 +323,7 @@ namespace Raven.Tests.Bugs
 						.Search(x => x.Tags, "canine love", boost: 13);
 					var s = ravenQueryable
 						.ToString();
-					Assert.Equal("Tags:<<i love cats>>^3 Tags:<<canine love>>^13", s);
+					Assert.Equal("( Tags:(i love cats)^3 Tags:(canine love)^13)", s);
 
 					var images = ravenQueryable.ToList();
 
@@ -320,7 +361,7 @@ namespace Raven.Tests.Bugs
 						.Search(x => x.Tags, "i love cats")
 						.Search(x => x.Users, "oren")
 						.ToString();
-					Assert.Equal("Tags:<<i love cats>> Users:<<oren>>", query.Trim());
+					Assert.Equal("( Tags:(i love cats) Users:(oren))", query.Trim());
 				}
 			}
 		}
@@ -343,7 +384,8 @@ namespace Raven.Tests.Bugs
 				store.DatabaseCommands.PutIndex("test", new IndexDefinition
 				{
 					Map = "from doc in docs.Images select new { doc.Tags, doc.Users }",
-					Indexes = { { "Tags", FieldIndexing.Analyzed } }
+					Indexes = { { "Tags", FieldIndexing.Analyzed } },
+					Suggestions = {{"Tags", new SuggestionOptions{Distance = StringDistanceTypes.Default, Accuracy = 0.5f}}}
 				});
 
 				using (var session = store.OpenSession())
@@ -353,7 +395,7 @@ namespace Raven.Tests.Bugs
 						.ToList();
 
 					var query = session.Query<Image>("test")
-						.Search(x => x.Tags, "anmal lover")
+						.Search(x => x.Tags, "animal lover")
 						.Suggest();
 					Assert.NotEmpty(query.Suggestions);
 					Assert.Equal("animal", query.Suggestions[0]);
@@ -393,6 +435,7 @@ namespace Raven.Tests.Bugs
 				}
 			}
 		}
+		
 
 		[Fact]
 		public void Can_search_inner_words_with_extra_condition()
@@ -423,6 +466,7 @@ namespace Raven.Tests.Bugs
 						.Search(x => x.Name, "Photo", options: SearchOptions.And)
 						.Where(x => x.Id == "1")
 						.ToList();
+					WaitForUserToContinueTheTest(store);
 					Assert.NotEmpty(images);
 					Assert.True(images.Count == 1);
 				}
@@ -442,7 +486,7 @@ namespace Raven.Tests.Bugs
 						var qry = session.Query<Image>()
 							.Customize(x => x.WaitForNonStaleResults())
 							.Search(x => x.Name, specialCharacter.ToString());
-						Assert.Equal(string.Format("Name:<<\\{0}>>", specialCharacter), qry.ToString());
+						Assert.Equal(string.Format("Name:(\\{0})", specialCharacter), qry.ToString());
 						qry.ToList();
 					}
 				}
@@ -459,7 +503,7 @@ namespace Raven.Tests.Bugs
 					var qry = session.Query<Image>()
 						.Customize(x => x.WaitForNonStaleResults())
 						.Search(x => x.Name, "He said: hello there");
-					Assert.Equal("Name:<<He said\\: hello there>>", qry.ToString());
+					Assert.Equal("Name:(He said\\: hello there)", qry.ToString());
 					qry.ToList();
 				}
 			}

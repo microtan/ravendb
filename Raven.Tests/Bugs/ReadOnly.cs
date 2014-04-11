@@ -1,10 +1,13 @@
 using System;
+
+using Raven.Tests.Common;
+
 using Xunit;
 using Constants = Raven.Abstractions.Data.Constants;
 
 namespace Raven.Tests.Bugs
 {
-	public class ReadOnly : LocalClientTest
+	public class ReadOnly : RavenTest
 	{
 		[Fact]
 		public void CanMarkEntityAsReadOnly()

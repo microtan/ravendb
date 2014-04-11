@@ -4,11 +4,14 @@
 // </copyright>
 //-----------------------------------------------------------------------
 using System;
+
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class InvalidIds : LocalClientTest
+	public class InvalidIds : RavenTest
 	{
 		[Fact]
 		public void DocumentIdCannotStartWithSlash()

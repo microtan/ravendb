@@ -3,12 +3,14 @@
 //     Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 // </copyright>
 //-----------------------------------------------------------------------
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs
 {
-	public class LukeQuerying : LocalClientTest
+	public class LukeQuerying : RavenTest
 	{
 		[Fact]
 		public void Can_query_on_not_equal()
@@ -65,7 +67,7 @@ namespace Raven.Tests.Bugs
 		}
 
 		[Fact]
-		public void Can_query_on_collection_primitiv()
+		public void Can_query_on_collection_primitive()
 		{
 			using (var store = NewDocumentStore())
 			{

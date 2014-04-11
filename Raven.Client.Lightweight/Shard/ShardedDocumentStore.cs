@@ -4,19 +4,21 @@
 // </copyright>
 //-----------------------------------------------------------------------
 using System;
-#if !SILVERLIGHT
 using System.Collections.Generic;
 using System.Collections.Specialized;
-#endif
 using System.Linq;
-using System.Net;
+using Raven.Abstractions.Data;
 using Raven.Abstractions.Extensions;
-#if !NET_3_5
+using Raven.Abstractions.Util;
+using Raven.Client.Changes;
 using Raven.Client.Connection.Async;
-#endif
 using Raven.Client.Connection;
 using Raven.Client.Document;
 using Raven.Client.Indexes;
+
+#if NETFX_CORE
+using Raven.Client.WinRT.Connection;
+#endif
 
 namespace Raven.Client.Shard
 {
@@ -27,19 +29,27 @@ namespace Raven.Client.Shard
 	/// </summary>
 	public class ShardedDocumentStore : DocumentStoreBase
 	{
-#if !SILVERLIGHT
+#if !NETFX_CORE
 		/// <summary>
 		/// Gets the shared operations headers.
 		/// </summary>
 		/// <value>The shared operations headers.</value>
 		/// <exception cref="NotSupportedException"></exception>
-		public override NameValueCollection SharedOperationsHeaders 
+		public override NameValueCollection SharedOperationsHeaders
 #else
 		public IDictionary<string,string> SharedOperationsHeaders 
 #endif
 		{
 			get { throw new NotSupportedException("Sharded document store doesn't have a SharedOperationsHeaders. you need to explicitly use the shard instances to get access to the SharedOperationsHeaders"); }
 			protected set { throw new NotSupportedException("Sharded document store doesn't have a SharedOperationsHeaders. you need to explicitly use the shard instances to get access to the SharedOperationsHeaders"); }
+		}
+
+		/// <summary>
+		/// Whatever this instance has json request factory available
+		/// </summary>
+		public override bool HasJsonRequestFactory
+		{
+			get { return false; }
 		}
 
 		/// <summary>
@@ -79,7 +89,7 @@ namespace Raven.Client.Shard
 		/// </summary>
 		/// <value>The identifier.</value>
 		public override string Identifier { get; set; }
-		
+
 		/// <summary>
 		/// Called after dispose is completed
 		/// </summary>
@@ -99,8 +109,6 @@ namespace Raven.Client.Shard
 				afterDispose(this, EventArgs.Empty);
 		}
 
-#if !NET_3_5
-
 		/// <summary>
 		/// Gets the async database commands.
 		/// </summary>
@@ -109,14 +117,14 @@ namespace Raven.Client.Shard
 		{
 			get { throw new NotSupportedException("Sharded document store doesn't have a database commands. you need to explicitly use the shard instances to get access to the database commands"); }
 		}
-		
+
 		/// <summary>
 		/// Opens the async session.
 		/// </summary>
 		/// <returns></returns>
 		public override IAsyncDocumentSession OpenAsyncSession()
 		{
-			throw new NotSupportedException("Sharded document store doesn't support async operations");
+			return OpenAsyncSessionInternal(null, ShardStrategy.Shards.ToDictionary(x => x.Key, x => x.Value.AsyncDatabaseCommands));
 		}
 
 		/// <summary>
@@ -125,10 +133,27 @@ namespace Raven.Client.Shard
 		/// <returns></returns>
 		public override IAsyncDocumentSession OpenAsyncSession(string databaseName)
 		{
-			throw new NotSupportedException("Sharded document store doesn't support async operations");
+			return OpenAsyncSessionInternal(databaseName, ShardStrategy.Shards.ToDictionary(x => x.Key, x => x.Value.AsyncDatabaseCommands.ForDatabase(databaseName)));
 		}
 
-#endif
+		private IAsyncDocumentSession OpenAsyncSessionInternal(string dbName,Dictionary<string, IAsyncDatabaseCommands> shardDbCommands)
+		{
+			EnsureNotClosed();
+
+			var sessionId = Guid.NewGuid();
+			var session = new AsyncShardedDocumentSession(dbName, this, Listeners, sessionId, ShardStrategy, shardDbCommands);
+			AfterSessionCreated(session);
+			return session;
+		}
+
+		private readonly AtomicDictionary<IDatabaseChanges> changes =
+			new AtomicDictionary<IDatabaseChanges>(StringComparer.OrdinalIgnoreCase);
+
+		public override IDatabaseChanges Changes(string database = null)
+		{
+			return changes.GetOrAdd(database, 
+				_ => new ShardedDatabaseChanges(ShardStrategy.Shards.Values.Select(x => x.Changes(database)).ToArray()));
+		}
 
 		/// <summary>
 		/// Setup the context for aggressive caching.
@@ -141,7 +166,8 @@ namespace Raven.Client.Shard
 		/// </remarks>
 		public override IDisposable AggressivelyCacheFor(TimeSpan cacheDuration)
 		{
-			var disposables = ShardStrategy.Shards.Select(shard => shard.Value.AggressivelyCacheFor(cacheDuration)).ToList();
+			var disposables =
+				ShardStrategy.Shards.Select(shard => shard.Value.AggressivelyCacheFor(cacheDuration)).ToList();
 
 			return new DisposableAction(() =>
 			{
@@ -173,15 +199,33 @@ namespace Raven.Client.Shard
 			});
 		}
 
-#if !SILVERLIGHT
-		
+		/// <summary>
+		/// Setup the WebRequest timeout for the session
+		/// </summary>
+		/// <param name="timeout">Specify the timeout duration</param>
+		/// <remarks>
+		/// Sets the timeout for the JsonRequest.  Scoped to the Current Thread.
+		/// </remarks>
+		public override IDisposable SetRequestsTimeoutFor(TimeSpan timeout) {
+			var disposables =
+				ShardStrategy.Shards.Select(shard => shard.Value.SetRequestsTimeoutFor(timeout)).ToList();
+
+			return new DisposableAction(() => {
+				foreach (var disposable in disposables) {
+					disposable.Dispose();
+				}
+			});
+		}
+
+#if !NETFX_CORE
+
 		/// <summary>
 		/// Opens the session.
 		/// </summary>
 		/// <returns></returns>
 		public override IDocumentSession OpenSession()
 		{
-			return OpenSessionInternal(ShardStrategy.Shards.ToDictionary(x => x.Key, x => x.Value.DatabaseCommands));
+			return OpenSessionInternal(null, ShardStrategy.Shards.ToDictionary(x => x.Key, x => x.Value.DatabaseCommands));
 		}
 
 		/// <summary>
@@ -189,7 +233,7 @@ namespace Raven.Client.Shard
 		/// </summary>
 		public override IDocumentSession OpenSession(string database)
 		{
-			return OpenSessionInternal(ShardStrategy.Shards.ToDictionary(x => x.Key, x => x.Value.DatabaseCommands.ForDatabase(database)));
+			return OpenSessionInternal(database, ShardStrategy.Shards.ToDictionary(x => x.Key, x => x.Value.DatabaseCommands.ForDatabase(database)));
 		}
 
 		/// <summary>
@@ -197,17 +241,20 @@ namespace Raven.Client.Shard
 		/// </summary>
 		public override IDocumentSession OpenSession(OpenSessionOptions sessionOptions)
 		{
-			return OpenSessionInternal(ShardStrategy.Shards.ToDictionary(x => x.Key, x => x.Value.DatabaseCommands
+			return OpenSessionInternal(sessionOptions.Database, ShardStrategy.Shards.ToDictionary(x => x.Key, x => x.Value.DatabaseCommands
 				.ForDatabase(sessionOptions.Database)
 				.With(sessionOptions.Credentials)));
 		}
 
-		private IDocumentSession OpenSessionInternal(Dictionary<string, IDatabaseCommands> shardDbCommands)
+		private IDocumentSession OpenSessionInternal(string database, Dictionary<string, IDatabaseCommands> shardDbCommands)
 		{
 			EnsureNotClosed();
 
 			var sessionId = Guid.NewGuid();
-			var session = new ShardedDocumentSession(this, listeners, sessionId, ShardStrategy, shardDbCommands);
+            var session = new ShardedDocumentSession(database, this, Listeners, sessionId, ShardStrategy, shardDbCommands)
+				{
+					DatabaseName = database
+				};
 			AfterSessionCreated(session);
 			return session;
 		}
@@ -236,10 +283,17 @@ namespace Raven.Client.Shard
 		/// Gets the etag of the last document written by any session belonging to this 
 		/// document store
 		///</summary>
-		public override Guid? GetLastWrittenEtag()
+		public override Etag GetLastWrittenEtag()
 		{
 			throw new NotSupportedException("This isn't a single last written etag when sharding");
 		}
+
+#if !NETFX_CORE
+		public override BulkInsertOperation BulkInsert(string database = null, BulkInsertOptions options = null)
+		{
+            return new BulkInsertOperation(database, this, Listeners, options ?? new BulkInsertOptions(), Changes(database));
+		}
+#endif
 
 		/// <summary>
 		/// Initializes this instance.
@@ -253,7 +307,13 @@ namespace Raven.Client.Shard
 				if (Conventions.DocumentKeyGenerator == null)// don't overwrite what the user is doing
 				{
 					var generator = new ShardedHiloKeyGenerator(this, 32);
-					Conventions.DocumentKeyGenerator = entity => generator.GenerateDocumentKey(Conventions, entity);
+					Conventions.DocumentKeyGenerator = (dbName, commands, entity) => generator.GenerateDocumentKey(commands, Conventions, entity);
+				}
+
+				if (Conventions.AsyncDocumentKeyGenerator == null)
+				{
+					var generator = new AsyncShardedHiloKeyGenerator(this, 32);
+					Conventions.AsyncDocumentKeyGenerator = (dbName, commands, entity) => generator.GenerateDocumentKeyAsync(commands, Conventions, entity);
 				}
 			}
 			catch (Exception)
@@ -265,6 +325,7 @@ namespace Raven.Client.Shard
 			return this;
 		}
 
+#if !NETFX_CORE
 		public IDatabaseCommands DatabaseCommandsFor(string shardId)
 		{
 			IDocumentStore store;
@@ -272,7 +333,32 @@ namespace Raven.Client.Shard
 				throw new InvalidOperationException("Could not find a shard named: " + shardId);
 
 			return store.DatabaseCommands;
+		}
+#endif
 
+		public IAsyncDatabaseCommands AsyncDatabaseCommandsFor(string shardId)
+		{
+			IDocumentStore store;
+			if (ShardStrategy.Shards.TryGetValue(shardId, out store) == false)
+				throw new InvalidOperationException("Could not find a shard named: " + shardId);
+
+			return store.AsyncDatabaseCommands;
+		}
+
+#if !NETFX_CORE
+		/// <summary>
+		/// Executes the transformer creation
+		/// </summary>
+		public override void ExecuteTransformer(AbstractTransformerCreationTask transformerCreationTask)
+		{
+			var list = ShardStrategy.Shards.Values.Select(x => x.DatabaseCommands).ToList();
+			ShardStrategy.ShardAccessStrategy.Apply(list,
+															new ShardRequestData()
+															, (commands, i) =>
+															{
+																transformerCreationTask.Execute(commands, Conventions);
+																return (object)null;
+															});
 		}
 
 		/// <summary>
@@ -281,13 +367,14 @@ namespace Raven.Client.Shard
 		public override void ExecuteIndex(AbstractIndexCreationTask indexCreationTask)
 		{
 			var list = ShardStrategy.Shards.Values.Select(x => x.DatabaseCommands).ToList();
-			ShardStrategy.ShardAccessStrategy.Apply<object>(list,
-			                                                new ShardRequestData()
-			                                                , (commands, i) =>
-			                                                {
-			                                                	indexCreationTask.Execute(commands, Conventions);
-			                                                	return null;
-			                                                });
+			ShardStrategy.ShardAccessStrategy.Apply(list,
+															new ShardRequestData()
+															, (commands, i) =>
+															{
+																indexCreationTask.Execute(commands, Conventions);
+																return (object)null;
+															});
 		}
+#endif
 	}
 }

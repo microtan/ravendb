@@ -1,10 +1,12 @@
 ﻿using System.Linq;
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class IndexDefinitions : LocalClientTest
+	public class IndexDefinitions : RavenTest
 	{
 		public class MyEntity1
 		{

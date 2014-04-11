@@ -1,11 +1,13 @@
 using System;
 using System.Linq;
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs.MultiMap
 {
-	public class SimpleMultiMap : LocalClientTest
+	public class SimpleMultiMap : RavenTest
 	{
 		[Fact]
 		public void CanCreateMultiMapIndex()
@@ -16,13 +18,17 @@ namespace Raven.Tests.Bugs.MultiMap
 
 				var indexDefinition = store.DatabaseCommands.GetIndex("CatsAndDogs");
 				Assert.Equal(2, indexDefinition.Maps.Count);
-				Assert.Equal("docs.Cats\r\n\t.Select(cat => new {Name = cat.Name})", indexDefinition.Maps.First());
-				Assert.Equal("docs.Dogs\r\n\t.Select(dog => new {Name = dog.Name})", indexDefinition.Maps.Skip(1).First());   
+				Assert.Equal(@"docs.Cats.Select(cat => new {
+    Name = cat.Name
+})", indexDefinition.Maps.First());
+				Assert.Equal(@"docs.Dogs.Select(dog => new {
+    Name = dog.Name
+})", indexDefinition.Maps.Skip(1).First());   
 			}
 		}
 
 		[Fact]
-		public void CanQueryUsingMutliMap()
+		public void CanQueryUsingMultiMap()
 		{
 			using (var store = NewDocumentStore())
 			{

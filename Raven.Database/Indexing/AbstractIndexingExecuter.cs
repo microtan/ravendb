@@ -1,211 +1,263 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading.Tasks;
-using NLog;
+using Microsoft.Isam.Esent.Interop;
 using Raven.Abstractions.Data;
+using Raven.Abstractions.Logging;
+using Raven.Abstractions.Util;
+using Raven.Database.Server;
 using Raven.Database.Storage;
 using System.Linq;
-using Raven.Database.Tasks;
-using Task = Raven.Database.Tasks.Task;
 using Raven.Abstractions.Extensions;
+using Raven.Database.Tasks;
 
 namespace Raven.Database.Indexing
 {
-	public abstract class AbstractIndexingExecuter
-	{
-		protected WorkContext context;
-		protected TaskScheduler scheduler;
-		protected static readonly Logger log = LogManager.GetCurrentClassLogger();
-		protected ITransactionalStorage transactionalStorage;
-		protected int workCounter;
-		protected int lastFlushedWorkCounter;
-		protected BaseBatchSizeAutoTuner autoTuner;
+    public abstract class AbstractIndexingExecuter
+    {
+        protected WorkContext context;
+        protected TaskScheduler scheduler;
+        protected static readonly ILog Log = LogManager.GetCurrentClassLogger();
+        protected ITransactionalStorage transactionalStorage;
+        protected int workCounter;
+        protected int lastFlushedWorkCounter;
+        protected BaseBatchSizeAutoTuner autoTuner;
+        protected ConcurrentDictionary<int, Index> currentlyProcessedIndexes = new ConcurrentDictionary<int, Index>();
 
-		protected AbstractIndexingExecuter(ITransactionalStorage transactionalStorage, WorkContext context, TaskScheduler scheduler)
-		{
-			this.transactionalStorage = transactionalStorage;
-			this.context = context;
-			this.scheduler = scheduler;
-		}
+        protected AbstractIndexingExecuter(WorkContext context)
+        {
+            this.transactionalStorage = context.TransactionalStorage;
+            this.context = context;
+            this.scheduler = context.TaskScheduler;
+        }
 
-		public void Execute()
-		{
-			var name = GetType().Name;
-			var workComment = "WORK BY " + name;
+        public void Execute()
+        {
+            using (LogContext.WithDatabase(context.DatabaseName))
+            {
+                Init();
+                var name = GetType().Name;
+                var workComment = "WORK BY " + name;
+                bool isIdle = false;
+                while (context.RunIndexing)
+                {
+                    bool foundWork;
+                    try
+                    {
+                        bool onlyFoundIdleWork;
+                        foundWork = ExecuteIndexing(isIdle, out onlyFoundIdleWork);
+                        if (foundWork && onlyFoundIdleWork == false)
+                            isIdle = false;
 
-			while (context.DoWork)
-			{
-				var foundWork = false;
-				try
-				{
-					foundWork = ExecuteIndexing();
-					while (context.DoWork) // we want to drain all of the pending tasks before the next run
-					{
-						if (ExecuteTasks() == false)
-							break;
-						foundWork = true;
-					}
+                        int runs = 32;
 
-				}
-				catch (OutOfMemoryException oome)
-				{
-					foundWork = true;
-					HandleOutOfMemoryException(oome);
-				}
-				catch (AggregateException ae)
-				{
-					foundWork = true;
-					var oome = ae.ExtractSingleInnerException() as OutOfMemoryException;
-					if (oome == null)
-					{
-						log.ErrorException("Failed to execute indexing", ae);
-					}
-					else
-					{
-						HandleOutOfMemoryException(oome);
-					}
-				}
-				catch (Exception e)
-				{
-					foundWork = true; // we want to keep on trying, anyway, not wait for the timeout or more work
-					log.ErrorException("Failed to execute indexing", e);
-				}
-				if (foundWork == false)
-				{
-					context.WaitForWork(TimeSpan.FromHours(1), ref workCounter, FlushIndexes, name);
-				}
-				else // notify the tasks executer that it has work to do
-				{
-					context.ShouldNotifyAboutWork(() => workComment);
-					context.NotifyAboutWork();
-				}
-			}
-		}
+                        // we want to drain all of the pending tasks before the next run
+                        // but we don't want to halt indexing completely
+                        while (context.RunIndexing && runs-- > 0)
+                        {
+                            if (ExecuteTasks() == false)
+                                break;
+                            foundWork = true;
+                        }
 
-		private void HandleOutOfMemoryException(OutOfMemoryException oome)
-		{
-			log.WarnException(
-				@"Failed to execute indexing because of an out of memory exception. Will force a full GC cycle and then become more conservative with regards to memory",
-				oome);
+                    }
+                    catch (OutOfMemoryException oome)
+                    {
+                        foundWork = true;
+                        HandleOutOfMemoryException(oome);
+                    }
+                    catch (AggregateException ae)
+                    {
+                        foundWork = true;
+                        var actual = ae.ExtractSingleInnerException();
+                        var oome = actual as OutOfMemoryException;
+                        if (oome == null)
+                        {
+                            if (IsEsentOutOfMemory(actual))
+                            {
 
-			// On the face of it, this is stupid, because OOME will not be thrown if the GC could release
-			// memory, but we are actually aware that during indexing, the GC couldn't find garbage to clean,
-			// but in here, we are AFTER the index was done, so there is likely to be a lot of garbage.
-			GC.Collect(GC.MaxGeneration);
-			autoTuner.OutOfMemoryExceptionHappened();
-		}
+                                autoTuner.OutOfMemoryExceptionHappened();
+                            }
+                            Log.ErrorException("Failed to execute indexing", ae);
+                        }
+                        else
+                        {
+                            HandleOutOfMemoryException(oome);
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        Log.Info("Got rude cancellation of indexing as a result of shutdown, aborting current indexing run");
+                        return;
+                    }
+                    catch (Exception e)
+                    {
+                        foundWork = true; // we want to keep on trying, anyway, not wait for the timeout or more work
+#if DEBUG
+                        if (Debugger.IsAttached)
+                            Debugger.Break();
+#endif
+                        Log.ErrorException("Failed to execute indexing", e);
+                        if (IsEsentOutOfMemory(e))
+                        {
+                            autoTuner.OutOfMemoryExceptionHappened();
+                        }
+                    }
+                    if (foundWork == false && context.RunIndexing)
+                    {
+                        isIdle = context.WaitForWork(context.Configuration.TimeToWaitBeforeRunningIdleIndexes, ref workCounter, () =>
+                        {
+                            try
+                            {
+                                FlushIndexes();
+                            }
+                            catch (Exception e)
+                            {
+                                Log.WarnException("Could not flush indexes properly", e);
+                            }
+                        }, name);
+                    }
+                    else // notify the tasks executer that it has work to do
+                    {
+                        context.ShouldNotifyAboutWork(() => workComment);
+                        context.NotifyAboutWork();
+                    }
+                }
+                Dispose();
+            }
+        }
 
-		private bool ExecuteTasks()
-		{
-			bool foundWork = false;
-			transactionalStorage.Batch(actions =>
-			{
-				Task task = GetApplicableTask(actions);
-				if (task == null)
-					return;
+        private bool IsEsentOutOfMemory(Exception actual)
+        {
+            var esentErrorException = actual as EsentErrorException;
+            if (esentErrorException == null)
+                return false;
+            switch (esentErrorException.Error)
+            {
+                case JET_err.OutOfMemory:
+                case JET_err.CurrencyStackOutOfMemory:
+                case JET_err.SPAvailExtCacheOutOfMemory:
+                case JET_err.VersionStoreOutOfMemory:
+                case JET_err.VersionStoreOutOfMemoryAndCleanupTimedOut:
+                    return true;
+            }
+            return false;
+        }
 
-				log.Debug("Executing {0}", task);
-				foundWork = true;
+        protected virtual void Dispose() { }
 
-				try
-				{
-					task.Execute(context);
-				}
-				catch (Exception e)
-				{
-					log.WarnException(
-						string.Format("Task {0} has failed and was deleted without completing any work", task),
-						e);
-				}
-			});
-			return foundWork;
-		}
+        protected virtual void Init() { }
 
-		protected abstract Task GetApplicableTask(IStorageActionsAccessor actions);
+        private void HandleOutOfMemoryException(Exception oome)
+        {
+            Log.WarnException(
+                @"Failed to execute indexing because of an out of memory exception. Will force a full GC cycle and then become more conservative with regards to memory",
+                oome);
 
-		private void FlushIndexes()
-		{
-			if (lastFlushedWorkCounter == workCounter || context.DoWork == false)
-				return;
-			lastFlushedWorkCounter = workCounter;
-			FlushAllIndexes();
-		}
+            // On the face of it, this is stupid, because OOME will not be thrown if the GC could release
+            // memory, but we are actually aware that during indexing, the GC couldn't find garbage to clean,
+            // but in here, we are AFTER the index was done, so there is likely to be a lot of garbage.
+            RavenGC.CollectGarbage(GC.MaxGeneration);
+            autoTuner.OutOfMemoryExceptionHappened();
+        }
 
-		protected abstract void FlushAllIndexes();
+        private bool ExecuteTasks()
+        {
+            bool foundWork = false;
+            transactionalStorage.Batch(actions =>
+            {
+                DatabaseTask task = GetApplicableTask(actions);
+                if (task == null)
+                    return;
 
-		protected bool ExecuteIndexing()
-		{
-			var indexesToWorkOn = new List<IndexToWorkOn>();
-			transactionalStorage.Batch(actions =>
-			{
-				foreach (var indexesStat in actions.Indexing.GetIndexesStats().Where(IsValidIndex))
-				{
-					var failureRate = actions.Indexing.GetFailureRate(indexesStat.Name);
-					if (failureRate.IsInvalidIndex)
-					{
-						log.Info("Skipped indexing documents for index: {0} because failure rate is too high: {1}",
-									   indexesStat.Name,
-									   failureRate.FailureRate);
-						continue;
-					}
-					if (IsIndexStale(indexesStat, actions) == false)
-						continue;
-					indexesToWorkOn.Add(GetIndexToWorkOn(indexesStat));
-				}
-			});
+                context.UpdateFoundWork();
 
-			if (indexesToWorkOn.Count == 0)
-				return false;
+                Log.Debug("Executing task: {0}", task);
+                foundWork = true;
 
-			using(context.IndexDefinitionStorage.CurrentlyIndexing())
-				ExecuteIndexingWork(indexesToWorkOn);
+                context.CancellationToken.ThrowIfCancellationRequested();
 
-			return true;
-		}
+                try
+                {
+                    task.Execute(context);
+                }
+                catch (Exception e)
+                {
+                    Log.WarnException(
+                        string.Format("Task {0} has failed and was deleted without completing any work", task),
+                        e);
+                }
+            });
+            return foundWork;
+        }
 
-		protected abstract IndexToWorkOn GetIndexToWorkOn(IndexStats indexesStat);
+        protected abstract DatabaseTask GetApplicableTask(IStorageActionsAccessor actions);
 
-		protected abstract bool IsIndexStale(IndexStats indexesStat, IStorageActionsAccessor actions);
+        private void FlushIndexes()
+        {
+            if (lastFlushedWorkCounter == workCounter || context.DoWork == false)
+                return;
+            lastFlushedWorkCounter = workCounter;
+            FlushAllIndexes();
+        }
 
-		protected abstract void ExecuteIndexingWork(IList<IndexToWorkOn> indexesToWorkOn);
+        protected abstract void FlushAllIndexes();
 
-		protected abstract bool IsValidIndex(IndexStats indexesStat);
+        protected bool ExecuteIndexing(bool isIdle, out bool onlyFoundIdleWork)
+        {
+            var indexesToWorkOn = new List<IndexToWorkOn>();
+            var localFoundOnlyIdleWork = new Reference<bool> { Value = true };
+            transactionalStorage.Batch(actions =>
+            {
+                foreach (var indexesStat in actions.Indexing.GetIndexesStats().Where(IsValidIndex))
+                {
+                    var failureRate = actions.Indexing.GetFailureRate(indexesStat.Id);
+                    if (failureRate.IsInvalidIndex)
+                    {
+                        Log.Info("Skipped indexing documents for index: {0} because failure rate is too high: {1}",
+                                   indexesStat.Id,
+                                       failureRate.FailureRate);
+                        continue;
+                    }
+                    if (IsIndexStale(indexesStat, actions, isIdle, localFoundOnlyIdleWork) == false)
+                        continue;
+                    var indexToWorkOn = GetIndexToWorkOn(indexesStat);
+                    var index = context.IndexStorage.GetIndexInstance(indexesStat.Id);
+                    if (index == null) // not there
+                        continue;
 
-		protected class ComparableByteArray : IComparable<ComparableByteArray>, IComparable
-		{
-			private readonly byte[] inner;
+                    indexToWorkOn.Index = index;
+                    indexesToWorkOn.Add(indexToWorkOn);
+                }
+            });
+            onlyFoundIdleWork = localFoundOnlyIdleWork.Value;
+            if (indexesToWorkOn.Count == 0)
+                return false;
 
-			public ComparableByteArray(byte[] inner)
-			{
-				this.inner = inner;
-			}
+            context.UpdateFoundWork();
+            context.CancellationToken.ThrowIfCancellationRequested();
 
-			public int CompareTo(ComparableByteArray other)
-			{
-				if (inner.Length != other.inner.Length)
-					return inner.Length - other.inner.Length;
-				for (int i = 0; i < inner.Length; i++)
-				{
-					if (inner[i] != other.inner[i])
-						return inner[i] - other.inner[i];
-				}
-				return 0;
-			}
+            using (context.IndexDefinitionStorage.CurrentlyIndexing())
+            {
+               ExecuteIndexingWork(indexesToWorkOn);
+            }
 
-			public int CompareTo(object obj)
-			{
-				return CompareTo((ComparableByteArray)obj);
-			}
+            return true;
+        }
 
-			public Guid ToGuid()
-			{
-				return new Guid(inner);
-			}
+        public Index[] GetCurrentlyProcessingIndexes()
+        {
+            return currentlyProcessedIndexes.Values.ToArray();
+        }
 
-			public override string ToString()
-			{
-				return ToGuid().ToString();
-			}
-		}
-	}
+        protected abstract IndexToWorkOn GetIndexToWorkOn(IndexStats indexesStat);
+
+        protected abstract bool IsIndexStale(IndexStats indexesStat, IStorageActionsAccessor actions, bool isIdle, Reference<bool> onlyFoundIdleWork);
+
+        protected abstract void ExecuteIndexingWork(IList<IndexToWorkOn> indexesToWorkOn);
+
+        protected abstract bool IsValidIndex(IndexStats indexesStat);
+    }
 }

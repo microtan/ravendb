@@ -3,11 +3,13 @@ using System.ComponentModel.Composition.Hosting;
 using System.Linq;
 using Raven.Client.Indexes;
 using Raven.Client.Linq;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs.Chripede
 {
-	public class IndexOnList : LocalClientTest
+	public class IndexOnList : RavenTest
 	{
 		[Fact]
 		public void CanIndexAndQueryOnList()

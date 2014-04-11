@@ -4,6 +4,7 @@
 // </copyright>
 //-----------------------------------------------------------------------
 using System;
+using System.Globalization;
 using Raven.Json.Linq;
 
 namespace Raven.Abstractions.Data
@@ -42,7 +43,7 @@ namespace Raven.Abstractions.Data
 		/// <value>The metadata.</value>
 		public RavenJObject Metadata
 		{
-			get { return metadata ?? (metadata = new RavenJObject(StringComparer.InvariantCultureIgnoreCase)); }
+			get { return metadata ?? (metadata = new RavenJObject(StringComparer.OrdinalIgnoreCase)); }
 			set { metadata = value; }
 		}
 
@@ -61,7 +62,7 @@ namespace Raven.Abstractions.Data
 		/// Gets or sets the etag.
 		/// </summary>
 		/// <value>The etag.</value>
-		public Guid? Etag { get; set; }
+		public Etag Etag { get; set; }
 
 		/// <summary>
 		/// Gets or sets the last modified date for the document
@@ -70,10 +71,21 @@ namespace Raven.Abstractions.Data
 		public DateTime? LastModified { get; set; }
 
 		/// <summary>
+		/// The ranking of this result in the current query
+		/// </summary>
+		public float? TempIndexScore { get; set; }
+
+		/// <summary>
 		/// How much space this document takes on disk
 		/// Only relevant during indexing phases, and not available on the client
 		/// </summary>
 		public int SerializedSizeOnDisk;
+
+		/// <summary>
+		/// Whatever this document can be skipped from delete
+		/// Only relevant during indexing phases, and not available on the client
+		/// </summary>
+		public bool SkipDeleteFromIndex;
 
 		/// <summary>
 		/// Translate the json document to a <see cref = "RavenJObject" />
@@ -81,16 +93,23 @@ namespace Raven.Abstractions.Data
 		/// <returns></returns>
 		public RavenJObject ToJson()
 		{
-			var doc = (RavenJObject)DataAsJson.CloneToken();
-			var metadata = (RavenJObject)Metadata.CloneToken();
+			DataAsJson.EnsureCannotBeChangeAndEnableSnapshotting();
+			Metadata.EnsureCannotBeChangeAndEnableSnapshotting();
+
+			var doc = (RavenJObject)DataAsJson.CreateSnapshot();
+			var metadata = (RavenJObject)Metadata.CreateSnapshot();
 
 			if (LastModified != null)
+			{
 				metadata[Constants.LastModified] = LastModified.Value;
-			if(Etag != null)
-				metadata["@etag"] = Etag.Value.ToString();
+				metadata[Constants.RavenLastModified] = LastModified.Value.ToString(Default.DateTimeFormatsToWrite, CultureInfo.InvariantCulture);
+			}
+			if (Etag != null)
+				metadata["@etag"] = Etag.ToString();
 			if (NonAuthoritativeInformation != null)
 				metadata["Non-Authoritative-Information"] = NonAuthoritativeInformation.Value;
-
+			//if (metadata.ContainsKey("@id") == false)
+			//	metadata["@id"] = Key;
 			doc["@metadata"] = metadata;
 
 			return doc;

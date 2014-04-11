@@ -3,8 +3,13 @@
 //     Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 // </copyright>
 //-----------------------------------------------------------------------
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net;
+using System.Net.Http;
+using System.Threading.Tasks;
+using System.IO.Compression;
 
 namespace Raven.Abstractions.Connection
 {
@@ -13,7 +18,6 @@ namespace Raven.Abstractions.Connection
 	/// </summary>
 	public static class WebResponseExtensions
 	{
-#if !SILVERLIGHT
 		/// <summary>
 		/// Gets the response stream with HTTP decompression.
 		/// </summary>
@@ -22,29 +26,29 @@ namespace Raven.Abstractions.Connection
 		public static Stream GetResponseStreamWithHttpDecompression(this WebResponse response)
 		{
 			var stream = response.GetResponseStream();
+			Debug.Assert(stream != null, "stream != null");
 			var encoding = response.Headers["Content-Encoding"];
 			if (encoding != null && encoding.Contains("gzip"))
-				stream = new System.IO.Compression.GZipStream(stream, System.IO.Compression.CompressionMode.Decompress);
+				stream = new GZipStream(stream, CompressionMode.Decompress);
 			else if (encoding != null && encoding.Contains("deflate"))
-				stream = new System.IO.Compression.DeflateStream(stream, System.IO.Compression.CompressionMode.Decompress);
+				stream = new DeflateStream(stream, CompressionMode.Decompress);
 			return stream;
 		}
-#else
+
 		/// <summary>
 		/// Gets the response stream with HTTP decompression.
 		/// </summary>
 		/// <param name="response">The response.</param>
 		/// <returns></returns>
-		public static Stream GetResponseStreamWithHttpDecompression(this WebResponse response)
+		public static async Task<Stream> GetResponseStreamWithHttpDecompression(this HttpResponseMessage response)
 		{
-			var stream = response.GetResponseStream();
-			var encoding = response.Headers["Content-Encoding"];
+			var stream = await response.Content.ReadAsStreamAsync();
+			var encoding = response.Content.Headers.ContentEncoding.FirstOrDefault();
 			if (encoding != null && encoding.Contains("gzip"))
-				stream = new Ionic.Zlib.GZipStream(stream, Ionic.Zlib.CompressionMode.Decompress);
+				stream = new GZipStream(stream, CompressionMode.Decompress);
 			else if (encoding != null && encoding.Contains("deflate"))
-				stream = new Ionic.Zlib.DeflateStream(stream, Ionic.Zlib.CompressionMode.Decompress);
+				stream = new DeflateStream(stream, CompressionMode.Decompress);
 			return stream;
 		}
-#endif
 	}
 }

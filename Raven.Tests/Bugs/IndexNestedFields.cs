@@ -9,11 +9,13 @@ using Raven.Abstractions.Indexing;
 using Raven.Client;
 using Raven.Client.Indexes;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class IndexNestedFields : LocalClientTest
+	public class IndexNestedFields : RavenTest
 	{
 		public class Outer
 		{
@@ -35,9 +37,9 @@ namespace Raven.Tests.Bugs
 		[Fact]
 		public void can_query_by_ID()
 		{
-			UsingPrepoulatedDatabase(delegate(IDocumentSession session3)
+			UsingPrepopulatedDatabase(delegate(IDocumentSession session3)
 			{
-				var results1 = session3.Advanced.LuceneQuery<Outer>("matryoshka").Where("middle_inner_ID:" + ExpectedId).ToArray();
+                var results1 = session3.Advanced.DocumentQuery<Outer>("matryoshka").Where("middle_inner_ID:" + ExpectedId).ToArray();
 
 				Assert.Equal(ExpectedId, results1.Single().middle.inner.ID);
 			});
@@ -46,7 +48,7 @@ namespace Raven.Tests.Bugs
 		[Fact]
 		public void can_query_by_ID_with_linq()
 		{
-			UsingPrepoulatedDatabase(delegate(IDocumentSession session3)
+			UsingPrepopulatedDatabase(delegate(IDocumentSession session3)
 				{
 					var results1 = session3.Query<Outer>("matryoshka")
 						.Where(d => d.middle.inner.ID == ExpectedId)
@@ -56,7 +58,7 @@ namespace Raven.Tests.Bugs
 				});
 		}
 
-		void UsingPrepoulatedDatabase(Action<IDocumentSession> testOperation)
+		void UsingPrepopulatedDatabase(Action<IDocumentSession> testOperation)
 		{
 			using (var store = NewDocumentStore())
 			{

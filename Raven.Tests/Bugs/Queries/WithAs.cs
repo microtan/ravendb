@@ -1,10 +1,13 @@
+using Raven.Client;
+using Raven.Tests.Common;
+
 using Xunit;
 using Raven.Client.Linq;
 using System.Linq;
 
 namespace Raven.Tests.Bugs.Queries
 {
-	public class WithAs : LocalClientTest
+	public class WithAs : RavenTest
 	{
 		[Fact]
 		public void WillAutomaticallyGenerateSelect()

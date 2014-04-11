@@ -3,12 +3,14 @@
 //     Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 // </copyright>
 //-----------------------------------------------------------------------
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs
 {
-	public class KeysAreCaseInsensitive : LocalClientTest
+	public class KeysAreCaseInsensitive : RavenTest
 	{
 		[Fact]
 		public void WillNotGoToTheServerForLoadingDocumentWithSameIdDifferentCase()
@@ -38,7 +40,7 @@ namespace Raven.Tests.Bugs
 		}
 
 		[Fact]
-		public void CanIndexIdWithDifferntCasing()
+		public void CanIndexIdWithDifferentCasing()
 		{
 			using (var s = NewDocumentStore())
 			{
@@ -57,7 +59,7 @@ namespace Raven.Tests.Bugs
 
 				using (var session = s.OpenSession())
 				{
-					session.Advanced.LuceneQuery<User>().WaitForNonStaleResults().FirstOrDefault();
+                    session.Advanced.DocumentQuery<User>().WaitForNonStaleResults().FirstOrDefault();
 				}
 
 
@@ -75,7 +77,7 @@ namespace Raven.Tests.Bugs
 
 				using (var session = s.OpenSession())
 				{
-					var count = session.Advanced.LuceneQuery<User>().WaitForNonStaleResults().ToList().Count();
+                    var count = session.Advanced.DocumentQuery<User>().WaitForNonStaleResults().ToList().Count();
 					Assert.Equal(1, count);
 				}
 			}

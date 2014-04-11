@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using Raven.Client.Document;
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
 using Raven.Tests.Spatial;
 using Xunit;
 
@@ -17,7 +18,7 @@ namespace Raven.Tests.Bugs
 		}
 	}
 
-	public class ReservedWords : LocalClientTest
+	public class ReservedWords : RavenTest
 	{
 		[Fact]
 		public void WillOutputCorrectly()
@@ -27,7 +28,11 @@ namespace Raven.Tests.Bugs
 				Conventions = new DocumentConvention()
 			}.CreateIndexDefinition();
 
-			Assert.Equal("docs.Events\r\n\t.Select(@event => new {Year = @event.Date.Year, Month = @event.Date.Month, Count = 1})", indexDefinition.Map);
+			Assert.Equal(@"docs.Events.Select(@event => new {
+    Year = @event.Date.Year,
+    Month = @event.Date.Month,
+    Count = 1
+})", indexDefinition.Map);
 		}
 
 		[Fact]

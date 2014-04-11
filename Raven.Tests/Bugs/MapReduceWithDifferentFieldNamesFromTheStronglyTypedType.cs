@@ -1,18 +1,21 @@
 using System;
 using System.Linq;
+using Raven.Abstractions.Exceptions;
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class MapReduceWithDifferentFieldNamesFromTheStronglyTypedType : LocalClientTest
+	public class MapReduceWithDifferentFieldNamesFromTheStronglyTypedType : RavenTest
 	{
 		[Fact]
 		public void WhenTheAnonymousTypeResultIsNotTheSameAsTheStronglyType_ShouldThrowAnException()
 		{
 			using (var embeddableDocumentStore = NewDocumentStore())
 			{
-				Assert.Throws<InvalidOperationException>(() => new Posts_ByMonthPublished_Count_ShouldFail().Execute(embeddableDocumentStore));
+				Assert.Throws<IndexCompilationException>(() => new Posts_ByMonthPublished_Count_ShouldFail().Execute(embeddableDocumentStore));
 			}
 		}
 

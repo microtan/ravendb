@@ -3,41 +3,33 @@
 //     Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 // </copyright>
 //-----------------------------------------------------------------------
-using System;
 using System.Linq;
 using Raven.Abstractions.Indexing;
 using Raven.Client;
-using Raven.Client.Document;
-using Raven.Database.Indexing;
-using Raven.Server;
 using Raven.Tests.Bugs.TransformResults;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class Includes : RemoteClientTest, IDisposable
+	public class Includes : RavenTest
 	{
 		private readonly IDocumentStore store;
-		private readonly RavenDbServer server;
 
 		public Includes()
 		{
-			server = GetNewServer(8079, GetPath(DbName));
-
-			store = new DocumentStore
-			{
-				Url = "http://localhost:8079"
-			}.Initialize();
+			store = NewRemoteDocumentStore();
 
 			store.DatabaseCommands.PutIndex("Orders/ByName",
-			                                new IndexDefinition
-			                                {
+											new IndexDefinition
+											{
 												Map = "from doc in docs.Orders select new { doc.Name }"
-			                                });
+											});
 
-			using(var session = store.OpenSession())
+			using (var session = store.OpenSession())
 			{
-				
+
 				for (int i = 0; i < 15; i++)
 				{
 					var customer = new Customer
@@ -45,7 +37,7 @@ namespace Raven.Tests.Bugs
 						Email = "ayende@ayende.com",
 						Name = "Oren"
 					};
-					
+
 					session.Store(customer);
 
 					session.Store(new Order
@@ -86,8 +78,8 @@ namespace Raven.Tests.Bugs
 		{
 			using (var session = store.OpenSession())
 			{
-				var orders = session.Advanced.LuceneQuery<Order>()
-					.Include(x=>x.Customer.Id)
+                var orders = session.Advanced.DocumentQuery<Order>()
+					.Include(x => x.Customer.Id)
 					.WaitForNonStaleResults()
 					.WhereEquals("Name", "3")
 					.ToArray();
@@ -132,8 +124,8 @@ namespace Raven.Tests.Bugs
 			{
 				var views = session
 					.Query<Answer, Answers_ByAnswerEntity>()
-					.Customize(x => x.Include("Fppbar").WaitForNonStaleResults())
-					.Where(x => x.Id == answerId)
+					.Customize(x => x.Include("Foobar").WaitForNonStaleResults())
+					.Where(x => x.Id == answerId && x.UserId == "foo")
 					.ToArray();
 			}
 		}
@@ -182,7 +174,7 @@ namespace Raven.Tests.Bugs
 			using (var session = store.OpenSession())
 			{
 				var orders = session
-					.Advanced.LuceneQuery<Order>("Orders/ByName")
+                    .Advanced.DocumentQuery<Order>("Orders/ByName")
 					.WaitForNonStaleResults()
 					.Include("Customer.Id")
 					.Take(2)
@@ -203,10 +195,12 @@ namespace Raven.Tests.Bugs
 		}
 
 		[Fact]
-		public void CanIncludeExtensionWithQuery() {
-			using (var session = store.OpenSession()) {
+		public void CanIncludeExtensionWithQuery()
+		{
+			using (var session = store.OpenSession())
+			{
 				var orders = session.Advanced
-					.LuceneQuery<Order>("Orders/ByName")
+                    .DocumentQuery<Order>("Orders/ByName")
 					.WaitForNonStaleResults()
 					.Include(o => o.Customer.Id)
 					.Take(2)
@@ -247,14 +241,6 @@ namespace Raven.Tests.Bugs
 
 				Assert.Equal(1, session.Advanced.NumberOfRequests);
 			}
-		}
-
-		public override void Dispose()
-		{
-			store.Dispose();
-			server.Dispose();
-			ClearDatabaseDirectory();
-			base.Dispose();
 		}
 
 		public class Order

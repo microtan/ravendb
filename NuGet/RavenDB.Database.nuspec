@@ -2,7 +2,7 @@
 <package>
 	<metadata>
 		<id>RavenDB.Database</id>
-		<version>1.0</version>
+		<version>{{version}}</version>
 		<title>RavenDB Database</title>
 		<authors>Hibernating Rhinos</authors>
 		<summary>This package allows you to extend RavenDB database.</summary>
@@ -13,8 +13,12 @@
 		<requireLicenseAcceptance>true</requireLicenseAcceptance>
 		<tags>nosql ravendb raven document database</tags>
 		<dependencies>
-			<dependency id="Newtonsoft.Json" version="[4.0.8]"/>
-			<dependency id="NLog" version="[2.0.0.2000]" />
+			<dependency id="System.Spatial" version="5.2" />
+			<dependency id="WindowsAzure.Storage" version="2.0" />
+			<dependency id="Microsoft.Data.Edm" version="5.2" />
+			<dependency id="Microsoft.Data.OData" version="5.2" />
+			<dependency id="Microsoft.WindowsAzure.ConfigurationManager" version="1.8" />
+			<dependency id="RavenDB.Client" version="" />
 		</dependencies>
 		<frameworkAssemblies>
 			<frameworkAssembly assemblyName="System.ComponentModel.Composition" targetFramework="net40" />

@@ -10,6 +10,8 @@ using Raven.Client.Connection;
 using Raven.Client.Document;
 using Raven.Client.Shard;
 using Raven.Server;
+using Raven.Tests.Common;
+
 using Xunit;
 using Raven.Client.Linq;
 using System.Linq;
@@ -109,6 +111,7 @@ namespace Raven.Tests.Shard
 		[Fact]
 		public void WhenQueryingWillGoToTheRightServer_UsingQueryById()
 		{
+			store.Conventions.AllowQueriesOnId = true;
 			using (var session = store.OpenSession())
 			{
 				var p1 = new Post();

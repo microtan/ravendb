@@ -1,16 +1,18 @@
 ﻿using System.Linq;
 using Raven.Client;
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class StaticDynamic : LocalClientTest
+	public class StaticDynamic : RavenTest
 	{
 		[Fact]
 		public void IfStaticQueryHasWhere_SeparateDynamicQueryCreated()
 		{
-			using (var store = NewDocumentStore())
+			using (var store = NewDocumentStore(requestedStorage: "esent"))
 			{
 				new Docs_Flagged().Execute(store);
 				const int docsCount = 10;
@@ -19,13 +21,13 @@ namespace Raven.Tests.Bugs
 
 				using (var session = store.OpenSession())
 				{
-					var docsByDynamicIndex = session.Advanced.LuceneQuery<TestDoc>().WaitForNonStaleResults().ToList();
+                    var docsByDynamicIndex = session.Advanced.DocumentQuery<TestDoc>().WaitForNonStaleResults().ToList();
 					Assert.Equal(docsCount, docsByDynamicIndex.Count);
 				}
 
 				using (var session = store.OpenSession())
 				{
-					var docsByStaticIndex = session.Advanced.LuceneQuery<TestDoc, Docs_Flagged>().WaitForNonStaleResults().ToList();
+                    var docsByStaticIndex = session.Advanced.DocumentQuery<TestDoc, Docs_Flagged>().WaitForNonStaleResults().ToList();
 					Assert.Equal(docsCount/2, docsByStaticIndex.Count);
 				}
 			}
@@ -41,7 +43,7 @@ namespace Raven.Tests.Bugs
 
 				var session = store.OpenSession();
 
-				var docsByDynamicIndex = session.Advanced.LuceneQuery<TestDoc>().WaitForNonStaleResults().ToList();
+                var docsByDynamicIndex = session.Advanced.DocumentQuery<TestDoc>().WaitForNonStaleResults().ToList();
 				Assert.Equal(docsCount, docsByDynamicIndex.Count);
 			}
 		}
@@ -57,21 +59,21 @@ namespace Raven.Tests.Bugs
 				session.SaveChanges();
 			}
 		}
-	}
 
-	public class Docs_Flagged : AbstractIndexCreationTask<TestDoc>
-	{
-		public Docs_Flagged()
+		public class Docs_Flagged : AbstractIndexCreationTask<TestDoc>
 		{
-			Map = testDocs => from doc in testDocs
-							  where doc.Flag
-							  select new { doc.Id };
+			public Docs_Flagged()
+			{
+				Map = testDocs => from doc in testDocs
+								  where doc.Flag
+								  select new { doc.Id };
+			}
 		}
-	}
 
-	public class TestDoc
-	{
-		public string Id { get; set; }
-		public bool Flag { get; set; }
+		public class TestDoc
+		{
+			public string Id { get; set; }
+			public bool Flag { get; set; }
+		}
 	}
 }

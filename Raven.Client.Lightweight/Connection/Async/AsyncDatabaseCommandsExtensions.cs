@@ -1,10 +1,8 @@
-#if !NET_3_5
 using System;
-using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Linq;
 using Raven.Abstractions.Data;
-using Raven.Json.Linq;
+using Raven.Abstractions.Util;
 
 namespace Raven.Client.Connection.Async
 {
@@ -39,11 +37,21 @@ namespace Raven.Client.Connection.Async
 					return cmds.MultiGetAsync(termRequests)
 						.ContinueWith(termsResultsTask => termsResultsTask.Result.Select((t, i) => new NameAndCount
 						{
-							Count = RavenJObject.Parse(t.Result).Value<int>("TotalResults"),
+							Count = t.Result.Value<int>("TotalResults"),
 							Name = terms[i]
 						}).ToArray());
 				})
 				.Unwrap();
+		}
+
+		/// <summary>
+		/// Sends a patch request for a specific document, ignoring the document's Etag
+		/// </summary>
+		/// <param name="key">Id of the document to patch</param>
+		/// <param name="patches">Array of patch requests</param>
+		public static Task PatchAsync(this IAsyncDatabaseCommands commands, string key, PatchRequest[] patches)
+		{
+			return commands.PatchAsync(key, patches, null);
 		}
 	}
 
@@ -53,4 +61,3 @@ namespace Raven.Client.Connection.Async
 		public int Count { get; set; }
 	}
 }
-#endif

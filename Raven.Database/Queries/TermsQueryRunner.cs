@@ -5,7 +5,6 @@
 //-----------------------------------------------------------------------
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.Contracts;
 using Lucene.Net.Index;
 using Lucene.Net.Search;
 
@@ -24,27 +23,39 @@ namespace Raven.Database.Queries
 		{
 			if(field == null) throw new ArgumentNullException("field");
 			if(index == null) throw new ArgumentNullException("index");
-			
+
+			if (field.EndsWith("_Range"))
+			{
+				field = field.Substring(0, field.Length - "_Range".Length);
+			}
+
 			var result = new HashSet<string>();
 			IndexSearcher currentIndexSearcher;
-			using(database.IndexStorage.GetCurrentIndexSearcher(index, out currentIndexSearcher))
+			var indexDefinition = database.IndexDefinitionStorage.GetIndexDefinition(index);
+			if(indexDefinition == null) //prevent NRE if needed
+				throw new ArgumentException("index definition not found","index");
+
+			using(database.IndexStorage.GetCurrentIndexSearcher(indexDefinition.IndexId, out currentIndexSearcher))
 			{
-				var termEnum = currentIndexSearcher.GetIndexReader().Terms(new Term(field, fromValue ?? string.Empty));
-				try
+				if(currentIndexSearcher == null)
+				{
+					throw new InvalidOperationException("Could not find current searcher");
+				}
+				using(var termEnum = currentIndexSearcher.IndexReader.Terms(new Term(field, fromValue ?? string.Empty)))
 				{
 					if (string.IsNullOrEmpty(fromValue) == false) // need to skip this value
 					{
-						while (termEnum.Term() == null || fromValue.Equals(termEnum.Term().Text()))
+						while (termEnum.Term == null || fromValue.Equals(termEnum.Term.Text))
 						{
 							if (termEnum.Next() == false)
 								return result;
 						}
 					}
-					while (termEnum.Term() == null || 
-						field.Equals(termEnum.Term().Field()))
+					while (termEnum.Term == null || 
+						field.Equals(termEnum.Term.Field))
 					{
-						if (termEnum.Term() != null)
-							result.Add(termEnum.Term().Text());
+						if (termEnum.Term != null)
+							result.Add(termEnum.Term.Text);
 
 						if (result.Count >= pageSize)
 							break;
@@ -52,10 +63,6 @@ namespace Raven.Database.Queries
 						if (termEnum.Next() == false)
 							break;
 					}
-				}
-				finally
-				{
-					termEnum.Close();
 				}
 			}
 

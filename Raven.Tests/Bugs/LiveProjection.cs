@@ -6,18 +6,18 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Lucene.Net.Documents;
 using Raven.Abstractions.Indexing;
 using Raven.Client;
-using Raven.Client.Document;
 using Raven.Client.Embedded;
 using Raven.Client.Indexes;
 using Raven.Client.Linq;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class LiveProjection : LocalClientTest, IDisposable
+	public class LiveProjection : RavenTest, IDisposable
 	{
 		public LiveProjection()
 		{

@@ -1,7 +1,12 @@
+#if !NETFX_CORE
 using System;
+using System.Collections.Generic;
 using System.Configuration;
+using System.Linq;
 using System.Net;
 using System.Text.RegularExpressions;
+using Raven.Abstractions.Replication;
+using Raven.Imports.Newtonsoft.Json;
 
 namespace Raven.Abstractions.Data
 {
@@ -9,14 +14,19 @@ namespace Raven.Abstractions.Data
 	{
 		public RavenConnectionStringOptions()
 		{
+#if MONO
+			EnlistInDistributedTransactions = false;
+#else
 			EnlistInDistributedTransactions = true;
+#endif
 		}
 
-		public NetworkCredential Credentials { get; set; }
+		public ICredentials Credentials { get; set; }
 		public bool EnlistInDistributedTransactions { get; set; }
 		public string DefaultDatabase { get; set; }
 		public Guid ResourceManagerId { get; set; }
 		private string url;
+
 		public string Url
 		{
 			get { return url; }
@@ -26,13 +36,15 @@ namespace Raven.Abstractions.Data
 			}
 		}
 
+		public FailoverServers FailoverServers { get; set; }
+
 		public string ApiKey { get; set; }
 
 		internal string CurrentOAuthToken { get; set; }
 
 		public override string ToString()
 		{
-			var user = Credentials == null ? "<none>" : Credentials.UserName;
+			var user = Credentials == null ? "<none>" : ((NetworkCredential)Credentials).UserName;
 			return string.Format("Url: {4}, User: {0}, EnlistInDistributedTransactions: {1}, DefaultDatabase: {2}, ResourceManagerId: {3}, Api Key: {5}", user, EnlistInDistributedTransactions, DefaultDatabase, ResourceManagerId, Url, ApiKey);
 		}
 	}
@@ -50,12 +62,16 @@ namespace Raven.Abstractions.Data
 	{
 		public static ConnectionStringParser<TConnectionString> FromConnectionStringName(string connectionStringName)
 		{
+#if !MONODROID
 			var connectionStringSettings = ConfigurationManager.ConnectionStrings[connectionStringName];
 			if (connectionStringSettings == null)
 				throw new ArgumentException(string.Format("Could not find connection string name: '{0}'", connectionStringName));
 
 		
 			return new ConnectionStringParser<TConnectionString>(connectionStringName, connectionStringSettings.ConnectionString);
+#else
+			throw new ArgumentException(string.Format("Connection string not supported"));
+#endif
 		}
 
 		public static ConnectionStringParser<TConnectionString> FromConnectionString(string connectionString)
@@ -64,15 +80,11 @@ namespace Raven.Abstractions.Data
 		}
 
 		private static readonly Regex connectionStringRegex = new Regex(@"(\w+) \s* = \s* (.*)",
-#if !SILVERLIGHT
 		                                                                RegexOptions.Compiled |
-#endif
 		                                                                RegexOptions.IgnorePatternWhitespace);
 
 		private static readonly Regex connectionStringArgumentsSplitterRegex = new Regex(@"; (?=\s* \w+ \s* =)",
-#if !SILVERLIGHT
 		                                                                                 RegexOptions.Compiled |
-#endif
 		                                                                                 RegexOptions.IgnorePatternWhitespace);
 
 		private readonly string connectionString;
@@ -106,7 +118,13 @@ namespace Raven.Abstractions.Data
 						goto default;
 					bool result;
 					if (bool.TryParse(value, out result) == false)
+					{
+#if !MONODROID
 						throw new ConfigurationErrorsException(string.Format("Could not understand memory setting: '{0}'", value));
+#else
+						throw new Exception(string.Format("Could not understand memory setting: '{0}'", value));
+#endif
+					}
 					embeddedRavenConnectionStringOptions.RunInMemory = result;
 					break;
 				case "datadir":
@@ -122,7 +140,26 @@ namespace Raven.Abstractions.Data
 					ConnectionStringOptions.ResourceManagerId = new Guid(value);
 					break;
 				case "url":
-					ConnectionStringOptions.Url = value;
+					if (string.IsNullOrEmpty(ConnectionStringOptions.Url))
+						ConnectionStringOptions.Url = value;
+					break;
+				case "failover":
+					if (ConnectionStringOptions.FailoverServers == null)
+						ConnectionStringOptions.FailoverServers = new FailoverServers();
+
+					var databaseNameAndFailoverDestination = value.Split('|');
+
+					ReplicationDestination destination;
+					if (databaseNameAndFailoverDestination.Length == 1)
+					{
+						destination = JsonConvert.DeserializeObject<ReplicationDestination>(databaseNameAndFailoverDestination[0]);
+						ConnectionStringOptions.FailoverServers.AddForDefaultDatabase(destination);
+					}
+					else
+					{
+						destination = JsonConvert.DeserializeObject<ReplicationDestination>(databaseNameAndFailoverDestination[1]);
+						ConnectionStringOptions.FailoverServers.AddForDatabase(databaseName: databaseNameAndFailoverDestination[0], destinations: destination);
+					}
 					break;
 				case "database":
 				case "defaultdatabase":
@@ -166,3 +203,4 @@ namespace Raven.Abstractions.Data
 		}
 	}
 }
+#endif

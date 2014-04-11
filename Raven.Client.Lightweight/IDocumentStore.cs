@@ -4,22 +4,23 @@
 // </copyright>
 //-----------------------------------------------------------------------
 using System;
-#if !SILVERLIGHT
-using System.Collections.Specialized;
-#endif
 using System.Collections.Generic;
 using System.Net;
+using System.Threading.Tasks;
+using Raven.Abstractions.Data;
+using Raven.Client.Changes;
 using Raven.Client.Connection;
 using Raven.Client.Connection.Profiling;
 using Raven.Client.Document;
-#if SILVERLIGHT
-using Raven.Client.Silverlight.Connection;
+using Raven.Client.Listeners;
+#if NETFX_CORE
+using Raven.Client.WinRT.Connection;
 #else
+using System.Collections.Specialized;
+#endif
 using Raven.Client.Indexes;
-#endif
-#if !NET_3_5
 using Raven.Client.Connection.Async;
-#endif
+
 
 namespace Raven.Client
 {
@@ -29,15 +30,30 @@ namespace Raven.Client
 	public interface IDocumentStore : IDisposalNotification
 	{
 		/// <summary>
+		/// Subscribe to change notifications from the server
+		/// </summary>
+		IDatabaseChanges Changes(string database = null);
+
+		/// <summary>
 		/// Setup the context for aggressive caching.
 		/// </summary>
-		/// <param name="cahceDuration">Specify the aggressive cache duration</param>
+		/// <param name="cacheDuration">Specify the aggressive cache duration</param>
 		/// <remarks>
 		/// Aggressive caching means that we will not check the server to see whatever the response
 		/// we provide is current or not, but will serve the information directly from the local cache
 		/// without touching the server.
 		/// </remarks>
-		IDisposable AggressivelyCacheFor(TimeSpan cahceDuration);
+		IDisposable AggressivelyCacheFor(TimeSpan cacheDuration);
+
+		/// <summary>
+		/// Setup the context for aggressive caching.
+		/// </summary>
+		/// <remarks>
+		/// Aggressive caching means that we will not check the server to see whatever the response
+		/// we provide is current or not, but will serve the information directly from the local cache
+		/// without touching the server.
+		/// </remarks>
+		IDisposable AggressivelyCache();
 
 		/// <summary>
 		/// Setup the context for no aggressive caching
@@ -50,10 +66,19 @@ namespace Raven.Client
 		IDisposable DisableAggressiveCaching();
 
 		/// <summary>
+		/// Setup the WebRequest timeout for the session
+		/// </summary>
+		/// <param name="timeout">Specify the timeout duration</param>
+		/// <remarks>
+		/// Sets the timeout for the JsonRequest.  Scoped to the Current Thread.
+		/// </remarks>
+		IDisposable SetRequestsTimeoutFor(TimeSpan timeout);
+
+		/// <summary>
 		/// Gets the shared operations headers.
 		/// </summary>
 		/// <value>The shared operations headers.</value>
-#if !SILVERLIGHT
+#if !NETFX_CORE
 		NameValueCollection SharedOperationsHeaders { get; }
 #else
 		IDictionary<string,string> SharedOperationsHeaders { get; }
@@ -76,8 +101,6 @@ namespace Raven.Client
 		/// <returns></returns>
 		IDocumentStore Initialize();
 
-
-#if !NET_3_5
 		/// <summary>
 		/// Gets the async database commands.
 		/// </summary>
@@ -95,9 +118,8 @@ namespace Raven.Client
 		/// </summary>
 		/// <returns></returns>
 		IAsyncDocumentSession OpenAsyncSession(string database);
-#endif
 
-#if !SILVERLIGHT
+#if !NETFX_CORE
 		/// <summary>
 		/// Opens the session.
 		/// </summary>
@@ -120,11 +142,23 @@ namespace Raven.Client
 		/// <value>The database commands.</value>
 		IDatabaseCommands DatabaseCommands { get; }
 
-		
 		/// <summary>
 		/// Executes the index creation.
 		/// </summary>
 		void ExecuteIndex(AbstractIndexCreationTask indexCreationTask);
+
+        /// <summary>
+        /// Executes the index creation.
+        /// </summary>
+        /// <param name="indexCreationTask"></param>
+        Task ExecuteIndexAsync(AbstractIndexCreationTask indexCreationTask);
+
+		/// <summary>
+		/// Executes the transformer creation
+		/// </summary>
+		void ExecuteTransformer(AbstractTransformerCreationTask transformerCreationTask);
+
+        Task ExecuteTransformerAsync(AbstractTransformerCreationTask transformerCreationTask);
 #endif
 
 		/// <summary>
@@ -142,6 +176,14 @@ namespace Raven.Client
 		/// Gets the etag of the last document written by any session belonging to this 
 		/// document store
 		///</summary>
-		Guid? GetLastWrittenEtag();
+		Etag GetLastWrittenEtag();
+
+#if !NETFX_CORE
+		BulkInsertOperation BulkInsert(string database = null, BulkInsertOptions options = null);
+#endif
+
+        DocumentSessionListeners Listeners { get; }
+
+	    void SetListeners(DocumentSessionListeners listeners);
 	}
 }

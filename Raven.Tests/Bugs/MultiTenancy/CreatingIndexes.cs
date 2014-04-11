@@ -12,27 +12,35 @@ using Raven.Database.Config;
 using Raven.Database.Extensions;
 using Raven.Database.Server;
 using Raven.Server;
+using Raven.Tests.Common;
+
 using Xunit;
+using Raven.Client.Extensions;
 
 namespace Raven.Tests.Bugs.MultiTenancy
 {
-	public class CreatingIndexes : RemoteClientTest, IDisposable
+	public class CreatingIndexes : RavenTest, IDisposable
 	{
 		protected RavenDbServer GetNewServer(int port)
 		{
-			return
-				new RavenDbServer(new RavenConfiguration
-				{
-					Port = port,
-					RunInMemory = true,
-					DataDirectory = "Data",
-					AnonymousUserAccessMode = AnonymousUserAccessMode.All
-				});
+		    RavenDbServer ravenDbServer = new RavenDbServer(new RavenConfiguration
+		    {
+		        Port = port,
+		        RunInMemory = true,
+		        DataDirectory = "Data",
+		        AnonymousUserAccessMode = AnonymousUserAccessMode.Admin
+		    })
+		    {
+		        UseEmbeddedHttpServer = true
+		    };
+		    ravenDbServer.Initialize();
+		    return
+				ravenDbServer;
 		}
 
 
-		[Fact]
-		public void Mulitenancy_Test()
+	    [Fact]
+		public void Multitenancy_Test()
 		{
 			using (GetNewServer(8079))
 			using (var store = new DocumentStore
@@ -41,6 +49,7 @@ namespace Raven.Tests.Bugs.MultiTenancy
 				DefaultDatabase = "Test"
 			}.Initialize())
 			{
+				store.DatabaseCommands.GlobalAdmin.EnsureDatabaseExists("Test");
 				store.DatabaseCommands.PutIndex("TestIndex",
 												new IndexDefinitionBuilder<Test, Test>
 												{
@@ -48,16 +57,16 @@ namespace Raven.Tests.Bugs.MultiTenancy
 																	select new {movie.Name}
 												});
 
-				using (var sess = store.OpenSession())
+				using (var session = store.OpenSession())
 				{
-					sess.Store(new Test {Name = "xxx"});
+					session.Store(new Test {Name = "xxx"});
 
-					sess.SaveChanges();
+					session.SaveChanges();
 				}
 
-				using (var sess = store.OpenSession())
+				using (var session = store.OpenSession())
 				{
-					var result = sess.Query<Test>("TestIndex")
+					var result = session.Query<Test>("TestIndex")
 						.Customize(x=>x.WaitForNonStaleResults())
 						.Where(x => x.Name == "xxx")
 						.FirstOrDefault();

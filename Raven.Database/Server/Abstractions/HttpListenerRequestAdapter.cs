@@ -13,16 +13,14 @@ namespace Raven.Database.Server.Abstractions
 	public class HttpListenerRequestAdapter : IHttpRequest
 	{
 		private readonly HttpListenerRequest request;
-
-	    private NameValueCollection queryString;
+	    private readonly NameValueCollection queryString;
 
 	    public HttpListenerRequestAdapter(HttpListenerRequest request)
 		{
 			this.request = request;
-		    this.queryString = System.Web.HttpUtility.ParseQueryString(Uri.UnescapeDataString(request.Url.Query));
-	        Url = this.request.Url;
+		    Url = this.request.Url;
 	        RawUrl = this.request.RawUrl;
-			
+		    queryString = HttpRequestHelper.ParseQueryStringWithLegacySupport(request.Headers["Raven-Client-Version"], request.Url.Query);
 		}
 
 		public bool IsLocal
@@ -41,6 +39,11 @@ namespace Raven.Database.Server.Abstractions
 			set { inputStream = value; }
 		}
 
+		public long ContentLength
+		{
+			get { return request.ContentLength64; }
+		}
+
 		public NameValueCollection QueryString
 		{
 			get { return queryString; }
@@ -54,5 +57,25 @@ namespace Raven.Database.Server.Abstractions
 		}
 
 	    public string RawUrl { get;  set; }
+
+		public Stream GetBufferLessInputStream()
+		{
+			return request.InputStream;
+		}
+
+		public bool HasCookie(string name)
+		{
+			return request.Cookies[name] != null;
+		}
+
+		public string GetCookie(string name)
+		{
+			var cookie = request.Cookies[name];
+			if (cookie == null)
+			{
+				return null;
+			}
+			return cookie.Value;
+		}
 	}
 }

@@ -1,11 +1,14 @@
 using System.ComponentModel.Composition.Hosting;
-using System.Linq;
 using Raven.Client.Indexes;
+using System.Linq;
+
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class CreatingIndexes : LocalClientTest
+	public class CreatingIndexes : RavenTest
 	{
 		public class AllDocs1 : AbstractIndexCreationTask<object>
 		{

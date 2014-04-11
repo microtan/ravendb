@@ -3,18 +3,16 @@
 //     Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 // </copyright>
 //-----------------------------------------------------------------------
-#if !SILVERLIGHT
+#if !NETFX_CORE
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Raven.Abstractions.Data;
 using System.Threading;
-#if !NET_3_5
 using System.Threading.Tasks;
+using Raven.Abstractions.Data;
 using Raven.Client.Connection.Async;
 using Raven.Client.Document.Batches;
-#endif
 using Raven.Client.Document.SessionOperations;
 using Raven.Client.Listeners;
 using Raven.Client.Connection;
@@ -40,7 +38,7 @@ namespace Raven.Client.Document
 			{
 				if (databaseCommands == null)
 				{
-					var shardsToOperateOn = getShardsToOperateOn(new ShardRequestData {EntityType = typeof (T), Query = IndexQuery});
+					var shardsToOperateOn = getShardsToOperateOn(new ShardRequestData {EntityType = typeof (T), Query = IndexQuery, IndexName = indexName});
 					databaseCommands = shardsToOperateOn.Select(x => x.Item2).ToList();
 				}
 				return databaseCommands;
@@ -48,23 +46,23 @@ namespace Raven.Client.Document
 		}
 
 		private IndexQuery indexQuery;
-		private IndexQuery IndexQuery
+	    private IndexQuery IndexQuery
 		{
-			get { return indexQuery ?? (indexQuery = GenerateIndexQuery(theQueryText.ToString())); }
+			get { return indexQuery ?? (indexQuery = GenerateIndexQuery(queryText.ToString())); }
 		}
 
 		/// <summary>
 		/// Initializes a new instance of the <see cref="ShardedDocumentQuery{T}"/> class.
 		/// </summary>
-		public ShardedDocumentQuery(InMemoryDocumentSessionOperations session, Func<ShardRequestData, IList<Tuple<string, IDatabaseCommands>>> getShardsToOperateOn, ShardStrategy shardStrategy, string indexName, string[] projectionFields, IDocumentQueryListener[] queryListeners)
+		public ShardedDocumentQuery(InMemoryDocumentSessionOperations session, Func<ShardRequestData, IList<Tuple<string, IDatabaseCommands>>> getShardsToOperateOn, ShardStrategy shardStrategy, string indexName, string[] fieldsToFetch, string[] projectionFields, IDocumentQueryListener[] queryListeners, bool isMapReduce)
 			: base(session
-#if !SILVERLIGHT
 			, null
-#endif
-#if !NET_3_5
 			, null
-#endif
-			, indexName, projectionFields, queryListeners)
+			, indexName, 
+			fieldsToFetch,
+			projectionFields, 
+			queryListeners,
+			isMapReduce)
 		{
 			this.getShardsToOperateOn = getShardsToOperateOn;
 			this.shardStrategy = shardStrategy;
@@ -89,30 +87,51 @@ namespace Raven.Client.Document
 			ExecuteActualQuery();
 		}
 
-		public override IDocumentQuery<TProjection> SelectFields<TProjection>(string[] fields)
+		public override IDocumentQuery<TProjection> SelectFields<TProjection>(string[] fields, string[] projections)
 		{
 			var documentQuery = new ShardedDocumentQuery<TProjection>(theSession,
 				getShardsToOperateOn,
 				shardStrategy, 
 				indexName,
 				fields,
-				queryListeners)
+				projections,
+				queryListeners,
+				isMapReduce)
 			{
 				pageSize = pageSize,
-				theQueryText = new StringBuilder(theQueryText.ToString()),
+				queryText = new StringBuilder(queryText.ToString()),
 				start = start,
 				timeout = timeout,
 				cutoff = cutoff,
+				cutoffEtag = cutoffEtag,
 				queryStats = queryStats,
 				theWaitForNonStaleResults = theWaitForNonStaleResults,
+                theWaitForNonStaleResultsAsOfNow = theWaitForNonStaleResultsAsOfNow,
 				sortByHints = sortByHints,
 				orderByFields = orderByFields,
-				groupByFields = groupByFields,
-				aggregationOp = aggregationOp,
+				isDistinct = isDistinct,
 				transformResultsFunc = transformResultsFunc,
-				includes = new HashSet<string>(includes)
+				includes = new HashSet<string>(includes),
+				rootTypes = {typeof(T)},
+				beforeQueryExecutionAction = beforeQueryExecutionAction,
+				afterQueryExecutedCallback = afterQueryExecutedCallback,
+				defaultField = defaultField,
+				highlightedFields = new List<HighlightedField>(highlightedFields),
+				highlighterPreTags = highlighterPreTags,
+				highlighterPostTags = highlighterPostTags,
+				distanceErrorPct = distanceErrorPct,
+				isSpatialQuery = isSpatialQuery,
+				negate = negate,
+				queryShape = queryShape,
+				spatialFieldName = spatialFieldName,
+				spatialRelation = spatialRelation,
+				spatialUnits = spatialUnits,
+				databaseCommands = databaseCommands,
+				indexQuery = indexQuery,
+				disableEntitiesTracking = disableEntitiesTracking,
+				disableCaching = disableCaching,
+				shouldExplainScores = shouldExplainScores
 			};
-			documentQuery.AfterQueryExecuted(afterQueryExecutedCallback);
 			return documentQuery;
 		}
 
@@ -126,7 +145,8 @@ namespace Raven.Client.Document
 					new ShardRequestData
 					{
 						EntityType = typeof(T),
-						Query = IndexQuery
+						Query = IndexQuery,
+						IndexName = indexName
 					}, (dbCmd, i) =>
 				{
 					if (currentCopy[i]) // if we already got a good result here, do nothing
@@ -146,20 +166,22 @@ namespace Raven.Client.Document
 				Thread.Sleep(100);
 			}
 
-			AssertNoDuplicateIdsInResults();
+			AssertNoDuplicateIdsInResults(shardQueryOperations);
 
 			var mergedQueryResult = shardStrategy.MergeQueryResults(IndexQuery,
-			                                                        shardQueryOperations.Select(x => x.CurrentQueryResults)
-			                                                        	.Where(x => x != null)
-			                                                        	.ToList());
+																	shardQueryOperations.Select(x => x.CurrentQueryResults)
+																		.Where(x => x != null)
+																		.ToList());
 
 			shardQueryOperations[0].ForceResult(mergedQueryResult);
 			queryOperation = shardQueryOperations[0];
+			
+			afterQueryExecutedCallback(mergedQueryResult);
 		}
 
-		private void AssertNoDuplicateIdsInResults()
+		internal static void AssertNoDuplicateIdsInResults(List<QueryOperation> shardQueryOperations)
 		{
-			var shardsPerId = new Dictionary<string, HashSet<QueryOperation>>(StringComparer.InvariantCultureIgnoreCase);
+			var shardsPerId = new Dictionary<string, HashSet<QueryOperation>>(StringComparer.OrdinalIgnoreCase);
 
 			foreach (var shardQueryOperation in shardQueryOperations)
 			{
@@ -185,7 +207,6 @@ namespace Raven.Client.Document
 			}
 		}
 
-#if !SILVERLIGHT
 		/// <summary>
 		///   Grant access to the database commands
 		/// </summary>
@@ -193,25 +214,36 @@ namespace Raven.Client.Document
 		{
 			get { throw new NotSupportedException("Sharded has more than one DatabaseCommands to operate on."); }
 		}
-#endif
 
-#if !NET_3_5
 		/// <summary>
 		///   Grant access to the async database commands
 		/// </summary>
 		public override IAsyncDatabaseCommands AsyncDatabaseCommands
 		{
-			get { throw new NotSupportedException("Sharded doesn't support async operations."); }
+			get { throw new NotSupportedException("Sharded has more than one DatabaseCommands to operate on."); }
 		}
-#endif
-
-#if !NET_3_5 && !SILVERLIGHT
 
 		/// <summary>
 		/// Register the query as a lazy query in the session and return a lazy
 		/// instance that will evaluate the query only when needed
 		/// </summary>
 		public override Lazy<IEnumerable<T>> Lazily(Action<IEnumerable<T>> onEval)
+		{
+			var lazyQueryOperation = ProcessLazyQuery();
+			return ((ShardedDocumentSession)theSession).AddLazyOperation(lazyQueryOperation, onEval, ShardDatabaseCommands);
+		}
+
+        /// <summary>
+        /// Register the query as a lazy-count query in the session and return a lazy
+        /// instance that will evaluate the query only when needed
+        /// </summary>
+        public override Lazy<int> CountLazily()
+		{
+			var lazyQueryOperation = ProcessLazyQuery();
+			return ((ShardedDocumentSession)theSession).AddLazyCountOperation(lazyQueryOperation, ShardDatabaseCommands);
+		}
+
+		private LazyQueryOperation<T> ProcessLazyQuery()
 		{
 			if (queryOperation == null)
 			{
@@ -222,23 +254,19 @@ namespace Raven.Client.Document
 						databaseCommands11.OperationsHeaders.Remove(key);
 					}
 				}
-			
+
 				ExecuteBeforeQueryListeners();
 				queryOperation = InitializeQueryOperation((s, s1) => ShardDatabaseCommands.ForEach(cmd => cmd.OperationsHeaders.Set(s, s1)));
 			}
 
 			var lazyQueryOperation = new LazyQueryOperation<T>(queryOperation, afterQueryExecutedCallback, includes);
-
-			return ((ShardedDocumentSession)theSession).AddLazyOperation(lazyQueryOperation, onEval, ShardDatabaseCommands);
+			return lazyQueryOperation;
 		}
-#endif
 
-#if !NET_3_5
 		protected override Task<QueryOperation> ExecuteActualQueryAsync()
 		{
 			throw new NotSupportedException();
 		}
-#endif
 	}
 }
 #endif

@@ -1,10 +1,13 @@
 using System;
+
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs
 {
-	public class DateTimeOffsets : LocalClientTest
+	public class DateTimeOffsets : RavenTest
 	{
 		[Fact]
 		public void Can_save_and_load()

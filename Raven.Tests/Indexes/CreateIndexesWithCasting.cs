@@ -2,11 +2,13 @@ using System.Linq;
 using Raven.Client.Document;
 using Raven.Client.Indexes;
 using Raven.Tests.Bugs.LiveProjections;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Indexes
 {
-	public class CreateIndexesWithCasting
+	public class CreateIndexesWithCasting : NoDisposalNeeded
 	{
 		[Fact]
 		public void WillPreserverTheCasts()
@@ -16,7 +18,8 @@ namespace Raven.Tests.Indexes
 				Conventions = new DocumentConvention()	
 			}.CreateIndexDefinition();
 
-			Assert.Equal("docs.People\r\n\t.Select(person => new {Id = ((System.Int64)(person.Name.Length))})", indexDefinition.Map);
+			Assert.Contains("docs.People.Select(person => new {", indexDefinition.Map);
+			Assert.Contains("Id = ((long) person.Name.Length)", indexDefinition.Map);
 		}
 
 		public class WithCasting : AbstractIndexCreationTask<Person>

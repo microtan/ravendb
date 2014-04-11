@@ -3,15 +3,21 @@
 //     Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 // </copyright>
 //-----------------------------------------------------------------------
-#if !SILVERLIGHT
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
-using System.Security.Cryptography;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Json;
 using Raven.Client.Document;
+#if NETFX_CORE
+using Raven.Client.Silverlight.MissingFromSilverlight;
+using Raven.Client.WinRT.MissingFromWinRT;
+#else
+using System.Security.Cryptography;
+
+
+#endif
 
 namespace Raven.Client.Shard
 {
@@ -32,7 +38,7 @@ namespace Raven.Client.Shard
 			if (shards.Count == 0)
 				throw new ArgumentException("Shards collection must have at least one item", "shards");
 
-			this.shards = new Dictionary<string, IDocumentStore>(shards, StringComparer.InvariantCultureIgnoreCase);
+			this.shards = new Dictionary<string, IDocumentStore>(shards, StringComparer.OrdinalIgnoreCase);
 
 
 			Conventions = shards.First().Value.Conventions.Clone();
@@ -57,14 +63,14 @@ namespace Raven.Client.Shard
 		public QueryResult DefaultMergeQueryResults(IndexQuery query, IList<QueryResult> queryResults)
 		{
 			var buffer = queryResults.SelectMany(x => x.IndexEtag.ToByteArray()).ToArray();
-			Guid indexEtag;
-#if !SILVERLIGHT
+			Etag indexEtag;
+#if  NETFX_CORE
+			indexEtag = new Etag(Convert.ToBase64String(MD5.HashCore(buffer)));			
+#else
 			using (var md5 = MD5.Create())
 			{
-				indexEtag = new Guid(md5.ComputeHash(buffer));
+				indexEtag = Etag.Parse(md5.ComputeHash(buffer));
 			}
-#else
-			indexEtag = new Guid(MD5Core.GetHash(buffer));
 #endif
 			var results = queryResults.SelectMany(x => x.Results);
 
@@ -74,6 +80,8 @@ namespace Raven.Client.Shard
 				foreach (var sortedField in query.SortedFields)
 				{
 					var copy = sortedField;
+				    if (copy.Field.EndsWith("_Range"))
+				        copy.Field = copy.Field.Substring(0, copy.Field.Length - "_Range".Length);
 					results = sortedField.Descending ?
 						results.OrderByDescending(x => x.SelectTokenWithRavenSyntaxReturningSingleValue(copy.Field)) :
 						results.OrderBy(x => x.SelectTokenWithRavenSyntaxReturningSingleValue(copy.Field));
@@ -122,7 +130,7 @@ namespace Raven.Client.Shard
 		{
 			var defaultShardResolutionStrategy = ShardResolutionStrategy as DefaultShardResolutionStrategy;
 			if (defaultShardResolutionStrategy == null)
-				throw new NotSupportedException("ShardingOn<T> is only supported if ShardResulotionStrategy is DefaultShardResolutionStrategy");
+				throw new NotSupportedException("ShardingOn<T> is only supported if ShardResolutionStrategy is DefaultShardResolutionStrategy");
 
 			var identityProperty = Conventions.GetIdentityProperty(typeof(TEntity));
 			if (identityProperty == null)
@@ -150,7 +158,7 @@ namespace Raven.Client.Shard
 		{
 			unchecked
 			{
-				return text.Aggregate(11, (current, c) => current * 397 + c);
+				return text.ToCharArray().Aggregate(11, (current, c) => current * 397 + c);
 			}
 		}
 
@@ -165,7 +173,7 @@ namespace Raven.Client.Shard
 		{
 			var defaultShardResolutionStrategy = ShardResolutionStrategy as DefaultShardResolutionStrategy;
 			if (defaultShardResolutionStrategy == null)
-				throw new NotSupportedException("ShardingOn<T> is only supported if ShardResulotionStrategy is DefaultShardResolutionStrategy");
+				throw new NotSupportedException("ShardingOn<T> is only supported if ShardResolutionStrategy is DefaultShardResolutionStrategy");
 
 			defaultShardResolutionStrategy.ShardingOn(shardingProperty, translator);
 			return this;
@@ -183,7 +191,7 @@ namespace Raven.Client.Shard
 		{
 			var defaultShardResolutionStrategy = ShardResolutionStrategy as DefaultShardResolutionStrategy;
 			if (defaultShardResolutionStrategy == null)
-				throw new NotSupportedException("ShardingOn<T> is only supported if ShardResulotionStrategy is DefaultShardResolutionStrategy");
+				throw new NotSupportedException("ShardingOn<T> is only supported if ShardResolutionStrategy is DefaultShardResolutionStrategy");
 
 			defaultShardResolutionStrategy.ShardingOn(shardingProperty, valueTranslator, queryTranslator);
 			return this;
@@ -191,5 +199,3 @@ namespace Raven.Client.Shard
 		}
 	}
 }
-
-#endif

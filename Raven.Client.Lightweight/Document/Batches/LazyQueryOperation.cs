@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Text;
 using Raven.Abstractions.Data;
 using Raven.Client.Connection;
@@ -7,8 +8,6 @@ using Raven.Client.Document.SessionOperations;
 using Raven.Client.Shard;
 using Raven.Json.Linq;
 using System.Linq;
-
-#if !NET_3_5
 
 namespace Raven.Client.Document.Batches
 {
@@ -18,6 +17,8 @@ namespace Raven.Client.Document.Batches
 		private readonly Action<QueryResult> afterQueryExecuted;
 		private readonly HashSet<string> includes;
 
+		private IDictionary<string,string> headers;
+
 		public LazyQueryOperation(QueryOperation queryOperation, Action<QueryResult> afterQueryExecuted, HashSet<string> includes)
 		{
 			this.queryOperation = queryOperation;
@@ -25,7 +26,7 @@ namespace Raven.Client.Document.Batches
 			this.includes = includes;
 		}
 
-		public GetRequest CraeteRequest()
+		public GetRequest CreateRequest()
 		{
 			var stringBuilder = new StringBuilder();
 			queryOperation.IndexQuery.AppendQueryString(stringBuilder);
@@ -34,17 +35,26 @@ namespace Raven.Client.Document.Batches
 			{
 				stringBuilder.Append("&include=").Append(include);
 			}
-			return new GetRequest
+			var request = new GetRequest
 			{
-				Url = "/indexes/" + queryOperation.IndexName,
+				Url = "/indexes/" + queryOperation.IndexName, 
 				Query = stringBuilder.ToString()
 			};
+			if (headers != null)
+			{
+				foreach (var header in headers)
+				{
+					request.Headers[header.Key] = header.Value;
+				}
+			}
+			return request;
 		}
 
 		public object Result { get; set; }
 
-		public bool RequiresRetry { get; set; }
+		public QueryResult QueryResult { get; set; }
 
+		public bool RequiresRetry { get; set; }
 		public void HandleResponses(GetResponse[] responses, ShardStrategy shardStrategy)
 		{
 			var count = responses.Count(x => x.Status == 404);
@@ -53,10 +63,9 @@ namespace Raven.Client.Document.Batches
 				throw new InvalidOperationException("There is no index named: " + queryOperation.IndexName + " in " + count + " shards");
 			}
 
-			var list = (from response in responses 
-						let json = RavenJObject.Parse(response.Result) 
-						select SerializationHelper.ToQueryResult(json, response.Headers["ETag"]))
-						.ToList();
+			var list = responses
+				.Select(response => SerializationHelper.ToQueryResult((RavenJObject)response.Result, response.GetEtagHeader(), response.Headers["Temp-Request-Time"]))
+				.ToList();
 
 			var queryResult = shardStrategy.MergeQueryResults(queryOperation.IndexQuery, list);
 
@@ -67,14 +76,15 @@ namespace Raven.Client.Document.Batches
 			if (afterQueryExecuted != null)
 				afterQueryExecuted(queryResult);
 			Result = queryOperation.Complete<T>();
+			QueryResult = queryResult;
 		}
 
-		public void HandleResponse(GetResponse response)
+        public void HandleResponse(GetResponse response)
 		{
 			if (response.Status == 404)
 				throw new InvalidOperationException("There is no index named: " + queryOperation.IndexName + Environment.NewLine + response.Result);
-			var json = RavenJObject.Parse(response.Result);
-			var queryResult = SerializationHelper.ToQueryResult(json, response.Headers["ETag"]);
+			var json = (RavenJObject)response.Result;
+			var queryResult = SerializationHelper.ToQueryResult(json, response.GetEtagHeader(), response.Headers["Temp-Request-Time"]);
 			HandleResponse(queryResult);
 		}
 
@@ -87,6 +97,7 @@ namespace Raven.Client.Document.Batches
 			if (afterQueryExecuted != null)
 				afterQueryExecuted(queryResult);
 			Result = queryOperation.Complete<T>();
+			QueryResult = queryResult;
 		}
 
 		public IDisposable EnterContext()
@@ -103,7 +114,10 @@ namespace Raven.Client.Document.Batches
 		{
 			HandleResponse((QueryResult)result);
 		}
+
+		public void SetHeaders(IDictionary<string,string> theHeaders)
+		{
+			headers = theHeaders;
+		}
 	}
 }
-
-#endif

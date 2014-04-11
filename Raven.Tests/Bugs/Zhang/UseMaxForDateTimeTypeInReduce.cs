@@ -1,13 +1,15 @@
 using Raven.Abstractions;
 using Raven.Abstractions.Indexing;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 using System;
 
 namespace Raven.Tests.Bugs.Zhang
 {
-	public class UseMaxForDateTimeTypeInReduce : LocalClientTest
+	public class UseMaxForDateTimeTypeInReduce : RavenTest
 	{
 		private const string map = @"
 from doc in docs
@@ -34,18 +36,18 @@ select new {Name = g.Key, CreatedTime = createdTime}
 													Reduce = reduce,
 												});
 
-				using (var sesion = store.OpenSession())
+				using (var session = store.OpenSession())
 				{
-					sesion.Store(new { Topic = "RavenDB is Hot", CreatedTime = SystemTime.Now, Tags = new[] { new { Name = "DB" }, new { Name = "NoSQL" } } });
+					session.Store(new { Topic = "RavenDB is Hot", CreatedTime = SystemTime.UtcNow, Tags = new[] { new { Name = "DB" }, new { Name = "NoSQL" } } });
 
-					sesion.Store(new { Topic = "RavenDB is Fast", CreatedTime = SystemTime.Now.AddMinutes(10), Tags = new[] { new { Name = "NoSQL" } } });
+					session.Store(new { Topic = "RavenDB is Fast", CreatedTime = SystemTime.UtcNow.AddMinutes(10), Tags = new[] { new { Name = "NoSQL" } } });
 
-					sesion.SaveChanges();
+					session.SaveChanges();
 				}
 
-				using (var sesion = store.OpenSession())
+				using (var session = store.OpenSession())
 				{
-					sesion.Advanced.LuceneQuery<object>("test").WaitForNonStaleResults().ToArray<object>();
+                    session.Advanced.DocumentQuery<object>("test").WaitForNonStaleResults().ToArray<object>();
 				}
 
 				Assert.Empty(store.DocumentDatabase.Statistics.Errors);

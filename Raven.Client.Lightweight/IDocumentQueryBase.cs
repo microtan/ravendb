@@ -1,14 +1,15 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq.Expressions;
 using Raven.Abstractions.Data;
+using Raven.Abstractions.Indexing;
 using Raven.Client.Document;
-using Raven.Client.Linq;
 
 namespace Raven.Client
 {
 	/// <summary>
-	///   A query against a Raven index
+	/// A query against a Raven index
 	/// </summary>
 	public interface IDocumentQueryBase<T, out TSelf>
 		where TSelf : IDocumentQueryBase<T, TSelf>
@@ -34,19 +35,18 @@ namespace Raven.Client
 		/// <param name = "path">The path.</param>
 		TSelf Include(string path);
 
-
 		/// <summary>
 		///   This function exists solely to forbid in memory where clause on IDocumentQuery, because
 		///   that is nearly always a mistake.
 		/// </summary>
 		[Obsolete(
-			@"
+            @"
 You cannot issue an in memory filter - such as Where(x=>x.Name == ""Ayende"") - on IDocumentQuery. 
 This is likely a bug, because this will execute the filter in memory, rather than in RavenDB.
-Consider using session.Query<T>() instead of session.LuceneQuery<T>. The session.Query<T>() method fully supports Linq queries, while session.LuceneQuery<T>() is intended for lower level API access.
-If you really want to do in memory filtering on the data returned from the query, you can use: session.LuceneQuery<T>().ToList().Where(x=>x.Name == ""Ayende"")
+Consider using session.Query<T>() instead of session.DocumentQuery<T>. The session.Query<T>() method fully supports Linq queries, while session.DocumentQuery<T>() is intended for lower level API access.
+If you really want to do in memory filtering on the data returned from the query, you can use: session.DocumentQuery<T>().ToList().Where(x=>x.Name == ""Ayende"")
 "
-			, true)]
+            , true)]
 		IEnumerable<T> Where(Func<T, bool> predicate);
 
 		/// <summary>
@@ -54,13 +54,13 @@ If you really want to do in memory filtering on the data returned from the query
 		///   that is nearly always a mistake.
 		/// </summary>
 		[Obsolete(
-			@"
+            @"
 You cannot issue an in memory filter - such as Count(x=>x.Name == ""Ayende"") - on IDocumentQuery. 
 This is likely a bug, because this will execute the filter in memory, rather than in RavenDB.
-Consider using session.Query<T>() instead of session.LuceneQuery<T>. The session.Query<T>() method fully supports Linq queries, while session.LuceneQuery<T>() is intended for lower level API access.
-If you really want to do in memory filtering on the data returned from the query, you can use: session.LuceneQuery<T>().ToList().Count(x=>x.Name == ""Ayende"")
+Consider using session.Query<T>() instead of session.DocumentQuery<T>. The session.Query<T>() method fully supports Linq queries, while session.DocumentQuery<T>() is intended for lower level API access.
+If you really want to do in memory filtering on the data returned from the query, you can use: session.DocumentQuery<T>().ToList().Count(x=>x.Name == ""Ayende"")
 "
-			, true)]
+            , true)]
 		int Count(Func<T, bool> predicate);
 
 		/// <summary>
@@ -71,8 +71,8 @@ If you really want to do in memory filtering on the data returned from the query
 			@"
 You cannot issue an in memory filter - such as Count() - on IDocumentQuery. 
 This is likely a bug, because this will execute the filter in memory, rather than in RavenDB.
-Consider using session.Query<T>() instead of session.LuceneQuery<T>. The session.Query<T>() method fully supports Linq queries, while session.LuceneQuery<T>() is intended for lower level API access.
-If you really want to do in memory filtering on the data returned from the query, you can use: session.LuceneQuery<T>().ToList().Count()
+Consider using session.Query<T>() instead of session.DocumentQuery<T>. The session.Query<T>() method fully supports Linq queries, while session.DocumentQuery<T>() is intended for lower level API access.
+If you really want to do in memory filtering on the data returned from the query, you can use: session.DocumentQuery<T>().ToList().Count()
 "
 			, true)]
 		int Count();
@@ -96,6 +96,30 @@ If you really want to do in memory filtering on the data returned from the query
 		/// <param name = "count">The count.</param>
 		/// <returns></returns>
 		TSelf Skip(int count);
+
+        /// <summary>
+        ///   Returns first element or default value for type if sequence is empty.
+        /// </summary>
+        /// <returns></returns>
+        T FirstOrDefault();
+
+        /// <summary>
+        ///   Returns first element or throws if sequence is empty.
+        /// </summary>
+        /// <returns></returns>
+        T First();
+
+        /// <summary>
+        ///   Returns first element or default value for given type if sequence is empty. Throws if sequence contains more than one element.
+        /// </summary>
+        /// <returns></returns>
+        T SingleOrDefault();
+
+        /// <summary>
+        ///   Returns first element or throws if sequence is empty or contains more than one element.
+        /// </summary>
+        /// <returns></returns>
+        T Single();
 
 		/// <summary>
 		///   Filter the results from the index using the specified where clause.
@@ -136,28 +160,9 @@ If you really want to do in memory filtering on the data returned from the query
 		TSelf WhereEquals<TValue>(Expression<Func<T, TValue>> propertySelector, TValue value, bool isAnalyzed);
 
 		/// <summary>
-		///   Matches exact value
+		/// Matches exact value
 		/// </summary>
-		TSelf WhereEquals (WhereParams whereParams);
-
-		/// <summary>
-		///   Matches substrings of the field
-		/// </summary>
-		[Obsolete("Avoid using WhereContains(), use Search() instead")]
-		TSelf WhereContains(string fieldName, object value);
-
-		/// <summary>
-		///   Matches substrings of the field
-		/// </summary>
-		[Obsolete("Avoid using WhereContains(), use Search() instead")]
-		TSelf WhereContains(string fieldName, params object[] values);
-
-		/// <summary>
-		///   Matches substrings of the field
-		/// </summary>
-		[Obsolete("Avoid using WhereContains(), use Search() instead")]
-		TSelf WhereContains(string fieldName, IEnumerable<object> values);
-
+		TSelf WhereEquals(WhereParams whereParams);
 
 		/// <summary>
 		/// Check that the field has one of the specified value
@@ -332,7 +337,29 @@ If you really want to do in memory filtering on the data returned from the query
 		/// <param name = "radius">The radius.</param>
 		/// <param name = "latitude">The latitude.</param>
 		/// <param name = "longitude">The longitude.</param>
-		TSelf WithinRadiusOf(double radius, double latitude, double longitude);
+        /// <param name = "radiusUnits">The units of the <paramref name="radius"/>.</param>
+        TSelf WithinRadiusOf(double radius, double latitude, double longitude, SpatialUnits radiusUnits = SpatialUnits.Kilometers);
+
+		/// <summary>
+		///   Filter matches to be inside the specified radius
+		/// </summary>
+		/// <param name="fieldName">The field name for the radius</param>
+		/// <param name = "radius">The radius.</param>
+		/// <param name = "latitude">The latitude.</param>
+		/// <param name = "longitude">The longitude.</param>
+        /// <param name = "radiusUnits">The units of the <paramref name="radius"/>.</param>
+        TSelf WithinRadiusOf(string fieldName, double radius, double latitude, double longitude, SpatialUnits radiusUnits = SpatialUnits.Kilometers);
+
+		/// <summary>
+		/// Filter matches based on a given shape - only documents with the shape defined in fieldName that
+		/// have a relation rel with the given shapeWKT will be returned
+		/// </summary>
+		/// <param name="fieldName">The name of the field containing the shape to use for filtering</param>
+		/// <param name="shapeWKT">The query shape</param>
+		/// <param name="rel">Spatial relation to check</param>
+		/// <param name="distanceErrorPct">The allowed error percentage</param>
+		/// <returns></returns>
+		TSelf RelatesToShape(string fieldName, string shapeWKT, SpatialRelation rel, double distanceErrorPct = 0.025);
 
 		/// <summary>
 		///   Sorts the query results by distance.
@@ -354,6 +381,94 @@ If you really want to do in memory filtering on the data returned from the query
 		/// </summary>
 		/// <param name = "propertySelectors">Property selectors for the fields.</param>
 		TSelf OrderBy<TValue>(params Expression<Func<T, TValue>>[] propertySelectors);
+
+		/// <summary>
+		///   Order the results by the specified fields
+		///   The fields are the names of the fields to sort, defaulting to sorting by descending.
+		///   You can prefix a field name with '-' to indicate sorting by descending or '+' to sort by ascending
+		/// </summary>
+		/// <param name = "fields">The fields.</param>
+		TSelf OrderByDescending(params string[] fields);
+
+		/// <summary>
+		///   Order the results by the specified fields
+		///   The fields are the names of the fields to sort, defaulting to sorting by descending.
+		///   You can prefix a field name with '-' to indicate sorting by descending or '+' to sort by ascending
+		/// </summary>
+		/// <param name = "propertySelectors">Property selectors for the fields.</param>
+		TSelf OrderByDescending<TValue>(params Expression<Func<T, TValue>>[] propertySelectors);
+
+		/// <summary>
+		///   Adds matches highlighting for the specified field.
+		/// </summary>
+		/// <remarks>
+		///   The specified field should be analysed and stored for highlighter to work.
+		///   For each match it creates a fragment that contains matched text surrounded by highlighter tags.
+		/// </remarks>
+		/// <param name="fieldName">The field name to highlight.</param>
+		/// <param name="fragmentLength">The fragment length.</param>
+		/// <param name="fragmentCount">The maximum number of fragments for the field.</param>
+		/// <param name="fragmentsField">The field in query results item to put highlightings into.</param>
+		TSelf Highlight(string fieldName, int fragmentLength, int fragmentCount, string fragmentsField);
+
+		/// <summary>
+		///   Adds matches highlighting for the specified field.
+		/// </summary>
+		/// <remarks>
+		///   The specified field should be analysed and stored for highlighter to work.
+		///   For each match it creates a fragment that contains matched text surrounded by highlighter tags.
+		/// </remarks>
+		/// <param name="fieldName">The field name to highlight.</param>
+		/// <param name="fragmentLength">The fragment length.</param>
+		/// <param name="fragmentCount">The maximum number of fragments for the field.</param>
+		TSelf Highlight(string fieldName, int fragmentLength, int fragmentCount, out FieldHighlightings highlightings);
+
+		/// <summary>
+		///   Adds matches highlighting for the specified field.
+		/// </summary>
+		/// <remarks>
+		///   The specified field should be analysed and stored for highlighter to work.
+		///   For each match it creates a fragment that contains matched text surrounded by highlighter tags.
+		/// </remarks>
+		/// <param name="propertySelector">The property to highlight.</param>
+		/// <param name="fragmentLength">The fragment length.</param>
+		/// <param name="fragmentCount">The maximum number of fragments for the field.</param>
+		/// <param name="fragmentsPropertySelector">The property to put highlightings into.</param>
+		TSelf Highlight<TValue>(
+			Expression<Func<T, TValue>> propertySelector, 
+			int fragmentLength, 
+			int fragmentCount,
+			Expression<Func<T, IEnumerable>> fragmentsPropertySelector);
+		
+		/// <summary>
+		///   Adds matches highlighting for the specified field.
+		/// </summary>
+		/// <remarks>
+		///   The specified field should be analysed and stored for highlighter to work.
+		///   For each match it creates a fragment that contains matched text surrounded by highlighter tags.
+		/// </remarks>
+		/// <param name="propertySelector">The property to highlight.</param>
+		/// <param name="fragmentLength">The fragment length.</param>
+		/// <param name="fragmentCount">The maximum number of fragments for the field.</param>
+		TSelf Highlight<TValue>(
+			Expression<Func<T, TValue>> propertySelector, 
+			int fragmentLength, 
+			int fragmentCount,
+			out FieldHighlightings highlightings);
+
+		/// <summary>
+		///   Sets the tags to highlight matches with.
+		/// </summary>
+		/// <param name="preTag">Prefix tag.</param>
+		/// <param name="postTag">Postfix tag.</param>
+		TSelf SetHighlighterTags(string preTag, string postTag);
+
+		/// <summary>
+		///   Sets the tags to highlight matches with.
+		/// </summary>
+		/// <param name="preTags">Prefix tags.</param>
+		/// <param name="postTags">Postfix tags.</param>
+		TSelf SetHighlighterTags(string[] preTags, string[] postTags);
 
 		/// <summary>
 		///   Instructs the query to wait for non stale results as of now.
@@ -399,10 +514,29 @@ If you really want to do in memory filtering on the data returned from the query
 		TSelf WaitForNonStaleResultsAsOf(DateTime cutOff, TimeSpan waitTimeout);
 
 		/// <summary>
+		///   Instructs the query to wait for non stale results as of the cutoff etag.
+		/// </summary>
+		/// <param name = "cutOffEtag">The cut off etag.</param>
+		/// <returns></returns>
+		TSelf WaitForNonStaleResultsAsOf(Etag cutOffEtag);
+
+		/// <summary>
+		///   Instructs the query to wait for non stale results as of the cutoff etag for the specified timeout.
+		/// </summary>
+		/// <param name = "cutOffEtag">The cut off etag.</param>
+		/// <param name = "waitTimeout">The wait timeout.</param>
+		TSelf WaitForNonStaleResultsAsOf(Etag cutOffEtag, TimeSpan waitTimeout);
+
+		/// <summary>
 		///   EXPERT ONLY: Instructs the query to wait for non stale results.
 		///   This shouldn't be used outside of unit tests unless you are well aware of the implications
 		/// </summary>
 		TSelf WaitForNonStaleResults();
+
+		/// <summary>
+		/// Allows you to modify the index query before it is sent to the server
+		/// </summary>
+		TSelf BeforeQueryExecution(Action<IndexQuery> beforeQueryExecution);
 
 		/// <summary>
 		///   EXPERT ONLY: Instructs the query to wait for non stale results for the specified wait timeout.
@@ -422,7 +556,6 @@ If you really want to do in memory filtering on the data returned from the query
 		/// this is useful if you want to have repeatable random queries
 		/// </summary>
 		TSelf RandomOrdering(string seed);
-
 
 		/// <summary>
 		///   Adds an ordering for a specific field to the query
@@ -470,27 +603,31 @@ If you really want to do in memory filtering on the data returned from the query
 		/// </summary>
 		TSelf Search<TValue>(Expression<Func<T, TValue>> propertySelector, string searchTerms);
 
-		///<summary>
-		///  Instruct the index to group by the specified fields using the specified aggregation operation
-		///</summary>
-		///<remarks>
-		///  This is only valid on dynamic indexes queries
-		///</remarks>
-		TSelf GroupBy (AggregationOperation aggregationOperation, params string[] fieldsToGroupBy);
-
-		///<summary>
-		///  Instruct the index to group by the specified fields using the specified aggregation operation
-		///</summary>
-		///<remarks>
-		///  This is only valid on dynamic indexes queries
-		///</remarks>
-		TSelf GroupBy<TValue>(AggregationOperation aggregationOperation, params Expression<Func<T, TValue>>[] groupPropertySelectors);
-
 		/// <summary>
 		/// Partition the query so we can intersect different parts of the query
 		/// across different index entries.
 		/// </summary>
 		TSelf Intersect();
+
+		/// <summary>
+		/// Performs a query matching ANY of the provided values against the given field (OR)
+		/// </summary>
+		TSelf ContainsAny(string fieldName, IEnumerable<object> values);
+
+		/// <summary>
+		/// Performs a query matching ANY of the provided values against the given field (OR)
+		/// </summary>
+		TSelf ContainsAny<TValue>(Expression<Func<T, TValue>> propertySelector, IEnumerable<TValue> values);
+
+		/// <summary>
+		/// Performs a query matching ALL of the provided values against the given field (AND)
+		/// </summary>
+		TSelf ContainsAll(string fieldName, IEnumerable<object> values);
+
+		/// <summary>
+		/// Performs a query matching ALL of the provided values against the given field (AND)
+		/// </summary>
+		TSelf ContainsAll<TValue>(Expression<Func<T, TValue>> propertySelector, IEnumerable<TValue> values);
 
 		/// <summary>
 		/// Callback to get the results of the query
@@ -511,5 +648,47 @@ If you really want to do in memory filtering on the data returned from the query
 		/// Select the default field to use for this query
 		/// </summary>
 		TSelf UsingDefaultField(string field);
+
+		/// <summary>
+		/// Select the default operator to use for this query
+		/// </summary>
+		TSelf UsingDefaultOperator(QueryOperator queryOperator);
+
+		/// <summary>
+		/// Disables tracking for queried entities by Raven's Unit of Work.
+		/// Usage of this option will prevent holding query results in memory.
+		/// </summary>
+		TSelf NoTracking();
+
+		/// <summary>
+		/// Disables caching for query results.
+		/// </summary>
+		TSelf NoCaching();
+
+		/// <summary>
+		/// Apply distinct operation to this query
+		/// </summary>
+		TSelf Distinct();
+		
+		/// <summary>
+		/// Sets a transformer to use after executing a query
+		/// </summary>
+		/// <param name="resultsTransformer"></param>
+		TSelf SetResultTransformer(string resultsTransformer);
+
+		/// <summary>
+		/// Adds an ordering by score for a specific field to the query
+		/// </summary>
+		TSelf OrderByScore();
+
+		/// <summary>
+		/// Adds an ordering by score for a specific field to the query
+		/// </summary>
+		TSelf OrderByScoreDescending();
+
+		/// <summary>
+		/// Adds explanations of scores calculated for queried documents to the query result
+		/// </summary>
+		TSelf ExplainScores();
 	}
 }

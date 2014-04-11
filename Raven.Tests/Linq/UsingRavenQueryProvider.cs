@@ -14,6 +14,8 @@ using Raven.Client.Embedded;
 using Raven.Client.Indexes;
 using Raven.Database.Extensions;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 using Raven.Database.Data;
 using Raven.Client;
@@ -319,7 +321,7 @@ namespace Raven.Tests.Linq
 									select new { info.TimeOfDay }",
 						});
 
-				var currentTime = SystemTime.Now;
+				var currentTime = SystemTime.UtcNow;
 				using (var s = db.OpenSession())
 				{
 					s.Store(new DateTimeInfo { TimeOfDay = currentTime + TimeSpan.FromHours(1) });
@@ -368,9 +370,9 @@ namespace Raven.Tests.Linq
 
 				using (var s = db.OpenSession())
 				{
-					s.Store(new DateTimeInfo { TimeOfDay = SystemTime.Now.AddDays(1) });
-					s.Store(new DateTimeInfo { TimeOfDay = SystemTime.Now.AddDays(-1) });
-					s.Store(new DateTimeInfo { TimeOfDay = SystemTime.Now.AddDays(1) });
+					s.Store(new DateTimeInfo { TimeOfDay = SystemTime.UtcNow.AddDays(1) });
+					s.Store(new DateTimeInfo { TimeOfDay = SystemTime.UtcNow.AddDays(-1) });
+					s.Store(new DateTimeInfo { TimeOfDay = SystemTime.UtcNow.AddDays(1) });
 					s.SaveChanges();
 				}
 
@@ -380,7 +382,7 @@ namespace Raven.Tests.Linq
 					s.Query<DateTimeInfo>("DateTime")
 						.Customize(x => x.WaitForNonStaleResults()).FirstOrDefault();
 
-					var count = s.Query<DateTimeInfo>("DateTime").Where(x => x.TimeOfDay > SystemTime.Now).Count();
+					var count = s.Query<DateTimeInfo>("DateTime").Where(x => x.TimeOfDay > SystemTime.UtcNow).Count();
 					Assert.Equal(2, count);
 				}
 			}
@@ -400,7 +402,7 @@ namespace Raven.Tests.Linq
 									select new { info.TimeOfDay }",
 						});
 
-				var currentTime = SystemTime.Now;
+				var currentTime = SystemTime.UtcNow;
 				using (var s = db.OpenSession())
 				{
 					s.Store(new DateTimeInfo { TimeOfDay = currentTime + TimeSpan.FromHours(1) });
@@ -470,7 +472,7 @@ namespace Raven.Tests.Linq
 					WaitForQueryToComplete(s, "ByLineCost");
 
 					//This is the lucene query we want to mimic
-					var luceneResult = s.Advanced.LuceneQuery<OrderItem>("ByLineCost")
+                    var luceneResult = s.Advanced.DocumentQuery<OrderItem>("ByLineCost")
 							.Where("Cost_Range:{Dx1 TO NULL}")
 							.SelectFields<SomeDataProjection>("Cost")
 							.ToArray();
@@ -490,6 +492,32 @@ namespace Raven.Tests.Linq
 				}
 			}
 		}
+
+        [Fact]
+        public void Throws_exception_when_overloaded_distinct_called()
+        {
+            using (var store = new EmbeddableDocumentStore() { RunInMemory = true })
+            {
+                store.Initialize();
+
+                using (var s = store.OpenSession())
+                {
+                    s.Store(new OrderItem { Description = "Test", Cost = 10.0m });
+                    s.Store(new OrderItem { Description = "Test1", Cost = 10.0m });
+
+                    s.SaveChanges();
+                }
+
+                using (var s = store.OpenSession())
+                {
+                    var shouldThrow = s.Query<OrderItem>().Distinct(new OrderItemCostComparer());
+                    Assert.Throws<NotSupportedException>(() => shouldThrow.ToArray());
+
+                    var shouldNotThrow = s.Query<OrderItem>().Distinct();
+                    Assert.DoesNotThrow(() => shouldNotThrow.ToArray());
+                }
+            }
+        }
 
 		public class SomeDataProjection
 		{
@@ -518,6 +546,19 @@ namespace Raven.Tests.Linq
 			public string Description { get; set; }
 		}
 
+        private class OrderItemCostComparer : IEqualityComparer<OrderItem>
+        {
+            public bool Equals(OrderItem x, OrderItem y)
+            {
+                return x.Cost == y.Cost;
+            }
+
+            public int GetHashCode(OrderItem obj)
+            {
+                return obj.Cost.GetHashCode();
+            }
+        }
+
 		private class DateTimeInfo
 		{
 			public string Id { get; set; }
@@ -530,7 +571,7 @@ namespace Raven.Tests.Linq
 			do
 			{
 				//doesn't matter what the query is here, just want to see if it's stale or not
-				results = session.Advanced.LuceneQuery<User>(indexName)
+                results = session.Advanced.DocumentQuery<User>(indexName)
 							  .Where("")
 							  .QueryResult;
 
@@ -599,14 +640,28 @@ namespace Raven.Tests.Linq
 				using (var s = store.OpenSession())
 				{
 					var ravenQueryable = (from item in s.Query<OrderItem>()
-										  .Customize(x => x.WaitForNonStaleResults())
-										  where item.Description.In(new[] { "", "First" })
-										  select item
-										 );
+						                      .Customize(x => x.WaitForNonStaleResults())
+					                      where item.Description.In(new[] {"", "First"})
+					                      select item
+					                     );
 					var items = ravenQueryable.ToArray();
 
 
 					Assert.Equal(items.Length, 1);
+
+				}
+
+				using (var s2 = store.OpenSession())
+				{
+					var ravenQueryable2 = (from item in s2.Query<OrderItem>()
+										  .Customize(x => x.WaitForNonStaleResults())
+										  where item.Description.In(new[] { "First", "" })
+										  select item
+										 );
+					var items2 = ravenQueryable2.ToArray();
+
+
+					Assert.Equal(items2.Length, 1);
 				}
 			}
 		}

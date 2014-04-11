@@ -8,12 +8,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Raven.Abstractions.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 using Raven.Client.Indexes;
 
 namespace Raven.Tests.Bugs
 {
-	public class CanProjectIdFromDocumentInQueries : LocalClientTest
+	public class CanProjectIdFromDocumentInQueries : RavenTest
 	{
 		[Fact]
 		public void CanProjectIdFromTransformResults()

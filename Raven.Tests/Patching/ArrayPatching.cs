@@ -4,17 +4,18 @@
 // </copyright>
 //-----------------------------------------------------------------------
 using System;
-using Newtonsoft.Json;
+using Raven.Imports.Newtonsoft.Json;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Exceptions;
 using Raven.Json.Linq;
-using Raven.Database.Exceptions;
 using Raven.Database.Json;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Patching
 {
-	public class ArrayPatching
+	public class ArrayPatching : NoDisposalNeeded
 	{
 		private readonly RavenJObject doc = RavenJObject.Parse(@"{ title: ""A Blog Post"", body: ""html markup"", comments: [{""author"":""ayende"",""text"":""good post 1""},{author: ""ayende"", text:""good post 2""}] }");
 
@@ -171,7 +172,7 @@ namespace Raven.Tests.Patching
 		}
 
 		[Fact]
-		public void CanAddServeralItemsToSeveralDifferentPartsAtTheSameTime()
+		public void CanAddSeveralItemsToSeveralDifferentPartsAtTheSameTime()
 		{
 			var patchedDoc = new JsonPatcher(doc).Apply(
 				new[]

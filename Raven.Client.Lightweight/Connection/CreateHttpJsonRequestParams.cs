@@ -9,9 +9,11 @@ using Raven.Json.Linq;
 
 namespace Raven.Client.Connection
 {
+	using Raven.Abstractions.Connection;
+
 	public class CreateHttpJsonRequestParams
 	{
-		public CreateHttpJsonRequestParams(IHoldProfilingInformation self, string url, string method, RavenJObject metadata, ICredentials credentials, DocumentConvention convention)
+		public CreateHttpJsonRequestParams(IHoldProfilingInformation self, string url, string method, RavenJObject metadata, OperationCredentials credentials, Convention convention)
 		{
 			Owner = self;
 			Url = url;
@@ -19,26 +21,7 @@ namespace Raven.Client.Connection
 			Metadata = metadata;
 			Credentials = credentials;
 			Convention = convention;
-			operationsHeadersColletion = new NameValueCollection();
-		}
-
-		/// <summary>
-		/// Adds the operation headers.
-		/// </summary>
-		/// <param name="operationsHeaders">The operations headers.</param>
-		public CreateHttpJsonRequestParams AddOperationHeaders(IDictionary<string, string> operationsHeaders)
-		{
-			urlCached = null;
-			operationsHeadersDictionary = operationsHeaders;
-			foreach (var operationsHeader in operationsHeaders)
-			{
-				operationHeadersHash = (operationHeadersHash*397) ^ operationsHeader.Key.GetHashCode();
-				if (operationsHeader.Value != null)
-				{
-					operationHeadersHash = (operationHeadersHash * 397) ^ operationsHeader.Value.GetHashCode();
-				}
-			}
-			return this;
+			operationsHeadersCollection = new NameValueCollection();
 		}
 
 		/// <summary>
@@ -48,12 +31,12 @@ namespace Raven.Client.Connection
 		public CreateHttpJsonRequestParams AddOperationHeaders(NameValueCollection operationsHeaders)
 		{
 			urlCached = null;
-			operationsHeadersColletion = operationsHeaders;
-			foreach (string operationsHeader in operationsHeadersColletion)
+			operationsHeadersCollection = operationsHeaders;
+			foreach (string operationsHeader in operationsHeadersCollection)
 			{
 				operationHeadersHash = (operationHeadersHash * 397) ^ operationsHeader.GetHashCode();
 				var values = operationsHeaders.GetValues(operationsHeader);
-				if (values == null) 
+				if (values == null)
 					continue;
 
 				foreach (var header in values.Where(header => header != null))
@@ -64,44 +47,35 @@ namespace Raven.Client.Connection
 			return this;
 		}
 
-		public void UpdateHeaders(WebRequest webRequest)
+		public void UpdateHeaders(NameValueCollection headers)
 		{
-			if (operationsHeadersDictionary != null)
+			if (operationsHeadersCollection != null)
 			{
-				foreach (var kvp in operationsHeadersDictionary)
-				{
-					webRequest.Headers[kvp.Key] = kvp.Value;
-				}
-			}
-			if(operationsHeadersColletion != null)
-			{
-				foreach (string header in operationsHeadersColletion)
+				foreach (string header in operationsHeadersCollection)
 				{
 					try
 					{
-						webRequest.Headers[header] = operationsHeadersColletion[header];
+						headers[header] = operationsHeadersCollection[header];
 					}
 					catch (Exception e)
 					{
 						throw new InvalidOperationException(
-							"Failed to set header '" + header + "' to the value: " + operationsHeadersColletion[header], e);
+							"Failed to set header '" + header + "' to the value: " + operationsHeadersCollection[header], e);
 					}
 				}
 			}
 		}
 
-		public CreateHttpJsonRequestParams(IHoldProfilingInformation self, string url, string method, ICredentials credentials, DocumentConvention convention)
+		public CreateHttpJsonRequestParams(IHoldProfilingInformation self, string url, string method, OperationCredentials credentials, Convention convention)
 			: this(self, url, method, new RavenJObject(), credentials, convention)
-		{
-			
-		}
+		{}
 
 		private int operationHeadersHash;
-		private NameValueCollection operationsHeadersColletion;
-		private IDictionary<string, string> operationsHeadersDictionary;
+		private NameValueCollection operationsHeadersCollection;
 		public IHoldProfilingInformation Owner { get; set; }
 		private string url;
 		private string urlCached;
+		public bool AvoidCachingRequest { get; set; }
 
 		public string Url
 		{
@@ -126,7 +100,9 @@ namespace Raven.Client.Connection
 
 		public string Method { get; set; }
 		public RavenJObject Metadata { get; set; }
-		public ICredentials Credentials { get; set; }
-		public DocumentConvention Convention { get; set; }
+		public OperationCredentials Credentials { get; set; }
+
+		public Convention Convention { get; set; }
+		public bool DisableRequestCompression { get; set; }
 	}
 }

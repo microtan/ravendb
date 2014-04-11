@@ -6,6 +6,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
 using Raven.Database.Linq;
 using Raven.Database.Storage;
 using System.Linq;
@@ -17,24 +18,29 @@ namespace Raven.Database.Indexing
 		public Action BeforeMoveNext = delegate { };
 		public Action CancelMoveNext = delegate { };
 		public Action<Exception, object> OnError = delegate { };
+		private readonly CancellationToken cancellationToken;
 		private readonly int numberOfConsecutiveErrors;
 
-		public RobustEnumerator(int numberOfConsecutiveErrors)
+		public RobustEnumerator(CancellationToken cancellationToken, int numberOfConsecutiveErrors)
 		{
+			this.cancellationToken = cancellationToken;
 			this.numberOfConsecutiveErrors = numberOfConsecutiveErrors;
 		}
 
-		public IEnumerable<object> RobustEnumeration(IEnumerable<object> input, IndexingFunc func)
+		public IEnumerable<object> RobustEnumeration(IEnumerator<object> input, IndexingFunc func)
 		{
 			return RobustEnumeration(input, new[] { func, });
 		}
 
-		public IEnumerable<object> RobustEnumeration(IEnumerable<object> input, IEnumerable<IndexingFunc> funcs)
+		public IEnumerable<object> RobustEnumeration(IEnumerator<object> input, IEnumerable<IndexingFunc> funcs)
 		{
-			List<object> onlyIterateOverEnumableOnce;
+			var onlyIterateOverEnumableOnce = new List<object>();
 			try
 			{
-				onlyIterateOverEnumableOnce = input.ToList();
+				while (input.MoveNext())
+				{
+					onlyIterateOverEnumableOnce.Add(input.Current);
+				}
 			}
 			catch (Exception e)
 			{
@@ -52,6 +58,7 @@ namespace Raven.Database.Indexing
 						int maxNumberOfConsecutiveErrors = numberOfConsecutiveErrors;
 						do
 						{
+							cancellationToken.ThrowIfCancellationRequested();
 							var moveSuccessful = MoveNext(en, wrapped);
 							if (moveSuccessful == false)
 								break;
@@ -62,7 +69,7 @@ namespace Raven.Database.Indexing
 							}
 							else
 							{
-								// we explictly do not dispose the enumerator, since that would not allow us 
+								// we explicitly do not dispose the enumerator, since that would not allow us 
 								// to continue on with the next item in the list.
 								// Not actually a problem, because we are iterating only over in memory data
 								// en.Dispose();

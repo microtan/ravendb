@@ -3,11 +3,13 @@ using Raven.Abstractions.Indexing;
 using Raven.Client;
 using Raven.Client.Linq;
 using Raven.Client.Embedded;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs.Indexing
 {
-	public class WithStringReverse : LocalClientTest
+	public class WithStringReverse : RavenTest
 	{
 		[Fact]
 		public void GivenSomeUsers_QueryWithAnIndex_ReturnsUsersWithNamesReversed()
@@ -18,7 +20,7 @@ namespace Raven.Tests.Bugs.Indexing
 				                                new IndexDefinition
 				                                	{
 				                                		Map =
-															"from doc in docs select new { doc.Name, ReverseName = doc.Name.Reverse())}"
+															"from doc in docs select new { doc.Name, ReverseName = doc.Name.Reverse()}"
 				                                	});
 
 				using (IDocumentSession documentSession = store.OpenSession())
@@ -50,6 +52,11 @@ namespace Raven.Tests.Bugs.Indexing
 		{
 			public string ReverseName { get; set; }
 		}
+
+		protected override void CreateDefaultIndexes(IDocumentStore documentStore)
+		{
+		}
+
 		[Fact]
 		public void CanQueryInReverse()
 		{
@@ -59,7 +66,7 @@ namespace Raven.Tests.Bugs.Indexing
 												new IndexDefinition
 												{
 													Map =
-														"from doc in docs select new { doc.Name, ReverseName = doc.Name.Reverse())}"
+														"from doc in docs select new { doc.Name, ReverseName = doc.Name.Reverse()}"
 												});
 
 				using (IDocumentSession documentSession = store.OpenSession())

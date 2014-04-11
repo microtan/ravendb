@@ -4,12 +4,15 @@
 // </copyright>
 //-----------------------------------------------------------------------
 using System;
+
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs
 {
-	public class AfterDeletingTheIndexStopsBeingStale : LocalClientTest
+	public class AfterDeletingTheIndexStopsBeingStale : RavenTest
 	{
 		[Fact]
 		public void Deletion()

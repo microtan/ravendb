@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -10,22 +9,22 @@ namespace Raven.Database.Linq.PrivateExtensions
 {
 	/// <summary>
 	/// Extension methods that we are translating on dynamic objects during the 
-	/// translation phase of the indx compilation
+	/// translation phase of the index compilation
 	/// </summary>
 	public class DynamicExtensionMethods
 	{
-		public static BoostedValue Boost(dynamic o, float value)
+		public static BoostedValue Boost(dynamic o, object value)
 		{
 			return new BoostedValue
 			{
 				Value = o,
-				Boost = value
+				Boost = Convert.ToSingle(value)
 			};
 		}
 
 		public static object IfEntityIs(dynamic o, string entityName)
 		{
-			if (string.Equals(o[Constants.Metadata][Constants.RavenEntityName], entityName, StringComparison.InvariantCultureIgnoreCase))
+			if (string.Equals(o[Constants.Metadata][Constants.RavenEntityName], entityName, StringComparison.OrdinalIgnoreCase))
 				return o;
 			return new DynamicNullObject();
 		}

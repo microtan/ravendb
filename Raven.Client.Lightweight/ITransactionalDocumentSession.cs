@@ -19,30 +19,26 @@ namespace Raven.Client
 		Guid ResourceManagerId { get; }
 
 		/// <summary>
-		/// Commits the transaction specified.
+		/// The db name for this session
 		/// </summary>
-		/// <param name="txId">The tx id.</param>
-		void Commit(Guid txId);
-
-		/// <summary>
-		/// Rollbacks the transaction specified.
-		/// </summary>
-		/// <param name="txId">The tx id.</param>
-		void Rollback(Guid txId);
-
-		/// <summary>
-		/// Promotes a transaction specified to a distributed transaction
-		/// </summary>
-		/// <param name="fromTxId">From tx id.</param>
-		/// <returns>The token representing the distributed transaction</returns>
-		byte[] PromoteTransaction(Guid fromTxId);
+		string DatabaseName { get; }
 
 	    /// <summary>
-	    /// Stores the recovery information for the specified transaction
+	    /// Commits the transaction specified.
 	    /// </summary>
-	    /// <param name="resourceManagerId">The resource manager Id for this transaction</param>
 	    /// <param name="txId">The tx id.</param>
-	    /// <param name="recoveryInformation">The recovery information.</param>
-	    void StoreRecoveryInformation(Guid resourceManagerId, Guid txId, byte[] recoveryInformation);
+	    void Commit(string txId);
+
+	    /// <summary>
+	    /// Rollbacks the transaction specified.
+	    /// </summary>
+	    /// <param name="txId">The tx id.</param>
+	    void Rollback(string txId);
+
+		/// <summary>
+		/// Prepares the transaction on the server.
+		/// </summary>
+		/// <param name="txId">The tx id.</param>
+		void PrepareTransaction(string txId);
 	}
 }

@@ -4,7 +4,10 @@
 // </copyright>
 //-----------------------------------------------------------------------
 using System;
+using System.Globalization;
 using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
 using System.Transactions;
 using Raven.Abstractions;
 using Raven.Abstractions.Commands;
@@ -13,42 +16,25 @@ using Raven.Abstractions.Exceptions;
 using Raven.Abstractions.Extensions;
 using Raven.Abstractions.Indexing;
 using Raven.Client;
-using Raven.Database.Server;
 using Raven.Json.Linq;
-using Raven.Client.Document;
 using Raven.Client.Indexes;
-using Raven.Database.Extensions;
-using Raven.Server;
+using Raven.Tests.Common;
+using Raven.Tests.Common.Attributes;
+using Raven.Tests.Common.Util;
 using Raven.Tests.Indexes;
-using Xunit;
-using System.Linq;
 using Raven.Tests.Spatial;
+using Xunit;
+using Xunit.Extensions;
 
 namespace Raven.Tests.Document
 {
-	public class DocumentStoreServerTests : RemoteClientTest, IDisposable
+	public class DocumentStoreServerTests : RavenTest
 	{
-		private readonly string path;
-		private readonly int port;
-		private readonly RavenDbServer server;
 		private readonly IDocumentStore documentStore;
 
 		public DocumentStoreServerTests()
 		{
-			port = 8079;
-			path = GetPath("TestDb");
-			NonAdminHttp.EnsureCanListenToWhenInNonAdminContext(8079);
-
-			server = GetNewServer(port, path);
-			documentStore = new DocumentStore {Url = "http://localhost:" + port}.Initialize();
-		}
-
-		public override void Dispose()
-		{
-			documentStore.Dispose();
-			server.Dispose();
-			IOExtensions.DeleteDirectory(path);
-			base.Dispose();
+			documentStore = NewRemoteDocumentStore();
 		}
 
 		[Fact]
@@ -79,9 +65,23 @@ namespace Raven.Tests.Document
 			                                                          		Indexes = {{x => x.Name, FieldIndexing.NotAnalyzed}}
 			                                                          	});
 			var indexDefinition = documentStore.DatabaseCommands.GetIndex("Companies/Name");
-			Assert.Equal(@"docs.Companies
-	.Select(c => new {Name = c.Name})", indexDefinition.Map);
+			Assert.Equal(@"docs.Companies.Select(c => new {
+    Name = c.Name
+})", indexDefinition.Map);
 			Assert.Equal(FieldIndexing.NotAnalyzed, indexDefinition.Indexes["Name"]);
+		}
+
+		[Fact]
+		public void Can_get_indexes()
+		{
+			documentStore.DatabaseCommands.PutIndex("Companies/Name", new IndexDefinitionBuilder<Company, Company>
+			{
+				Map = companies => from c in companies
+								   select new { c.Name },
+				Indexes = { { x => x.Name, FieldIndexing.NotAnalyzed } }
+			});
+			var indexDefinitions = documentStore.DatabaseCommands.GetIndexes(0, 10);
+			Assert.NotNull(indexDefinitions.SingleOrDefault(d => d.Name == "Companies/Name"));
 		}
 
 		[Fact]
@@ -93,17 +93,19 @@ namespace Raven.Tests.Document
 				session.Store(entity);
 				session.SaveChanges();
 
-				session.Advanced.LuceneQuery<Company>().WaitForNonStaleResults().ToArray(); // wait for the index to settle down
+                session.Advanced.DocumentQuery<Company>().WaitForNonStaleResults().ToArray(); // wait for the index to settle down
 			}
 
-			documentStore.DatabaseCommands.DeleteByIndex("Raven/DocumentsByEntityName", new IndexQuery
-			                                                                            	{
-			                                                                            		Query = "Tag:[[Companies]]"
-			                                                                            	}, allowStale: false);
+			var operation = documentStore.DatabaseCommands.DeleteByIndex("Raven/DocumentsByEntityName", new IndexQuery
+			{
+				Query = "Tag:[[Companies]]"
+			}, allowStale: false);
+
+			operation.WaitForCompletion();
 
 			using (var session = documentStore.OpenSession())
 			{
-				Assert.Empty(session.Advanced.LuceneQuery<Company>().WaitForNonStaleResults().ToArray());
+                Assert.Empty(session.Advanced.DocumentQuery<Company>().WaitForNonStaleResults().ToArray());
 			}
 		}
 
@@ -111,10 +113,12 @@ namespace Raven.Tests.Document
 		[Fact]
 		public void Can_order_by_using_linq()
 		{
-			documentStore.DatabaseCommands.PutIndex("CompaniesByName", new IndexDefinition
-			                                                           	{
-			                                                           		Map = "from company in docs.Companies select new { company.Name, company.Phone }",
-			                                                           	});
+			documentStore
+				.DatabaseCommands
+				.PutIndex("CompaniesByName", new IndexDefinition
+				                             {
+					                             Map = "from company in docs.Companies select new { company.Name, company.Phone }",
+				                             });
 
 			using (var session = documentStore.OpenSession())
 			{
@@ -123,7 +127,7 @@ namespace Raven.Tests.Document
 				session.Store(new Company {Name = "B", Phone = 4});
 				session.SaveChanges();
 
-				session.Advanced.LuceneQuery<Company>("CompaniesByName").WaitForNonStaleResults().ToArray(); // wait for the index to settle down
+                session.Advanced.DocumentQuery<Company>("CompaniesByName").WaitForNonStaleResults().ToArray(); // wait for the index to settle down
 			}
 
 			using (var session = documentStore.OpenSession())
@@ -131,7 +135,7 @@ namespace Raven.Tests.Document
 				var q = from company in session.Query<Company>("CompaniesByName")
 				        orderby company.Name descending
 				        select company;
-
+				
 				var companies = q.ToArray();
 				Assert.Equal("B", companies[0].Name);
 				Assert.Equal("B", companies[1].Name);
@@ -255,7 +259,7 @@ namespace Raven.Tests.Document
 				session.Store(entity);
 				session.SaveChanges();
 
-				session.Advanced.LuceneQuery<Company>().WaitForNonStaleResults().ToArray(); // wait for the index to settle down
+                session.Advanced.DocumentQuery<Company>().WaitForNonStaleResults().ToArray(); // wait for the index to settle down
 			}
 
 			documentStore.DatabaseCommands.UpdateByIndex("Raven/DocumentsByEntityName", new IndexQuery
@@ -269,7 +273,7 @@ namespace Raven.Tests.Document
 			                                                                            	   				Name = "Name",
 			                                                                            	   				Value = RavenJToken.FromObject("Another Company")
 			                                                                            	   			},
-			                                                                            	   	}, allowStale: false);
+			                                                                            	   	}, allowStale: false).WaitForCompletion();
 
 			using (var session = documentStore.OpenSession())
 			{
@@ -284,7 +288,7 @@ namespace Raven.Tests.Document
 			documentStore.DatabaseCommands.Query("Raven/DocumentsByEntityName", new IndexQuery
 			                                                                    	{
 			                                                                    		PageSize = 10,
-			                                                                    		Cutoff = SystemTime.Now.AddHours(-1)
+			                                                                    		Cutoff = SystemTime.UtcNow.AddHours(-1)
 			                                                                    	}, null);
 		}
 
@@ -309,7 +313,7 @@ namespace Raven.Tests.Document
 
 			using (var s = documentStore.OpenSession())
 			{
-				var query = s.Advanced.LuceneQuery<object>("my_index")
+                var query = s.Advanced.DocumentQuery<object>("my_index")
 					.SelectFields<DateHolder>("Date")
 					.WaitForNonStaleResults();
 				var dateHolder = query.ToArray().First();
@@ -337,7 +341,7 @@ namespace Raven.Tests.Document
 			{
 				s.Store(new
 				        	{
-				        		Language = "Fran�ais", //Note the �
+				        		Language = "Français", //Note the ç
 				        		Type = "Feats"
 				        	});
 				s.SaveChanges();
@@ -345,8 +349,8 @@ namespace Raven.Tests.Document
 
 			using (var s = documentStore.OpenSession())
 			{
-				var query = s.Advanced.LuceneQuery<object>("my_index")
-					.Where("Type:Feats AND Language:Fran�ais")
+                var query = s.Advanced.DocumentQuery<object>("my_index")
+					.Where("Type:Feats AND Language:Français")
 					.WaitForNonStaleResults();
 				query.ToArray();
 
@@ -360,7 +364,7 @@ namespace Raven.Tests.Document
 			documentStore.DatabaseCommands.PutIndex("my_index",
 			                                        new IndexDefinition
 			                                        	{
-			                                        		Map = "from doc in docs select new { doc.Language, doc.Type, Value = new{ Answers = 42, Paths = 7 }  }}",
+			                                        		Map = "from doc in docs select new { doc.Language, doc.Type, Value = new{ Answers = 42, Paths = 7 }  }",
 			                                        		Stores = {{"Value", FieldStorage.Yes},}
 			                                        	});
 
@@ -368,7 +372,7 @@ namespace Raven.Tests.Document
 			{
 				s.Store(new
 				        	{
-				        		Language = "Fran�ais", //Note the �
+								Language = "Français", //Note the ç
 				        		Type = "Feats"
 				        	});
 				s.SaveChanges();
@@ -376,8 +380,8 @@ namespace Raven.Tests.Document
 
 			using (var s = documentStore.OpenSession())
 			{
-				var query = s.Advanced.LuceneQuery<RavenJObject>("my_index")
-					.Where("Type:Feats AND Language:Fran�ais")
+                var query = s.Advanced.DocumentQuery<RavenJObject>("my_index")
+					.Where("Type:Feats AND Language:Français")
 					.SelectFields<RavenJObject>("Value")
 					.WaitForNonStaleResults();
 				var first = query.First();
@@ -487,6 +491,35 @@ namespace Raven.Tests.Document
 		}
 
 		[Fact]
+		public void Can_get_document_metadata_Async()
+		{
+			documentStore.AsyncDatabaseCommands
+			             .PutAsync("rhino1", null, RavenJObject.FromObject(new Company {Name = "Hibernating Rhinos"}), new RavenJObject())
+			             .Wait();
+
+			JsonDocument doc = null;
+			JsonDocumentMetadata meta = null;
+
+			documentStore.AsyncDatabaseCommands.GetAsync("rhino1")
+						 .ContinueWith(task => { doc = task.Result; })
+						 .Wait();
+			documentStore.AsyncDatabaseCommands.HeadAsync("rhino1")
+						 .ContinueWith(task => { meta = task.Result; })
+						 .Wait();
+
+			Assert.NotNull(meta);
+			Assert.Equal(doc.Key, meta.Key);
+			Assert.Equal(doc.Etag, meta.Etag);
+			Assert.Equal(doc.LastModified, meta.LastModified);
+		}
+
+		[Fact]
+		public async Task When_document_does_not_exist_Then_metadata_should_be_null_Async()
+		{
+			Assert.Null(await documentStore.AsyncDatabaseCommands.HeadAsync("rhino1"));
+		}
+
+		[Fact]
 		public void Can_defer_commands_until_savechanges()
 		{
 			using (var session = documentStore.OpenSession())
@@ -554,6 +587,18 @@ namespace Raven.Tests.Document
 			}
 		}
 
+		[Fact]
+		public void Can_get_documents()
+		{
+			using (var session = documentStore.OpenSession())
+			{
+				session.Store(new Company { Name = "Company A", Id = "1" });
+				session.Store(new Company { Name = "Company B", Id = "2" });
+				session.SaveChanges();
+			}
+			JsonDocument[] jsonDocuments = documentStore.DatabaseCommands.GetDocuments(0, 10, true);
+			Assert.Equal(2, jsonDocuments.Length);
+		}
 
 		[Fact]
 		public void Can_delete_document()
@@ -592,7 +637,7 @@ namespace Raven.Tests.Document
 				                                        	});
 
 				var q = session
-					.Advanced.LuceneQuery<Company>("company_by_name")
+                    .Advanced.DocumentQuery<Company>("company_by_name")
 					.SelectFields<Company>("Name", "Phone")
 					.WaitForNonStaleResults();
 				var single = q.Single();
@@ -745,13 +790,23 @@ namespace Raven.Tests.Document
 				}
 
 				company.Name = "Company 2";
-				Assert.Throws<ConcurrencyException>(() => session.SaveChanges());
+				try
+				{
+					session.SaveChanges();
+				}
+				catch (Exception e)
+				{
+					Assert.IsType<ConcurrencyException>(e.GetBaseException());
+				}
 			}
 		}
 
 		[Fact]
 		public void Can_insert_with_transaction()
 		{
+            if(documentStore.DatabaseCommands.GetStatistics().SupportsDtc == false)
+                return;
+
 			const string id = "Company/id";
 			using (var session = documentStore.OpenSession())
 			{
@@ -765,6 +820,7 @@ namespace Raven.Tests.Document
 
 					tx.Complete();
 				}
+
 				Assert.NotNull(session.Load<Company>(id));
 			}
 		}
@@ -772,6 +828,9 @@ namespace Raven.Tests.Document
 		[Fact]
 		public void Can_rollback_transaction_on_insert()
 		{
+            if(documentStore.DatabaseCommands.GetStatistics().SupportsDtc == false)
+                return;
+
 			string id;
 			using (var session = documentStore.OpenSession())
 			{
@@ -839,7 +898,7 @@ namespace Raven.Tests.Document
 			session1.SaveChanges();
 
 			var session2 = documentStore.OpenSession();
-			var companyFound = session2.Advanced.LuceneQuery<Company>()
+            var companyFound = session2.Advanced.DocumentQuery<Company>()
 				.WaitForNonStaleResults()
 				.ToArray();
 
@@ -856,7 +915,7 @@ namespace Raven.Tests.Document
 			session1.SaveChanges();
 
 			var session2 = documentStore.OpenSession();
-			var companyFound = session2.Advanced.LuceneQuery<Company>()
+            var companyFound = session2.Advanced.DocumentQuery<Company>()
 				.WaitForNonStaleResults()
 				.ToArray();
 
@@ -881,11 +940,11 @@ namespace Raven.Tests.Document
 				                                        	});
 
 				// Wait until the index is built
-				session.Advanced.LuceneQuery<Company>("company_by_name")
+                session.Advanced.DocumentQuery<Company>("company_by_name")
 					.WaitForNonStaleResults()
 					.ToArray();
 
-				var companies = session.Advanced.LuceneQuery<Company>("company_by_name")
+                var companies = session.Advanced.DocumentQuery<Company>("company_by_name")
 					.OrderBy("Phone")
 					.WaitForNonStaleResults()
 					.ToArray();
@@ -895,9 +954,11 @@ namespace Raven.Tests.Document
 			}
 		}
 
-		[Fact]
-		public void Can_query_from_spatial_index()
+		[Theory]
+		[CriticalCultures]
+		public void Can_query_from_spatial_index(CultureInfo cultureInfo)
 		{
+			using(new TemporaryCulture(cultureInfo))
 			using (var session = documentStore.OpenSession())
 			{
 				foreach (Event @event in SpatialIndexTestHelper.GetEvents())
@@ -919,32 +980,38 @@ namespace Raven.Tests.Document
 				documentStore.DatabaseCommands.PutIndex("eventsByLatLng", indexDefinition);
 
 				// Wait until the index is built
-				session.Advanced.LuceneQuery<Event>("eventsByLatLng")
+                session.Advanced.DocumentQuery<Event>("eventsByLatLng")
 					.WaitForNonStaleResults()
 					.ToArray();
 
 				const double lat = 38.96939, lng = -77.386398;
-				const double radius = 6.0;
+				const double radiusInKm = 6.0 * 1.609344;
 
-				var events = session.Advanced.LuceneQuery<Event>("eventsByLatLng")
+                var events = session.Advanced.DocumentQuery<Event>("eventsByLatLng")
 					.WhereEquals("Tag", "Event")
-					.WithinRadiusOf(radius, lat, lng)
+					.WithinRadiusOf(radiusInKm, lat, lng)
 					.SortByDistance()
 					.WaitForNonStaleResults()
 					.ToArray();
 
+
+				var expected =
+					SpatialIndexTestHelper.GetEvents()
+						.Count(e => SpatialIndexTest.GetGeographicalDistance(lat, lng, e.Latitude, e.Longitude) <= radiusInKm);
+
+				Assert.Equal(expected, events.Length);
+
 				Assert.Equal(7, events.Length);
 
-				//TODO
-				//double previous = 0;
-				//foreach (var e in events)
-				//{
-				//    double distance = Raven.Database.Indexing.SpatialIndex.GetDistanceMi(lat, lng, e.Latitude, e.Longitude);
-				//    Console.WriteLine("Venue: " + e.Venue + ", Distance " + distance);
-				//    Assert.True(distance < radius);
-				//    Assert.True(distance >= previous);
-				//    previous = distance;
-				//}
+				double previous = 0;
+				foreach (var e in events)
+				{
+					double distance = SpatialIndexTest.GetGeographicalDistance(lat, lng, e.Latitude, e.Longitude);
+					Console.WriteLine("Venue: " + e.Venue + ", Distance " + distance);
+					Assert.True(distance < radiusInKm);
+					Assert.True(distance >= previous);
+					previous = distance;
+				}
 			}
 		}
 
@@ -968,7 +1035,7 @@ namespace Raven.Tests.Document
 
 				session.SaveChanges();
 
-				LinqIndexesFromClient.User single = session.Advanced.LuceneQuery<LinqIndexesFromClient.User>("UsersByLocation")
+                LinqIndexesFromClient.User single = session.Advanced.DocumentQuery<LinqIndexesFromClient.User>("UsersByLocation")
 					.Where("Name:Yael")
 					.WaitForNonStaleResults()
 					.Single();
@@ -1002,7 +1069,7 @@ namespace Raven.Tests.Document
 
 				session.SaveChanges();
 
-				LinqIndexesFromClient.LocationCount single = session.Advanced.LuceneQuery<LinqIndexesFromClient.LocationCount>("UsersCountByLocation")
+                LinqIndexesFromClient.LocationCount single = session.Advanced.DocumentQuery<LinqIndexesFromClient.LocationCount>("UsersCountByLocation")
 					.Where("Location:\"Tel Aviv\"")
 					.WaitForNonStaleResults()
 					.Single();
@@ -1018,11 +1085,13 @@ namespace Raven.Tests.Document
 			documentStore.DatabaseCommands.PutIndex("AvgAgeByLocation", new IndexDefinitionBuilder<LinqIndexesFromClient.User, LinqIndexesFromClient.LocationAge>
 			                                                            	{
 			                                                            		Map = users => from user in users
-			                                                            		               select new {user.Location, user.Age},
+			                                                            		               select new {user.Location, AgeSum=  user.Age, AverageAge = user.Age, Count = 1},
 			                                                            		Reduce = results => from loc in results
 			                                                            		                    group loc by loc.Location
 			                                                            		                    into g
-			                                                            		                    select new {Location = g.Key, Age = g.Average(x => x.Age)},
+																									let count = g.Sum(x=>x.Count)
+																									let age = g.Sum(x=>x.AgeSum)
+			                                                            		                    select new {Location = g.Key, AverageAge = age/ count, Count = count, AgeSum = age },
 			                                                            		Indexes = {{x => x.Location, FieldIndexing.NotAnalyzed}}
 			                                                            	});
 
@@ -1044,13 +1113,13 @@ namespace Raven.Tests.Document
 
 				session.SaveChanges();
 
-				LinqIndexesFromClient.LocationAge single = session.Advanced.LuceneQuery<LinqIndexesFromClient.LocationAge>("AvgAgeByLocation")
+                LinqIndexesFromClient.LocationAge single = session.Advanced.DocumentQuery<LinqIndexesFromClient.LocationAge>("AvgAgeByLocation")
 					.Where("Location:\"Tel Aviv\"")
 					.WaitForNonStaleResults()
 					.Single();
 
 				Assert.Equal("Tel Aviv", single.Location);
-				Assert.Equal(26.5m, single.Age);
+				Assert.Equal(26.5m, single.AverageAge);
 			}
 		}
 
@@ -1061,8 +1130,8 @@ namespace Raven.Tests.Document
 			                                                  	{
 			                                                  		Map = users => from user in users
 			                                                  		               select new {user.Age},
-			                                                  		Indexes = {{x => x.Age, FieldIndexing.Analyzed}},
-			                                                  		Stores = {{x => x.Age, FieldStorage.Yes}}
+			                                                  		Indexes = {{x => x.AverageAge, FieldIndexing.Analyzed}},
+																	Stores = { { x => x.AverageAge, FieldStorage.Yes } }
 			                                                  	});
 
 			using (var session = documentStore.OpenSession())
@@ -1088,8 +1157,52 @@ namespace Raven.Tests.Document
 
 				session.SaveChanges();
 
-				var user = session.Advanced.LuceneQuery<LinqIndexesFromClient.User>("MaxAge")
+                var user = session.Advanced.DocumentQuery<LinqIndexesFromClient.User>("MaxAge")
 					.OrderBy("-Age")
+					.Take(1)
+					.WaitForNonStaleResults()
+					.Single();
+
+				Assert.Equal(33, user.Age);
+			}
+		}
+
+		[Fact]
+		public void Can_get_correct_maximum_from_map_reduce_index_using_orderbydescending()
+		{
+			documentStore.DatabaseCommands.PutIndex("MaxAge", new IndexDefinitionBuilder<LinqIndexesFromClient.User, LinqIndexesFromClient.LocationAge>
+			{
+				Map = users => from user in users
+								select new { user.Age },
+				Indexes = { { x => x.AverageAge, FieldIndexing.Analyzed } },
+				Stores = { { x => x.AverageAge, FieldStorage.Yes } }
+			});
+
+			using (var session = documentStore.OpenSession())
+			{
+
+				session.Store(new LinqIndexesFromClient.User
+				{
+					Age = 27,
+					Name = "Foo"
+				});
+
+				session.Store(new LinqIndexesFromClient.User
+				{
+					Age = 33,
+					Name = "Bar"
+				});
+
+				session.Store(new LinqIndexesFromClient.User
+				{
+					Age = 29,
+					Name = "Bar"
+				});
+
+				session.SaveChanges();
+
+                var user = session.Advanced.DocumentQuery<LinqIndexesFromClient.User>("MaxAge")
+					.OrderByDescending("Age")
 					.Take(1)
 					.WaitForNonStaleResults()
 					.Single();
@@ -1119,11 +1232,46 @@ namespace Raven.Tests.Document
 		}
 
 		[Fact]
+		public void Getting_attachment_metadata()
+		{
+			documentStore.DatabaseCommands.PutAttachment("sample", null, new MemoryStream(new byte[] { 1, 2, 3 }), new RavenJObject { { "Hello", "World" } });
+
+			var attachmentOnlyWithMetadata = documentStore.DatabaseCommands.HeadAttachment("sample");
+			Assert.Equal("World", attachmentOnlyWithMetadata.Metadata.Value<string>("Hello"));
+
+			var exception = Assert.Throws<InvalidOperationException>(() => attachmentOnlyWithMetadata.Data());
+			Assert.Equal("Cannot get attachment data because it was loaded using: HEAD", exception.Message);
+		}
+
+		[Fact]
+		public void Getting_headers_of_attachments_with_prefix()
+		{
+			documentStore.DatabaseCommands.PutAttachment("sample/1", null, new MemoryStream(new byte[] { 1, 2, 3 }), new RavenJObject { { "Hello", "World" } });
+			documentStore.DatabaseCommands.PutAttachment("example/1", null, new MemoryStream(new byte[] { 1, 2, 3 }), new RavenJObject { { "Hello", "World" } });
+			documentStore.DatabaseCommands.PutAttachment("sample/2", null, new MemoryStream(new byte[] { 1, 2, 3 }), new RavenJObject { { "Hello", "World" } });
+
+			var attachmentHeaders = documentStore.DatabaseCommands.GetAttachmentHeadersStartingWith("sample", 0, 5).ToList();
+
+			Assert.Equal(2, attachmentHeaders.Count);
+
+			foreach (var attachment in attachmentHeaders)
+			{
+				Assert.True(attachment.Key.StartsWith("sample"));
+
+				Assert.Equal("World", attachment.Metadata.Value<string>("Hello"));
+
+				var exception = Assert.Throws<InvalidOperationException>(() => attachment.Data());
+
+				Assert.Equal("Cannot get attachment data from an attachment header", exception.Message);
+			}
+		}
+
+		[Fact]
 		//Fix for issue at http://groups.google.com/group/ravendb/browse_thread/thread/78f1ca6dbdd07e2b
 		//The issue only shows up in Server/Client mode, not in Embedded mode!!!
 		public void Using_attachments_can_properly_set_WebRequest_Headers()
 		{
-			var key = string.Format("{0}-{1}", "test", SystemTime.Now.ToFileTimeUtc());
+			var key = string.Format("{0}-{1}", "test", SystemTime.UtcNow.ToFileTimeUtc());
 			var metadata = new RavenJObject
 			               	{
 			               		{"owner", 5},
@@ -1132,6 +1280,161 @@ namespace Raven.Tests.Document
 			               		{"Content-Length", 100},
 			               	};
 			Assert.DoesNotThrow(() => documentStore.DatabaseCommands.PutAttachment(key, null, new MemoryStream(new byte[] {0, 1, 2}), metadata));
+		}
+
+		[Fact]
+		public void Can_patch_existing_document_when_present()
+		{
+			var company = new Company {Name = "Hibernating Rhinos"};
+
+			using (var session = documentStore.OpenSession())
+			{
+				session.Store(company);
+				session.SaveChanges();
+			}
+
+			documentStore.DatabaseCommands.Patch(
+				company.Id,
+				new[]
+				{
+					new PatchRequest
+					{
+						Type = PatchCommandType.Set,
+						Name = "Name",
+						Value = "Existing",
+					}
+				},
+				new[]
+				{
+					new PatchRequest
+					{
+						Type = PatchCommandType.Set,
+						Name = "Name",
+						Value = "New",
+					}
+				},
+				new RavenJObject());
+
+			using (var session = documentStore.OpenSession())
+			{
+				var company2 = session.Load<Company>(company.Id);
+
+				Assert.NotNull(company2);
+				Assert.Equal(company2.Name, "Existing");
+			}
+		}
+
+		[Fact]
+		public void Can_patch_default_document_when_missing()
+		{
+			documentStore.DatabaseCommands.Patch(
+				"Company/1",
+				new[]
+				{
+					new PatchRequest
+					{
+						Type = PatchCommandType.Set,
+						Name = "Name",
+						Value = "Existing",
+					}
+				},
+				new[]
+				{
+					new PatchRequest
+					{
+						Type = PatchCommandType.Set,
+						Name = "Name",
+						Value = "New",
+					}
+				},
+				new RavenJObject
+				{
+					{ "DefaultMetadataPresent", "true" }
+				});
+
+			using (var session = documentStore.OpenSession())
+			{
+				var company = session.Load<Company>("Company/1");
+
+				Assert.NotNull(company);
+				Assert.Equal(company.Name, "New");
+
+				var metadata = session.Advanced.GetMetadataFor(company);
+
+				Assert.NotNull(metadata);
+				Assert.Equal(metadata["DefaultMetadataPresent"], "true");
+			}
+		}
+
+		[Fact]
+		public void Should_not_throw_when_ignore_missing_true()
+		{
+			Assert.DoesNotThrow(
+				() => documentStore.DatabaseCommands.Patch(
+					"Company/1",
+					new[]
+					{
+						new PatchRequest
+						{
+							Type = PatchCommandType.Set,
+							Name = "Name",
+							Value = "Existing",
+						}
+					}));
+		
+			Assert.DoesNotThrow(
+				() => documentStore.DatabaseCommands.Patch(
+					"Company/1",
+					new[]
+					{
+						new PatchRequest
+						{
+							Type = PatchCommandType.Set,
+							Name = "Name",
+							Value = "Existing",
+						}
+					}, true));
+		}
+
+		[Fact]
+		public void Should_throw_when_ignore_missing_false()
+		{
+			Assert.Throws<DocumentDoesNotExistsException>(
+				() => documentStore.DatabaseCommands.Patch(
+					"Company/1",
+					new[]
+					{
+						new PatchRequest
+						{
+							Type = PatchCommandType.Set,
+							Name = "Name",
+							Value = "Existing",
+						}
+					}, false));
+		}
+
+		[Fact]
+		public void Should_return_false_on_batch_delete_when_document_missing()
+		{
+			BatchResult[] batchResult = documentStore.DatabaseCommands.Batch(new[] { new DeleteCommandData { Key = "Company/1" } });
+
+			Assert.NotNull(batchResult);
+			Assert.Equal(1, batchResult.Length);
+			Assert.NotNull(batchResult[0].Deleted);
+			Assert.False(batchResult[0].Deleted ?? true);
+		}
+
+		[Fact]
+		public void Should_return_true_on_batch_delete_when_document_present()
+		{
+			documentStore.DatabaseCommands.Put("Company/1", null, new RavenJObject(), new RavenJObject());
+			
+			BatchResult[] batchResult = documentStore.DatabaseCommands.Batch(new[] { new DeleteCommandData { Key = "Company/1" } });
+
+			Assert.NotNull(batchResult);
+			Assert.Equal(1, batchResult.Length);
+			Assert.NotNull(batchResult[0].Deleted);
+			Assert.True(batchResult[0].Deleted ?? false);
 		}
 	}
 }

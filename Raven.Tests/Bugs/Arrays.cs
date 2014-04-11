@@ -2,11 +2,14 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs
 {
-	public class Arrays : LocalClientTest
+	public class Arrays : RavenTest
 	{
 		[Fact]
 		public void CanRetrieveMultiDimensionalArray()

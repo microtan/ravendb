@@ -4,8 +4,10 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using System.Threading.Tasks;
+using Raven.Abstractions.Json;
+using Raven.Imports.Newtonsoft.Json;
+using Raven.Imports.Newtonsoft.Json.Linq;
 using Raven.Json.Utilities;
 
 namespace Raven.Json.Linq
@@ -15,6 +17,8 @@ namespace Raven.Json.Linq
 	/// </summary>
 	public class RavenJArray : RavenJToken, IEnumerable<RavenJToken>
 	{
+		private bool isSnapshot;
+
 		/// <summary>
 		/// Initializes a new instance of the <see cref="RavenJArray"/> class.
 		/// </summary>
@@ -30,8 +34,11 @@ namespace Raven.Json.Linq
 		public RavenJArray(IEnumerable content)
 		{
 			Items = new List<RavenJToken>();
+			if (content == null)
+				return;
+
 			var ravenJToken = content as RavenJToken;
-			if (ravenJToken != null)
+			if (ravenJToken != null && ravenJToken.Type != JTokenType.Array)
 			{
 				Items.Add(ravenJToken);
 			}
@@ -58,7 +65,10 @@ namespace Raven.Json.Linq
 		public RavenJArray(IEnumerable<RavenJToken> content)
 		{
 			Items = new List<RavenJToken>();
-			Items.AddRange(content);
+			if (content != null)
+			{
+				Items.AddRange(content);
+			}
 		}
 
 		/// <summary>
@@ -77,12 +87,23 @@ namespace Raven.Json.Linq
 		public RavenJToken this[int index]
 		{
 			get { return Items[index]; }
-			set { Items[index] = value; }
+			set
+			{
+				if (isSnapshot)
+					throw new InvalidOperationException("Cannot modify a snapshot, this is probably a bug");
+
+				Items[index] = value;
+			}
 		}
 
 		public override RavenJToken CloneToken()
 		{
 			return CloneTokenImpl(new RavenJArray());
+		}
+
+		public override bool IsSnapshot
+		{
+			get { return isSnapshot; }
 		}
 
 		public int Length { get { return Items.Count; } }
@@ -137,11 +158,11 @@ namespace Raven.Json.Linq
 		/// </summary>
 		/// <param name="json">A <see cref="String"/> that contains JSON.</param>
 		/// <returns>A <see cref="RavenJArray"/> populated from the string that contains JSON.</returns>
-		public static new RavenJArray Parse(string json)
+		public new static RavenJArray Parse(string json)
 		{
 			try
 			{
-				JsonReader jsonReader = new JsonTextReader(new StringReader(json));
+				JsonReader jsonReader = new RavenJsonTextReader(new StringReader(json));
 
 				return Load(jsonReader);
 			}
@@ -197,22 +218,41 @@ namespace Raven.Json.Linq
 
 		public void Add(RavenJToken token)
 		{
+			if (isSnapshot)
+				throw new InvalidOperationException("Cannot modify a snapshot, this is probably a bug");
+
 			Items.Add(token);
 		}
 
 		public bool Remove(RavenJToken token)
 		{
+			if (isSnapshot)
+				throw new InvalidOperationException("Cannot modify a snapshot, this is probably a bug");
+
 			return Items.Remove(token);
 		}
 
 		public void RemoveAt(int index)
 		{
+			if (isSnapshot)
+				throw new InvalidOperationException("Cannot modify a snapshot, this is probably a bug");
+
 			Items.RemoveAt(index);
 		}
 
-		public void Insert(int index, RavenJToken token)
+		/// <summary>
+		/// Inserts an item to the <see cref="T:System.Collections.Generic.IList`1"/> at the specified index.
+		/// </summary>
+		/// <param name="index">The zero-based index at which <paramref name="item"/> should be inserted.</param>
+		/// <param name="item">The object to insert into the <see cref="T:System.Collections.Generic.IList`1"/>.</param>
+		/// <exception cref="T:System.ArgumentOutOfRangeException">
+		/// <paramref name="index"/> is not a valid index in the <see cref="T:System.Collections.Generic.IList`1"/>.</exception>
+		public void Insert(int index, RavenJToken item)
 		{
-			Items.Insert(index, token);
+			if (isSnapshot)
+				throw new InvalidOperationException("Cannot modify a snapshot, this is probably a bug");
+
+			Items.Insert(index, item);
 		}
 
 		public override IEnumerable<T> Values<T>()
@@ -228,6 +268,62 @@ namespace Raven.Json.Linq
 		internal override void AddForCloning(string key, RavenJToken token)
 		{
 			Add(token);
+		}
+
+		public override void EnsureCannotBeChangeAndEnableSnapshotting()
+		{
+			isSnapshot = true;
+		}
+
+		public override RavenJToken CreateSnapshot()
+		{
+			if (isSnapshot == false)
+				throw new InvalidOperationException("Cannot create snapshot without previously calling EnsureSnapShot");
+
+			return new RavenJArray(Items);
+		}
+
+		public static async Task<RavenJToken> LoadAsync(JsonTextReaderAsync reader)
+		{
+			if (reader.TokenType == JsonToken.None)
+			{
+				if (!await reader.ReadAsync())
+					throw new Exception("Error reading RavenJArray from JsonReader.");
+			}
+
+			if (reader.TokenType != JsonToken.StartArray)
+				throw new Exception("Error reading RavenJArray from JsonReader. Current JsonReader item is not an array: {0}".FormatWith(CultureInfo.InvariantCulture, reader.TokenType));
+
+			if (await reader.ReadAsync() == false)
+				throw new Exception("Unexpected end of json array");
+
+			var ar = new RavenJArray();
+			RavenJToken val = null;
+			do
+			{
+				switch (reader.TokenType)
+				{
+					case JsonToken.Comment:
+						// ignore comments
+						break;
+					case JsonToken.EndArray:
+						return ar;
+					case JsonToken.StartObject:
+						val = await RavenJObject.LoadAsync(reader);
+						ar.Items.Add(val);
+						break;
+					case JsonToken.StartArray:
+						val = await RavenJArray.LoadAsync(reader);
+						ar.Items.Add(val);
+						break;
+					default:
+						val = RavenJValue.Load(reader);
+						ar.Items.Add(val);
+						break;
+				}
+			} while (await reader.ReadAsync());
+
+			throw new Exception("Error reading RavenJArray from JsonReader.");
 		}
 	}
 }

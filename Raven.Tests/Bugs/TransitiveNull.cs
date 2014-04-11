@@ -6,12 +6,14 @@
 using Raven.Abstractions.Data;
 using Raven.Json.Linq;
 using Raven.Database.Data;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs
 {
-	public class TransitiveNull : LocalClientTest
+	public class TransitiveNull : RavenTest
 	{
 		[Fact]
 		public void WillNotError()
@@ -66,8 +68,8 @@ namespace Raven.Tests.Bugs
 				}, new string[0]);
 
 
-				var tempIndex = store.DocumentDatabase.IndexStorage.Indexes.First(x=>x.StartsWith("Temp"));
-				var results = store.OpenSession().Advanced.LuceneQuery<dynamic>(tempIndex).WaitForNonStaleResults().ToArray();
+				var autoIndex = store.DocumentDatabase.IndexStorage.IndexNames.First(x=>x.StartsWith("Auto"));
+                var results = store.OpenSession().Advanced.DocumentQuery<dynamic>(autoIndex).WaitForNonStaleResults().ToArray();
 
 				Assert.Equal(1, results.Length);
 			}

@@ -4,11 +4,13 @@ using System.Linq;
 using System.Linq.Expressions;
 using Raven.Client.Indexes;
 using Raven.Client.Linq;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs.Queries
 {
-	public class QueryProvider : LocalClientTest
+	public class QueryProvider : RavenTest
 	{
 		[Fact]
 		public void CanCreateQuery()

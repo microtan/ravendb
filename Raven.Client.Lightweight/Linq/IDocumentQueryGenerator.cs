@@ -15,14 +15,12 @@ namespace Raven.Client.Linq
 		/// <summary>
 		/// Create a new query for <typeparam name="T"/>
 		/// </summary>
-		IDocumentQuery<T> Query<T>(string indexName);
+		IDocumentQuery<T> Query<T>(string indexName, bool isMapReduce);
 
-#if !NET_3_5
 		/// <summary>
 		/// Create a new query for <typeparam name="T"/>
 		/// </summary>
-		IAsyncDocumentQuery<T> AsyncQuery<T>(string indexName);
-#endif
+		IAsyncDocumentQuery<T> AsyncQuery<T>(string indexName, bool isMapReduce);
 	}
 
 }

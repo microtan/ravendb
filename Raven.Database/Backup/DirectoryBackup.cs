@@ -5,12 +5,15 @@
 //-----------------------------------------------------------------------
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
-using NLog;
 using Raven.Abstractions.Data;
+using Raven.Abstractions.Logging;
 using Directory = System.IO.Directory;
 using Raven.Database.Extensions;
+using System.Linq;
 
 namespace Raven.Database.Backup
 {
@@ -27,7 +30,7 @@ namespace Raven.Database.Backup
 		public event Action<string, BackupStatus.BackupMessageSeverity> Notify = delegate { };
 
 		private readonly Dictionary<string, long> fileToSize = new Dictionary<string, long>();
-		private static readonly Logger logger = LogManager.GetCurrentClassLogger();
+		private static readonly ILog logger = LogManager.GetCurrentClassLogger();
 
 		private readonly string source;
 		private readonly string destination;
@@ -44,8 +47,8 @@ namespace Raven.Database.Backup
 			if (Directory.Exists(tempPath) == false)
 				Directory.CreateDirectory(tempPath);
 			
-			if (!allowOverwrite && Directory.Exists(destination))
-				throw new InvalidOperationException("Directory exists and overwrite was not explicitly requested by user: " + destination);
+			if (!allowOverwrite && Directory.Exists(destination) && Directory.EnumerateFileSystemEntries(destination).Any())
+				throw new InvalidOperationException("Directory exists and it is not empty; overwrite was not explicitly requested by user: " + destination);
 
 			if (Directory.Exists(destination) == false)
 				Directory.CreateDirectory(destination);
@@ -54,12 +57,12 @@ namespace Raven.Database.Backup
 		/// <summary>
 		/// The process for backing up a directory index is simple:
 		/// a) create hard links to all the files in the lucene directory in a temp director
-		///	   that gives us the current snapshot, and protect us from lucene's
+		///	   that gives us the current snapshot, and protect us from Lucene's
 		///    deleting files.
 		/// b) copy the hard links to the destination directory
 		/// c) delete the temp directory
 		/// </summary>
-		public void Execute()
+		public void Execute(ProgressNotifier progressNotifier)
 		{
 			if (allowOverwrite) // clean destination folder; we want to do this as close as possible to the actual backup operation
 			{
@@ -71,7 +74,7 @@ namespace Raven.Database.Backup
 			{
 				Notify("Copying " + Path.GetFileName(file), BackupStatus.BackupMessageSeverity.Informational);
 				var fullName = new FileInfo(file).FullName;
-				FileCopy(file, Path.Combine(destination, Path.GetFileName(file)), fileToSize[fullName]);
+				FileCopy(file, Path.Combine(destination, Path.GetFileName(file)), fileToSize[fullName], progressNotifier);
 				Notify("Copied " + Path.GetFileName(file), BackupStatus.BackupMessageSeverity.Informational);
 			}
 
@@ -81,9 +84,7 @@ namespace Raven.Database.Backup
 			}
 			catch (Exception e) //cannot delete, probably because there is a file being written there
 			{
-				logger.WarnException(
-					string.Format("Could not delete {0}, will delete those on startup", tempPath),
-					e);
+				logger.WarnException(string.Format("Could not delete {0}, will delete those on startup", tempPath), e);
 
 				foreach (var file in Directory.EnumerateFiles(tempPath))
 				{
@@ -93,18 +94,20 @@ namespace Raven.Database.Backup
 			}
 		}
 
-		private static void FileCopy(string src, string dest, long size)
+		private void FileCopy(string src, string dest, long size, ProgressNotifier notifier)
 		{
 			var buffer = new byte[16 * 1024];
+			var initialSize = size;
 			using (var srcStream = File.Open(src,FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
 			{
-				if(File.Exists(dest))
+				if (File.Exists(dest))
 					File.SetAttributes(dest,FileAttributes.Normal);
 				using (var destStream = File.Create(dest, buffer.Length))
 				{
 					while (true)
 					{
 						var read = srcStream.Read(buffer, 0, (int)Math.Min(buffer.Length, size));
+						notifier.UpdateProgress(read, Notify);
 						if (read == 0)
 							break;
 						size -= read;
@@ -115,23 +118,46 @@ namespace Raven.Database.Backup
 			}
 		}
 
-		public void Prepare()
+		public long Prepare()
 		{
-			var sourceFilesSnapshot = Directory.GetFiles(source);
-			foreach (var sourceFile in sourceFilesSnapshot)
+			string[] sourceFilesSnapshot;
+			try
 			{
+				sourceFilesSnapshot = Directory.GetFiles(source);
+			}
+			catch (Exception e)
+			{
+				logger.WarnException("Could not get directory files, maybe it was deleted", e);
+				return 0;
+			}
+			for (int index = 0; index < sourceFilesSnapshot.Length; index++)
+			{
+				var sourceFile = sourceFilesSnapshot[index];
 				if (Path.GetFileName(sourceFile) == "write.lock")
 					continue; // skip the Lucene lock file
-			   
-				var destFileName = Path.Combine(tempPath, Path.GetFileName(sourceFile));
-				CreateHardLink(
-					destFileName,
-					sourceFile,
-					IntPtr.Zero
-					);
 
-				var fileInfo = new FileInfo(destFileName);
-				fileToSize[fileInfo.FullName] = fileInfo.Length;
+				var destFileName = Path.Combine(tempPath, Path.GetFileName(sourceFile));
+				var success = CreateHardLink(destFileName, sourceFile, IntPtr.Zero);
+
+				if (success == false)
+				{
+					// 'The system cannot find the file specified' is explicitly ignored here
+					if (Marshal.GetLastWin32Error() != 0x80004005)
+						throw new Win32Exception();
+					sourceFilesSnapshot[index] = null;
+					continue;
+				}
+
+				try
+				{
+					var fileInfo = new FileInfo(destFileName);
+					fileToSize[fileInfo.FullName] = fileInfo.Length;
+				}
+				catch (IOException)
+				{
+					sourceFilesSnapshot[index] = null;
+					// something happened to this file, probably was removed somehow
+				}
 			}
 
 			// we have to do this outside the main loop because we mustn't
@@ -139,8 +165,12 @@ namespace Raven.Database.Backup
 			// of all the files
 			foreach (var sourceFile in sourceFilesSnapshot)
 			{
+				if (sourceFile == null)
+					continue;
 				Notify("Hard linked " + sourceFile, BackupStatus.BackupMessageSeverity.Informational);
 			}
+
+			return fileToSize.Sum(f => f.Value);
 		}
 	}
 }

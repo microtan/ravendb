@@ -2,39 +2,33 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using NLog;
 using Raven.Abstractions.Data;
+using Raven.Abstractions.Extensions;
+using Raven.Abstractions.Logging;
 using Raven.Client.Connection;
 
 namespace Raven.Client.Document.SessionOperations
 {
 	public class MultiLoadOperation
 	{
-		private static readonly Logger log = LogManager.GetCurrentClassLogger();
+		private static readonly ILog log = LogManager.GetCurrentClassLogger();
 
 		private readonly InMemoryDocumentSessionOperations sessionOperations;
 		internal Func<IDisposable> disableAllCaching { get; set; }
 		private readonly string[] ids;
+		private readonly KeyValuePair<string, Type>[] includes;
 		bool firstRequest = true;
 		JsonDocument[] results;
 		JsonDocument[] includeResults;
 
 		private Stopwatch sp;
 
-		public MultiLoadOperation(InMemoryDocumentSessionOperations sessionOperations,
-			Func<IDisposable> disableAllCaching)
-			: this(sessionOperations, disableAllCaching, null)
-		{
-
-		}
-
-		public MultiLoadOperation(InMemoryDocumentSessionOperations sessionOperations,
-			Func<IDisposable> disableAllCaching,
-			string[] ids)
+		public MultiLoadOperation(InMemoryDocumentSessionOperations sessionOperations, Func<IDisposable> disableAllCaching, string[] ids, KeyValuePair<string, Type>[] includes)
 		{
 			this.sessionOperations = sessionOperations;
 			this.disableAllCaching = disableAllCaching;
 			this.ids = ids;
+			this.includes = includes;
 		}
 
 		public void LogOperation()
@@ -68,24 +62,43 @@ namespace Raven.Client.Document.SessionOperations
 
 		public T[] Complete<T>()
 		{
-			foreach (var include in includeResults)
+			for (var i = 0; i < includeResults.Length; i++)
 			{
-				sessionOperations.TrackEntity<object>(include);
+				var include = includeResults[i];
+				sessionOperations.TrackIncludedDocumnet(include);
 			}
 
+			var transformedResults = TransformResults().ToList();
+			var finalResults = transformedResults.Select(ApplyTrackingIfNeeded<T>)
+												 .ToArray();
 
-			return SelectResults()
-				.Select(document => document == null ? default(T) : sessionOperations.TrackEntity<T>(document))
-				.ToArray();
+			for (var i = 0; i < finalResults.Length; i++)
+			{
+				if (ReferenceEquals(finalResults[i], null))
+					sessionOperations.RegisterMissing(ids[i]);
+			}
+
+			var includePaths = includes != null ? includes.Select(x => x.Key).ToArray() : null;
+			sessionOperations.RegisterMissingIncludes(results.Where(x => x != null).Select(x => x.DataAsJson), includePaths);
+
+			return finalResults;
 		}
 
-		private IEnumerable<JsonDocument> SelectResults()
+		private T ApplyTrackingIfNeeded<T>(JsonDocument document)
+		{
+			if (document != null)
+				return sessionOperations.TrackEntity<T>(document);
+
+			return default(T);
+		}
+
+		private IEnumerable<JsonDocument> TransformResults()
 		{
 			if (ids == null)
 				return results;
 
 			var finalResult = ids.Select(id => results.Where(r => r != null)
-			                                   	.FirstOrDefault(r => string.Equals(r.Metadata.Value<string>("@id"), id, StringComparison.InvariantCultureIgnoreCase)));
+			                                   		  .FirstOrDefault(r => string.Equals(r.Metadata.Value<string>("@id"), id, StringComparison.OrdinalIgnoreCase)));
 			return finalResult;
 		}
 	}

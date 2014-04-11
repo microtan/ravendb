@@ -1,9 +1,11 @@
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs.Indexing
 {
-	public class DynamicQueriesCanSort : LocalClientTest
+	public class DynamicQueriesCanSort : RavenTest
 	{
 		[Fact]
 		public void CanSortOnDynamicIndexOnFieldWhichWeDontQuery()
@@ -21,7 +23,7 @@ namespace Raven.Tests.Bugs.Indexing
 	
 				using (var session = store.OpenSession())
 				{
-					var array = session.Advanced.LuceneQuery<dynamic>()
+                    var array = session.Advanced.DocumentQuery<dynamic>()
 						.AddOrder("Value", true)
 						.ToArray();
 

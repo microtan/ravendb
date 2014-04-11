@@ -1,5 +1,6 @@
 using Raven.Abstractions;
 using Raven.Client;
+using Raven.Tests.Common;
 
 namespace Raven.Tests.Bugs.LiveProjections
 {
@@ -11,7 +12,7 @@ namespace Raven.Tests.Bugs.LiveProjections
 	using Raven.Tests.Bugs.LiveProjections.Views;
 	using Xunit;
 
-	public class LiveProjectionOnTasks : LocalClientTest
+	public class LiveProjectionOnTasks : RavenTest
 	{
 		[Fact]
 		public void TaskLiveProjection()

@@ -1,12 +1,15 @@
 using System.Linq;
 using Raven.Abstractions.Indexing;
+using Raven.Client;
 using Raven.Client.Linq;
 using Raven.Client.Indexes;
+using Raven.Tests.Common;
+
 using Xunit;
 
 namespace Raven.Tests.Bugs.Indexing
 {
-	public class ComplexUsage : LocalClientTest
+	public class ComplexUsage : RavenTest
 	{
 		[Fact]
 		public void ShouldNotOutputNull()
@@ -47,7 +50,7 @@ namespace Raven.Tests.Bugs.Indexing
 				}
 
 				new Accounts_Search().Execute(store);
-
+				WaitForIndexing(store);
 				using (var session = store.OpenSession())
 				{
 					var objects = session.Query<object, Accounts_Search>()

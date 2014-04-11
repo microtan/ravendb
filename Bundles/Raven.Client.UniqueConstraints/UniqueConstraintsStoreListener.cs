@@ -1,15 +1,26 @@
 ﻿namespace Raven.Client.UniqueConstraints
 {
 	using System;
-	using System.Collections.Concurrent;
 	using System.Linq;
 	using Listeners;
 	using Json.Linq;
 
-	using Constants = Bundles.UniqueConstraints.Constants;
+	using Constants = Raven.Bundles.UniqueConstraints.Constants;
 
 	public class UniqueConstraintsStoreListener : IDocumentStoreListener
 	{
+		public UniqueConstraintsStoreListener()
+			: this(new UniqueConstraintsTypeDictionary()) { }
+
+		public UniqueConstraintsStoreListener(UniqueConstraintsTypeDictionary dictionary)
+		{
+			if (dictionary == null) { throw new ArgumentNullException("dictionary"); }
+
+			this.UniqueConstraintsTypeDictionary = dictionary;
+		}
+
+		public UniqueConstraintsTypeDictionary UniqueConstraintsTypeDictionary { get; private set; }
+
 		public bool BeforeStore(string key, object entityInstance, RavenJObject metadata, RavenJObject original)
 		{
 			if (metadata[Constants.EnsureUniqueConstraints] != null)
@@ -23,7 +34,8 @@
 
 			if (properties != null)
 			{
-				metadata.Add(Constants.EnsureUniqueConstraints, new RavenJArray(properties.Select(x => x.Name).ToArray()));
+                metadata.Add(Constants.EnsureUniqueConstraints, new RavenJArray(properties.Select(x =>
+                    RavenJObject.FromObject(x.Configuration))));
 			}
 
 			return true;

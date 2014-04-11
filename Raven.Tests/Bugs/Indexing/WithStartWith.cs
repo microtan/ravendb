@@ -1,11 +1,13 @@
 using Raven.Abstractions.Indexing;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs.Indexing
 {
-	public class WithStartWith : LocalClientTest
+	public class WithStartWith : RavenTest
 	{
 		[Fact]
 		public void CanQueryDocumentsFilteredByMap()

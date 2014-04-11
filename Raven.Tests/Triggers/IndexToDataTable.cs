@@ -22,7 +22,7 @@ namespace Raven.Tests.Triggers
 		}
 
 
-		public override AbstractIndexUpdateTriggerBatcher CreateBatcher(string indexName)
+		public override AbstractIndexUpdateTriggerBatcher CreateBatcher(int indexName)
 		{
 			return new DataTableBatcher(this);
 		}
@@ -36,18 +36,24 @@ namespace Raven.Tests.Triggers
 				this.parent = parent;
 			}
 
-			public override void OnIndexEntryDeleted(string entryKey)
+            public override void OnIndexEntryDeleted(string entryKey, Lucene.Net.Documents.Document document = null)
 			{
-				var dataRows = parent.DataTable.Rows.Cast<DataRow>().Where(x => (string)x["entry"] == entryKey).ToArray();
-				foreach (var dataRow in dataRows)
+				lock (parent.DataTable)
 				{
-					parent.DataTable.Rows.Remove(dataRow);
+					var dataRows = parent.DataTable.Rows.Cast<DataRow>().Where(x => (string) x["entry"] == entryKey).ToArray();
+					foreach (var dataRow in dataRows)
+					{
+						parent.DataTable.Rows.Remove(dataRow);
+					}
 				}
 			}
 
 			public override void OnIndexEntryCreated(string entryKey, Lucene.Net.Documents.Document document)
 			{
-				parent.DataTable.Rows.Add(entryKey, document.GetField("Project").StringValue());
+				lock (parent.DataTable)
+				{
+					parent.DataTable.Rows.Add(entryKey, document.GetField("Project").StringValue);
+				}
 			}
 		}
 	}

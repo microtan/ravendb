@@ -5,6 +5,7 @@
 //-----------------------------------------------------------------------
 using System;
 using System.Globalization;
+using Raven.Abstractions.Indexing;
 
 namespace Raven.Abstractions.Data
 {
@@ -13,42 +14,58 @@ namespace Raven.Abstractions.Data
 	/// </summary>
 	public class SpatialIndexQuery : IndexQuery
 	{
+		public static string GetQueryShapeFromLatLon(double lat, double lng, double radius)
+		{
+			return "Circle(" +
+			       lng.ToString("F6", CultureInfo.InvariantCulture) + " " +
+			       lat.ToString("F6", CultureInfo.InvariantCulture) + " " +
+				   "d=" + radius.ToString("F6", CultureInfo.InvariantCulture) +
+			       ")";
+		}
+
+		public string QueryShape { get; set; }
+		public SpatialRelation SpatialRelation { get; set; }
+		public double DistanceErrorPercentage { get; set; }
+
 		/// <summary>
-		/// Gets or sets the latitude.
+		/// Overrides the units defined in the spatial index
 		/// </summary>
-		/// <value>The latitude.</value>
-		public double Latitude { get; set; }
-		/// <summary>
-		/// Gets or sets the longitude.
+		public SpatialUnits? RadiusUnitOverride { get; set; }
+
+		private string spatialFieldName = Constants.DefaultSpatialFieldName;
+		public string SpatialFieldName
+		{
+			get { return spatialFieldName; }
+			set { spatialFieldName = value; }
+		}
+
+
+	    /// <summary>
+		/// Initializes a new instance of the <see cref="SpatialIndexQuery"/> class.
 		/// </summary>
-		/// <value>The longitude.</value>
-		public double Longitude { get; set; }
-		/// <summary>
-		/// Gets or sets the radius.
-		/// </summary>
-		/// <value>The radius, in miles.</value>
-		public double Radius { get; set; }
+		/// <param name="query">The query.</param>
+		public SpatialIndexQuery(IndexQuery query) : this()
+		{
+			Query = query.Query;
+			Start = query.Start;
+			Cutoff = query.Cutoff;
+	        WaitForNonStaleResultsAsOfNow = query.WaitForNonStaleResultsAsOfNow;
+			PageSize = query.PageSize;
+			FieldsToFetch = query.FieldsToFetch;
+			SortedFields = query.SortedFields;
+		    HighlighterPreTags = query.HighlighterPreTags;
+		    HighlighterPostTags = query.HighlighterPostTags;
+		    HighlightedFields = query.HighlightedFields;
+	        QueryInputs = query.QueryInputs;
+		    ResultsTransformer = query.ResultsTransformer;
+		}
 
 		/// <summary>
 		/// Initializes a new instance of the <see cref="SpatialIndexQuery"/> class.
 		/// </summary>
 		public SpatialIndexQuery()
 		{
-			
-		}
-
-		/// <summary>
-		/// Initializes a new instance of the <see cref="SpatialIndexQuery"/> class.
-		/// </summary>
-		/// <param name="query">The query.</param>
-		public SpatialIndexQuery(IndexQuery query)
-		{
-			Query = query.Query;
-			Start = query.Start;
-			Cutoff = query.Cutoff;
-			PageSize = query.PageSize;
-			FieldsToFetch = query.FieldsToFetch;
-			SortedFields = query.SortedFields;
+			DistanceErrorPercentage = Constants.DefaultSpatialDistanceErrorPct;
 		}
 
 		/// <summary>
@@ -57,10 +74,16 @@ namespace Raven.Abstractions.Data
 		/// <returns></returns>
 		protected override string GetCustomQueryStringVariables()
 		{
-			return string.Format("latitude={0}&longitude={1}&radius={2}",
-				Uri.EscapeDataString(Latitude.ToString(CultureInfo.InvariantCulture)),
-				Uri.EscapeDataString(Longitude.ToString(CultureInfo.InvariantCulture)),
-				Uri.EscapeDataString(Radius.ToString(CultureInfo.InvariantCulture)));
+			var unitsParam = string.Empty;
+			if (RadiusUnitOverride.HasValue)
+				unitsParam = string.Format("&spatialUnits={0}", RadiusUnitOverride.Value);
+
+			return string.Format("queryShape={0}&spatialRelation={1}&spatialField={2}&distErrPrc={3}{4}",
+				Uri.EscapeDataString(QueryShape),
+				SpatialRelation,
+				spatialFieldName,
+				DistanceErrorPercentage.ToString(CultureInfo.InvariantCulture),
+				unitsParam);
 		}
 	}
 }

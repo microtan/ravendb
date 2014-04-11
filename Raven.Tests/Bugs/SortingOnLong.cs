@@ -7,12 +7,14 @@ using System;
 using Raven.Abstractions.Indexing;
 using Raven.Client;
 using Raven.Database.Indexing;
+using Raven.Tests.Common;
+
 using Xunit;
 using System.Linq;
 
 namespace Raven.Tests.Bugs
 {
-	public class SortingOnLong : LocalClientTest
+	public class SortingOnLong : RavenTest
 	{
 		void UsingDatabaseOfFoos(Action<IDocumentSession> action)
 		{
@@ -57,7 +59,7 @@ namespace Raven.Tests.Bugs
 		{
 			UsingDatabaseOfFoos(delegate(IDocumentSession session)
 			{
-				var foos1 = session.Advanced.LuceneQuery<Foo>("long")
+                var foos1 = session.Advanced.DocumentQuery<Foo>("long")
 					.WaitForNonStaleResults()
 					.OrderBy("Value_Range")
 					.ToList();
@@ -93,7 +95,7 @@ namespace Raven.Tests.Bugs
 		{
 			UsingDatabaseOfFoos(delegate(IDocumentSession session)
 			{
-				var foos1 = session.Advanced.LuceneQuery<Foo>("long")
+                var foos1 = session.Advanced.DocumentQuery<Foo>("long")
 					.WaitForNonStaleResults()
 					.OrderBy("-Value_Range")
 					.ToList();

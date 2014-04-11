@@ -1,132 +1,185 @@
-﻿using System;
-using System.IO;
-using System.Linq;
+﻿using System.Collections.Generic;
+using Raven.Abstractions.Data;
+using Raven.Client.Connection;
+using Raven.Client.Document;
+using Raven.Json.Linq;
+using System;
 using System.Net;
 using System.Threading;
-using Newtonsoft.Json.Linq;
 
 namespace Raven.Backup
 {
-	public class BackupOperation
-	{
-		public string ServerUrl { get; set; }
-		public string BackupPath { get; set; }
-		public bool NoWait { get; set; }
+    using Raven.Abstractions.Connection;
 
-		public bool Incremental { get; set; }
+    public class BackupOperation : IDisposable
+    {
+        private DocumentStore store;
+        public string ServerUrl { get; set; }
+        public string BackupPath { get; set; }
+        public bool NoWait { get; set; }
+        public NetworkCredential Credentials { get; set; }
 
-		public bool InitBackup()
-		{
-			ServerUrl = ServerUrl.TrimEnd('/');
+        public bool Incremental { get; set; }
+        public int? Timeout { get; set; }
+        public string ApiKey { get; set; }
+        public string Database { get; set; }
 
-			var json = @"{ ""BackupLocation"": """ + BackupPath.Replace("\\", "\\\\") + @""" }";
+        public BackupOperation()
+        {
+            Credentials = CredentialCache.DefaultNetworkCredentials;
+        }
 
-			var uriString = ServerUrl + "/admin/backup";
-			if (Incremental)
-				uriString += "?incremental=true";
-			var req = WebRequest.Create(uriString);
-			req.Method = "POST";
-			req.UseDefaultCredentials = true;
-			req.PreAuthenticate = true;
-			req.Credentials = CredentialCache.DefaultCredentials;
+        public bool InitBackup()
+        {
+            ServerUrl = ServerUrl.TrimEnd('/');
+            try //precaution - to show error properly just in case
+            {
+                var serverUri = new Uri(ServerUrl);
+                if ((String.IsNullOrWhiteSpace(serverUri.PathAndQuery) || serverUri.PathAndQuery.Equals("/")) &&
+                    String.IsNullOrWhiteSpace(Database))
+                    Database = Constants.SystemDatabase;
 
-			using (var streamWriter = new StreamWriter(req.GetRequestStream()))
-			{
-				streamWriter.WriteLine(json);
-				streamWriter.Flush();
-			}
+                var serverHostname = serverUri.Scheme + Uri.SchemeDelimiter + serverUri.Host + ":" + serverUri.Port;
 
-			try
-			{
-				Console.WriteLine(string.Format("Sending json {0} to {1}", json, ServerUrl));
+                store = new DocumentStore { Url = serverHostname, DefaultDatabase = Database, ApiKey = ApiKey };
+                store.Initialize();
+            }
+            catch (Exception exc)
+            {
+                Console.WriteLine(exc.Message);
+                try
+                {
+                    store.Dispose();
+                }
+                // ReSharper disable once EmptyGeneralCatchClause
+                catch (Exception) { }
+                return false;
+            }
 
-				using (var resp = req.GetResponse())
-				using (var reader = new StreamReader(resp.GetResponseStream()))
-				{
-					var response = reader.ReadToEnd();
-					Console.WriteLine(response);
-				}
-			}
-			catch (Exception exc)
-			{
-				Console.WriteLine(exc.Message);
-				return false;
-			}
 
-			return true;
-		}
+            var backupRequest = new
+            {
+                BackupLocation = BackupPath.Replace("\\", "\\\\"),
+                DatabaseDocument = new DatabaseDocument { Id = Database }
+            };
 
-		public void WaitForBackup()
-		{
-			JObject doc = null;
+            var json = RavenJObject.FromObject(backupRequest).ToString();
 
-			while (doc == null)
-			{
-				Thread.Sleep(100); // Allow the server to process the request
+            var url = "/admin/backup";
+            if (Incremental)
+                url += "?incremental=true";
+            try
+            {
+                var req = CreateRequest(url, "POST");
 
-				doc = GetStatusDoc();
-			}
+                req.WriteAsync(json).Wait();
 
-			if (NoWait)
-			{
-				Console.WriteLine("Backup operation has started, status is logged at Raven/Backup/Status");
-				return;
-			}
+                Console.WriteLine("Sending json {0} to {1}", json, ServerUrl);
 
-			while (doc.Value<bool>("IsRunning"))
-			{
-				Thread.Sleep(1000);
+                var response = req.ReadResponseJson();
+                Console.WriteLine(response);
+            }
+            catch (Exception exc)
+            {
+                Console.WriteLine(exc.Message);
+                return false;
+            }
 
-				doc = GetStatusDoc();
-			}
+            return true;
+        }
 
-			var res = from msg in doc["Messages"]
-			          select new
-			                 	{
-			                 		Message = msg.Value<string>("Message"),
-			                 		Timestamp = msg.Value<DateTime>("Timestamp"),
-			                 		Severity = msg.Value<int>("Severity")
-			                 	};
+        private HttpJsonRequest CreateRequest(string url, string method)
+        {
+            var uriString = ServerUrl;
+            if (string.IsNullOrWhiteSpace(Database) == false && !Database.Equals(Constants.SystemDatabase, StringComparison.OrdinalIgnoreCase))
+            {
+                uriString += "/databases/" + Database;
+            }
 
-			foreach (var msg in res)
-			{
-				Console.WriteLine(string.Format("[{0}] {1}", msg.Timestamp, msg.Message));	
-			}
-		}
+            uriString += url;
 
-		public JObject GetStatusDoc()
-		{
-			var req = WebRequest.Create(ServerUrl + "/docs/Raven/Backup/Status");
-			req.Method = "GET";
-			req.UseDefaultCredentials = true;
-			req.PreAuthenticate = true;
-			req.Credentials = CredentialCache.DefaultCredentials;
+            var req = store.JsonRequestFactory.CreateHttpJsonRequest(new CreateHttpJsonRequestParams(null, uriString, method, new OperationCredentials(ApiKey, CredentialCache.DefaultCredentials), store.Conventions));
+            Console.WriteLine("Request url - " + uriString);
+            if (Timeout.HasValue)
+            {
+                req.Timeout = TimeSpan.FromMilliseconds(Timeout.Value);
+            }
 
-			try
-			{
-				JObject ret;
-				using (var resp = req.GetResponse())
-				using (var reader = new StreamReader(resp.GetResponseStream()))
-				{
-					var response = reader.ReadToEnd();
-					ret = JObject.Parse(response);
-				}
-				return ret;
-			}
-			catch (WebException ex)
-			{
-				var res = ex.Response as HttpWebResponse;
-				if (res == null)
-				{
-					throw new Exception("Network error");
-				}
-				if (res.StatusCode == HttpStatusCode.NotFound)
-				{
-					return null;
-				}
-			}
+            return req;
+        }
 
-			return null;
-		}
-	}
+        public void WaitForBackup()
+        {
+            BackupStatus status = null;
+            var messagesSeenSoFar = new HashSet<BackupStatus.BackupMessage>();
+
+            while (status == null)
+            {
+                Thread.Sleep(100); // Allow the server to process the request
+                status = GetStatusDoc();
+            }
+
+            if (NoWait)
+            {
+                Console.WriteLine("Backup operation has started, status is logged at Raven/Backup/Status");
+                return;
+            }
+
+            while (status.IsRunning)
+            {
+                // Write out the messages as we poll for them, don't wait until the end, this allows "live" updates
+                foreach (var msg in status.Messages)
+                {
+                    if (messagesSeenSoFar.Add(msg))
+                    {
+                        Console.WriteLine("[{0}] {1}", msg.Timestamp, msg.Message);
+                    }
+                }
+
+                Thread.Sleep(1000);
+                status = GetStatusDoc();
+            }
+
+            // After we've know it's finished, write out any remaining messages
+            foreach (var msg in status.Messages)
+            {
+                if (messagesSeenSoFar.Add(msg))
+                {
+                    Console.WriteLine("[{0}] {1}", msg.Timestamp, msg.Message);
+                }
+            }
+        }
+
+        public BackupStatus GetStatusDoc()
+        {
+            var req = CreateRequest("/docs/" + BackupStatus.RavenBackupStatusDocumentKey, "GET");
+
+            try
+            {
+                var json = (RavenJObject)req.ReadResponseJson();
+                return json.Deserialize<BackupStatus>(store.Conventions);
+            }
+            catch (WebException ex)
+            {
+                var res = ex.Response as HttpWebResponse;
+                if (res == null)
+                {
+                    throw new Exception("Network error");
+                }
+                if (res.StatusCode == HttpStatusCode.NotFound)
+                {
+                    return null;
+                }
+            }
+
+            return null;
+        }
+
+        public void Dispose()
+        {
+            var _store = store;
+            if (_store != null)
+                _store.Dispose();
+        }
+    }
 }

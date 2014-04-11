@@ -5,57 +5,69 @@
 //-----------------------------------------------------------------------
 using System;
 using System.Collections.Generic;
+using System.Configuration;
 using System.Configuration.Install;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
 using System.ServiceProcess;
+using System.Text;
+using System.Windows.Forms;
 using System.Xml;
+using Microsoft.Win32;
 using NDesk.Options;
 using NLog.Config;
 using Raven.Abstractions;
 using Raven.Abstractions.Data;
-using Raven.Abstractions.Smuggler;
+using Raven.Abstractions.Logging;
 using Raven.Database;
+using Raven.Database.Actions;
 using Raven.Database.Config;
+using Raven.Database.Data;
 using Raven.Database.Server;
-using Raven.Smuggler;
+using Raven.Database.Util;
 
 namespace Raven.Server
 {
+	using Raven.Abstractions.Util;
+
 	public static class Program
 	{
+		static string[] cmdLineArgs;
 		private static void Main(string[] args)
 		{
-			HttpEndpointRegistration.RegisterHttpEndpointTarget();
-			if (RunningInInteractiveMode())
+			cmdLineArgs = args;
+			if (RunningInInteractiveMode(args))
 			{
 				try
 				{
+					LogManager.EnsureValidLogger();
 					InteractiveRun(args);
 				}
 				catch (ReflectionTypeLoadException e)
 				{
-					EmitWarningInRed();
-
-					Console.WriteLine(e);
-					foreach (var loaderException in e.LoaderExceptions)
+					WaitForUserInputAndExitWithError(GetLoaderExceptions(e), args);
+				}
+				catch (InvalidOperationException e)
+				{
+					ReflectionTypeLoadException refEx = null;
+					if (e.InnerException != null)
 					{
-						Console.WriteLine("- - - -");
-						Console.WriteLine(loaderException);
+						refEx = e.InnerException.InnerException as ReflectionTypeLoadException;
 					}
+					var errorMessage = refEx != null ? GetLoaderExceptions(refEx) : e.ToString();
 
-					WaitForUserInputAndExitWithError();
+					WaitForUserInputAndExitWithError(errorMessage, args);
 				}
 				catch (Exception e)
 				{
+
 					EmitWarningInRed();
 
-					Console.WriteLine(e);
-
-					WaitForUserInputAndExitWithError();
+					WaitForUserInputAndExitWithError(e.ToString(), args);
 				}
 			}
 			else
@@ -65,17 +77,46 @@ namespace Raven.Server
 			}
 		}
 
-		private static bool RunningInInteractiveMode()
+		private static string GetLoaderExceptions(ReflectionTypeLoadException exception)
+		{
+			var sb = new StringBuilder();
+			sb.AppendLine(exception.ToString());
+			foreach (var loaderException in exception.LoaderExceptions)
+			{
+				sb.AppendLine("- - - -").AppendLine();
+				sb.AppendLine(loaderException.ToString());
+			}
+
+			return sb.ToString();
+		}
+
+		private static bool RunningInInteractiveMode(string[] args)
 		{
 			if (Type.GetType("Mono.Runtime") != null) // running on mono, which doesn't support detecting this
 				return true;
-			return Environment.UserInteractive;
+			return Environment.UserInteractive || (args != null && args.Length > 0);
 		}
 
-		private static void WaitForUserInputAndExitWithError()
+		private static void WaitForUserInputAndExitWithError(string msg, string[] args)
 		{
+			EmitWarningInRed();
+
+			Console.Error.WriteLine(msg);
+
+			if (args.Contains("--msgbox", StringComparer.OrdinalIgnoreCase) ||
+				args.Contains("/msgbox", StringComparer.OrdinalIgnoreCase))
+			{
+				MessageBox.Show(msg, "RavenDB Startup failure");
+			}
 			Console.WriteLine("Press any key to continue...");
-			Console.ReadKey(true);
+			try
+			{
+				Console.ReadKey(true);
+			}
+			catch
+			{
+				// cannot read key?
+			}
 			Environment.Exit(-1);
 		}
 
@@ -83,7 +124,7 @@ namespace Raven.Server
 		{
 			var old = Console.ForegroundColor;
 			Console.ForegroundColor = ConsoleColor.Red;
-			Console.WriteLine("A critical error occurred while starting the server. Please see the exception details bellow for more details:");
+			Console.Error.WriteLine("A critical error occurred while starting the server. Please see the exception details bellow for more details:");
 			Console.ForegroundColor = old;
 		}
 
@@ -91,8 +132,11 @@ namespace Raven.Server
 		{
 			string backupLocation = null;
 			string restoreLocation = null;
+			bool defrag = false;
+			string theUser = null;
 			Action actionToTake = null;
 			bool launchBrowser = false;
+			bool noLog = false;
 			var ravenConfiguration = new RavenConfiguration();
 
 			OptionSet optionSet = null;
@@ -103,20 +147,25 @@ namespace Raven.Server
 					ravenConfiguration.Settings[key] = value;
 					ravenConfiguration.Initialize();
 				}},
-				{"config=", "The config {0:file} to use", path => ravenConfiguration.LoadFrom(path)},
-				{"install", "Installs the RavenDB service", key => actionToTake= () => AdminRequired(InstallAndStart, key)},
+				{"nolog", "Don't use the default log", s => noLog=true},
+				{"config=", "The config {0:file} to use", ravenConfiguration.LoadFrom},
+				{"install", "Installs the RavenDB service", key => actionToTake= () => AdminRequired(InstallAndStart)},
+				{"user=", "Which user will be used", user=> theUser = user},
+				{"setup-perf-counters", "Setup the performance counters and the related permissions", key => actionToTake = ()=> AdminRequired(()=>SetupPerfCounters(theUser))},
+				{"allow-blank-password-use", "Allow to log on by using a Windows account that has a blank password", key => actionToTake = () => AdminRequired(() => SetLimitBlankPasswordUseRegValue(0))},
+				{"deny-blank-password-use", "Deny to log on by using a Windows account that has a blank password", key => actionToTake = () =>  AdminRequired(() => SetLimitBlankPasswordUseRegValue(1))},
 				{"service-name=", "The {0:service name} to use when installing or uninstalling the service, default to RavenDB", name => ProjectInstaller.SERVICE_NAME = name},
-				{"uninstall", "Uninstalls the RavenDB service", key => actionToTake= () => AdminRequired(EnsureStoppedAndUninstall, key)},
-				{"start", "Starts the RavenDB servce", key => actionToTake= () => AdminRequired(StartService, key)},
-				{"restart", "Restarts the RavenDB service", key => actionToTake= () => AdminRequired(RestartService, key)},
-				{"stop", "Stops the RavenDB service", key => actionToTake= () => AdminRequired(StopService, key)},
+				{"uninstall", "Uninstalls the RavenDB service", key => actionToTake= () => AdminRequired(EnsureStoppedAndUninstall)},
+				{"start", "Starts the RavenDB service", key => actionToTake= () => AdminRequired(StartService)},
+				{"restart", "Restarts the RavenDB service", key => actionToTake= () => AdminRequired(RestartService)},
+				{"stop", "Stops the RavenDB service", key => actionToTake= () => AdminRequired(StopService)},
 				{"ram", "Run RavenDB in RAM only", key =>
 				{
 					ravenConfiguration.Settings["Raven/RunInMemory"] = "true";
 					ravenConfiguration.RunInMemory = true;
-					actionToTake = () => RunInDebugMode(AnonymousUserAccessMode.All, ravenConfiguration, launchBrowser);		
+					actionToTake = () => RunInDebugMode(AnonymousUserAccessMode.Admin, ravenConfiguration, launchBrowser, noLog);		
 				}},
-				{"debug", "Runs RavenDB in debug mode", key => actionToTake = () => RunInDebugMode(null, ravenConfiguration, launchBrowser)},
+				{"debug", "Runs RavenDB in debug mode", key => actionToTake = () => RunInDebugMode(null, ravenConfiguration, launchBrowser, noLog)},
 				{"browser|launchbrowser", "After the server starts, launches the browser", key => launchBrowser = true},
 				{"help", "Help about the command line interface", key =>
 				{
@@ -124,7 +173,7 @@ namespace Raven.Server
 				}},
 				{"config-help", "Help about configuration options", key=>
 				{
-					actionToTake = PrintConfig;
+					actionToTake = () => PrintConfig(ravenConfiguration.GetConfigOptionsDocs());
 				}},
 				{"restore", 
 					"Restores a RavenDB database from backup",
@@ -134,10 +183,39 @@ namespace Raven.Server
 						{
 							throw new OptionException("when using restore, source and destination must be specified", "restore");
 						}
-						RunRestoreOperation(backupLocation, restoreLocation);
+						RunRestoreOperation(backupLocation, restoreLocation, defrag);
+					}},
+				{"defrag", 
+					"Applicable only during restore, execute defrag after the restore is completed", key =>
+					{
+						defrag = true;
 					}},
 				{"dest=|destination=", "The {0:path} of the new new database", value => restoreLocation = value},
 				{"src=|source=", "The {0:path} of the backup", value => backupLocation = value},
+				{"encrypt-self-config", "Encrypt the RavenDB configuration file", file =>
+						{
+							actionToTake = () => ProtectConfiguration(AppDomain.CurrentDomain.SetupInformation.ConfigurationFile);
+						}},
+				{"encrypt-config=", "Encrypt the specified {0:configuration file}", file =>
+						{
+							actionToTake = () => ProtectConfiguration(file);
+						}},
+				{"decrypt-self-config", "Decrypt the RavenDB configuration file", file =>
+						{
+							actionToTake = () => UnprotectConfiguration(AppDomain.CurrentDomain.SetupInformation.ConfigurationFile);
+						}},
+				{"decrypt-config=", "Decrypt the specified {0:configuration file}", file =>
+						{
+							actionToTake = () => UnprotectConfiguration(file);
+						}},
+				{"installSSL={==}", "Bind X509 certificate specified in {0:option} with optional password from {1:option} with 'Raven/Port'.", (sslCertificateFile, sslCertificatePassword) =>
+						{
+							actionToTake = () => InstallSsl(sslCertificateFile, sslCertificatePassword, ravenConfiguration);
+						}},
+				{"uninstallSSL={==}", "Unbind X509 certificate specified in {0:option} with optional password from {2:option} from 'Raven/Port'.", (sslCertificateFile, sslCertificatePassword) =>
+						{
+							actionToTake = () => UninstallSsl(sslCertificateFile, sslCertificatePassword, ravenConfiguration);
+						}}
 			};
 
 
@@ -156,13 +234,116 @@ namespace Raven.Server
 			}
 
 			if (actionToTake == null)
-				actionToTake = () => RunInDebugMode(null, ravenConfiguration, launchBrowser);
+				actionToTake = () => RunInDebugMode(null, ravenConfiguration, launchBrowser, noLog);
 
 			actionToTake();
 
 		}
 
-		private static void PrintConfig()
+		public static void DumpToCsv(RavenConfiguration ravenConfiguration)
+		{
+			using (var db = new DocumentDatabase(ravenConfiguration))
+			{
+				db.TransactionalStorage.DumpAllStorageTables();
+			}
+		}
+
+		private static void InstallSsl(string sslCertificateFile, string sslCertificatePassword, RavenConfiguration configuration)
+		{
+			if (string.IsNullOrEmpty(sslCertificateFile))
+				throw new InvalidOperationException("X509 certificate path cannot be empty.");
+
+			var certificate = !string.IsNullOrEmpty(sslCertificatePassword) ? new X509Certificate2(sslCertificateFile, sslCertificatePassword) : new X509Certificate2(sslCertificateFile);
+
+			NonAdminHttp.EnsureCanListenToWhenInNonAdminContext(configuration.Port, true);
+			NonAdminHttp.UnbindCertificate(configuration.Port, certificate);
+			NonAdminHttp.BindCertificate(configuration.Port, certificate);
+		}
+
+		private static void UninstallSsl(string sslCertificateFile, string sslCertificatePassword, RavenConfiguration configuration)
+		{
+			X509Certificate2 certificate = null;
+
+			if (!string.IsNullOrEmpty(sslCertificateFile))
+			{
+				certificate = !string.IsNullOrEmpty(sslCertificatePassword) ? new X509Certificate2(sslCertificateFile, sslCertificatePassword) : new X509Certificate2(sslCertificateFile);
+			}
+
+			NonAdminHttp.UnbindCertificate(configuration.Port, certificate);
+		}
+
+		private static void SetupPerfCounters(string user)
+		{
+			user = user ?? WindowsIdentity.GetCurrent().Name;
+			PerformanceCountersUtils.EnsurePerformanceCountersMonitoringAccess(user);
+
+			var actionToTake = user.StartsWith("IIS") ? "restart IIS service" : "log in the user again";
+
+			Console.Write("User {0} has been added to Performance Monitoring Users group. Please {1} to take an effect.", user, actionToTake);
+		}
+
+		private static void SetLimitBlankPasswordUseRegValue(int value)
+		{
+			// value == 0 - disable a limit
+			// value == 1 - enable a limit
+
+			if (value != 0 && value != 1)
+				throw new ArgumentException("Allowed arguments for 'LimitBlankPasswordUse' registry value are only 0 or 1", "value");
+
+			const string registryKey = @"SYSTEM\CurrentControlSet\Control\Lsa";
+			const string policyName = "Limit local account use of blank passwords to console logon only";
+
+			var lsaKey = Registry.LocalMachine.OpenSubKey(registryKey, true);
+			if (lsaKey != null)
+			{
+				lsaKey.SetValue("LimitBlankPasswordUse", value, RegistryValueKind.DWord);
+
+				if (value == 0)
+					Console.WriteLine("You have just disabled the following security policy: '{0}' on the local machine.", policyName);
+				else
+					Console.WriteLine("You have just enabled the following security policy: '{0}' on the local machine.", policyName);
+			}
+			else
+			{
+				Console.WriteLine("Error: Could not find the registry key '{0}' in order to disable '{1}' policy.", registryKey,
+								  policyName);
+			}
+		}
+
+		private static void ProtectConfiguration(string file)
+		{
+			if (string.Equals(Path.GetExtension(file), ".config", StringComparison.OrdinalIgnoreCase))
+				file = Path.GetFileNameWithoutExtension(file);
+
+			var configuration = ConfigurationManager.OpenExeConfiguration(file);
+			var names = new[] { "appSettings", "connectionStrings" };
+
+			foreach (var section in names.Select(configuration.GetSection))
+			{
+				section.SectionInformation.ProtectSection("RsaProtectedConfigurationProvider");
+				section.SectionInformation.ForceSave = true;
+			}
+
+			configuration.Save(ConfigurationSaveMode.Full);
+		}
+
+		private static void UnprotectConfiguration(string file)
+		{
+			if (string.Equals(Path.GetExtension(file), ".config", StringComparison.OrdinalIgnoreCase))
+				file = Path.GetFileNameWithoutExtension(file);
+
+			var configuration = ConfigurationManager.OpenExeConfiguration(file);
+			var names = new[] { "appSettings", "connectionStrings" };
+
+			foreach (var section in names.Select(configuration.GetSection))
+			{
+				section.SectionInformation.UnprotectSection();
+				section.SectionInformation.ForceSave = true;
+			}
+			configuration.Save(ConfigurationSaveMode.Full);
+		}
+
+		private static void PrintConfig(IEnumerable<string> configOptions)
 		{
 			Console.WriteLine(
 				@"
@@ -173,31 +354,34 @@ Copyright (C) 2008 - {0} - Hibernating Rhinos
 ----------------------------------------
 Configuration options:
 ",
-				SystemTime.Now.Year);
+				SystemTime.UtcNow.Year);
 
-			foreach (var configOptionDoc in ConfigOptionDocs.OptionsDocs)
+			foreach (var configOptionDoc in configOptions)
 			{
 				Console.WriteLine(configOptionDoc);
 				Console.WriteLine();
 			}
 		}
 
-		private static void RunRestoreOperation(string backupLocation, string databaseLocation)
+		private static void RunRestoreOperation(string backupLocation, string databaseLocation, bool defrag)
 		{
 			try
 			{
 				var ravenConfiguration = new RavenConfiguration();
-				if (File.Exists(Path.Combine(backupLocation, "Raven.ravendb")))
-				{
-					ravenConfiguration.DefaultStorageTypeName =
-						"Raven.Storage.Managed.TransactionalStorage, Raven.Storage.Managed";
-				}
+				if (File.Exists(Path.Combine(backupLocation, "Raven.voron")))
+                {
+                    ravenConfiguration.DefaultStorageTypeName = typeof(Raven.Storage.Voron.TransactionalStorage).AssemblyQualifiedName;                    
+                }
 				else if (Directory.Exists(Path.Combine(backupLocation, "new")))
 				{
-					ravenConfiguration.DefaultStorageTypeName = "Raven.Storage.Esent.TransactionalStorage, Raven.Storage.Esent";
-
+					ravenConfiguration.DefaultStorageTypeName = typeof(Raven.Storage.Esent.TransactionalStorage).AssemblyQualifiedName;
 				}
-				DocumentDatabase.Restore(ravenConfiguration, backupLocation, databaseLocation);
+				MaintenanceActions.Restore(ravenConfiguration, new RestoreRequest
+				{
+				    BackupLocation = backupLocation,
+                    DatabaseLocation = databaseLocation,
+                    Defrag = defrag
+				}, Console.WriteLine);
 			}
 			catch (Exception e)
 			{
@@ -205,24 +389,32 @@ Configuration options:
 			}
 		}
 
-		private static void AdminRequired(Action actionThatMayRequiresAdminPrivileges, string cmdLine)
+		private static void AdminRequired(Action actionThatMayRequiresAdminPrivileges)
 		{
 			var principal = new WindowsPrincipal(WindowsIdentity.GetCurrent());
 			if (principal.IsInRole(WindowsBuiltInRole.Administrator) == false)
 			{
-				if (RunAgainAsAdmin(cmdLine))
+				if (RunAgainAsAdmin())
 					return;
 			}
 			actionThatMayRequiresAdminPrivileges();
 		}
 
-		private static bool RunAgainAsAdmin(string cmdLine)
+		private static bool RunAgainAsAdmin()
 		{
 			try
 			{
+				for (var i = 0; i < cmdLineArgs.Length; i++)
+				{
+					if (cmdLineArgs[i].Contains(" "))
+					{
+						cmdLineArgs[i] = "\"" + cmdLineArgs[i] + "\"";
+					}
+				}
+
 				var process = Process.Start(new ProcessStartInfo
 				{
-					Arguments = "--" + cmdLine,
+					Arguments = string.Join(" ", cmdLineArgs),
 					FileName = Assembly.GetExecutingAssembly().Location,
 					Verb = "runas",
 				});
@@ -235,11 +427,16 @@ Configuration options:
 			}
 		}
 
-		private static void RunInDebugMode(AnonymousUserAccessMode? anonymousUserAccessMode, RavenConfiguration ravenConfiguration, bool launchBrowser)
+		private static void RunInDebugMode(
+			AnonymousUserAccessMode? anonymousUserAccessMode,
+			RavenConfiguration ravenConfiguration,
+			bool launchBrowser,
+			bool noLog)
 		{
-			ConfigureDebugLogging();
+			if (noLog == false)
+				ConfigureDebugLogging();
 
-			NonAdminHttp.EnsureCanListenToWhenInNonAdminContext(ravenConfiguration.Port);
+			NonAdminHttp.EnsureCanListenToWhenInNonAdminContext(ravenConfiguration.Port, ravenConfiguration.UseSsl);
 			if (anonymousUserAccessMode.HasValue)
 				ravenConfiguration.AnonymousUserAccessMode = anonymousUserAccessMode.Value;
 			while (RunServerInDebugMode(ravenConfiguration, launchBrowser))
@@ -261,17 +458,17 @@ Configuration options:
 			}
 		}
 
-		private static bool RunServerInDebugMode(RavenConfiguration ravenConfiguration, bool lauchBrowser)
+		private static bool RunServerInDebugMode(RavenConfiguration ravenConfiguration, bool launchBrowser)
 		{
 			var sp = Stopwatch.StartNew();
-			using (var server = new RavenDbServer(ravenConfiguration))
+			using (var server = new RavenDbServer(ravenConfiguration){ UseEmbeddedHttpServer = true }.Initialize())
 			{
 				sp.Stop();
 				var path = Path.Combine(Environment.CurrentDirectory, "default.raven");
 				if (File.Exists(path))
 				{
 					Console.WriteLine("Loading data from: {0}", path);
-					new SmugglerApi(new RavenConnectionStringOptions {Url = ravenConfiguration.ServerUrl}).ImportData(new SmugglerOptions {File = path});
+					//new SmugglerApi(new SmugglerOptions(), new RavenConnectionStringOptions {Url = ravenConfiguration.ServerUrl}).ImportData(new SmugglerOptions {BackupPath = path});
 				}
 
 				Console.WriteLine("Raven is ready to process requests. Build {0}, Version {1}", DocumentDatabase.BuildVersion, DocumentDatabase.ProductVersion);
@@ -279,10 +476,10 @@ Configuration options:
 				Console.WriteLine("Data directory: {0}", ravenConfiguration.RunInMemory ? "RAM" : ravenConfiguration.DataDirectory);
 				Console.WriteLine("HostName: {0} Port: {1}, Storage: {2}", ravenConfiguration.HostName ?? "<any>",
 					ravenConfiguration.Port,
-					server.Database.TransactionalStorage.FriendlyName);
+					server.SystemDatabase.TransactionalStorage.FriendlyName);
 				Console.WriteLine("Server Url: {0}", ravenConfiguration.ServerUrl);
 
-				if (lauchBrowser)
+				if (launchBrowser)
 				{
 					try
 					{
@@ -293,38 +490,55 @@ Configuration options:
 						Console.WriteLine("Could not start browser: " + e.Message);
 					}
 				}
-				return InteractiveRun();
+				return InteractiveRun(server);
 			}
 		}
 
-		private static bool InteractiveRun()
+		private static bool InteractiveRun(RavenDbServer server)
 		{
 			bool? done = null;
-			var actions = new Dictionary<string,Action>
-			{
-				{"cls", () => Console.Clear()},
-				{
-					"reset", () =>
-					{
-						Console.Clear();
-						done = true;
-					}
-					},
-				{
-					"gc", () =>
-					{
-						long before = Process.GetCurrentProcess().WorkingSet64;
-						Console.WriteLine("Starting garbage collection, current memory is: {0:#,#.##;;0} MB", before / 1024d / 1024d);
-						GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced);
-						var after = Process.GetCurrentProcess().WorkingSet64;
-						Console.WriteLine("Done garbage collection, current memory is: {0:#,#.##;;0} MB, saved: {1:#,#.##;;0} MB", after / 1024d / 1024d,
-										  (before - after) / 1024d / 1024d);
-					}
-					},
-				{
-					"q", () => done = false
-				}
-			};
+			var actions = new Dictionary<string, Action>
+			              {
+				              { "cls", TryClearingConsole },
+				              {
+					              "reset", () =>
+					              {
+						              TryClearingConsole();
+						              done = true;
+					              }
+				              },
+				              {
+					              "gc", () =>
+					              {
+						              long before = Process.GetCurrentProcess().WorkingSet64;
+						              Console.WriteLine(
+										  "Starting garbage collection (without LOH compaction), current memory is: {0:#,#.##;;0} MB",
+							              before / 1024d / 1024d);
+						              RavenGC.CollectGarbage(false, () => server.SystemDatabase.TransactionalStorage.ClearCaches());
+						              var after = Process.GetCurrentProcess().WorkingSet64;
+						              Console.WriteLine(
+							              "Done garbage collection, current memory is: {0:#,#.##;;0} MB, saved: {1:#,#.##;;0} MB",
+							              after / 1024d / 1024d,
+							              (before - after) / 1024d / 1024d);
+					              }
+				              },
+				              {
+					              "loh-compaction", () =>
+					              {
+						              long before = Process.GetCurrentProcess().WorkingSet64;
+						              Console.WriteLine(
+							              "Starting garbage collection (with LOH compaction), current memory is: {0:#,#.##;;0} MB",
+							              before / 1024d / 1024d);
+									  RavenGC.CollectGarbage(true, () => server.SystemDatabase.TransactionalStorage.ClearCaches());
+						              var after = Process.GetCurrentProcess().WorkingSet64;
+						              Console.WriteLine(
+							              "Done garbage collection, current memory is: {0:#,#.##;;0} MB, saved: {1:#,#.##;;0} MB",
+							              after / 1024d / 1024d,
+							              (before - after) / 1024d / 1024d);
+					              }
+				              },
+				              { "q", () => done = false }
+			              };
 
 			WriteInteractiveOptions(actions);
 			while (true)
@@ -332,7 +546,7 @@ Configuration options:
 				var readLine = Console.ReadLine() ?? "";
 
 				Action value;
-				if(actions.TryGetValue(readLine, out value) == false)
+				if (actions.TryGetValue(readLine, out value) == false)
 				{
 					Console.WriteLine("Could not understand: {0}", readLine);
 					WriteInteractiveOptions(actions);
@@ -342,6 +556,18 @@ Configuration options:
 				value();
 				if (done != null)
 					return done.Value;
+			}
+		}
+
+		private static void TryClearingConsole()
+		{
+			try
+			{
+				Console.Clear();
+			}
+			catch (IOException)
+			{
+				// redirected output, probably, ignoring
 			}
 		}
 
@@ -359,8 +585,8 @@ Document Database for the .Net Platform
 ----------------------------------------
 Copyright (C) 2008 - {0} - Hibernating Rhinos
 ----------------------------------------
-Command line ptions:",
-				SystemTime.Now.Year);
+Command line options:",
+				SystemTime.UtcNow.Year);
 
 			optionSet.WriteOptionDescriptions(Console.Out);
 
@@ -435,7 +661,7 @@ Enjoy...
 			else
 			{
 				ManagedInstallerClass.InstallHelper(new[] { Assembly.GetExecutingAssembly().Location });
-				SetRecoveryOptions("RavenDB");
+				SetRecoveryOptions(ProjectInstaller.SERVICE_NAME);
 				var startController = new ServiceController(ProjectInstaller.SERVICE_NAME);
 				startController.Start();
 			}
@@ -449,7 +675,7 @@ Enjoy...
 		static void SetRecoveryOptions(string serviceName)
 		{
 			int exitCode;
-			var arguments = string.Format("failure {0} reset= 500 actions= restart/60000", serviceName);
+			var arguments = string.Format("failure \"{0}\" reset= 500 actions= restart/60000", serviceName);
 			using (var process = new Process())
 			{
 				var startInfo = process.StartInfo;
@@ -469,7 +695,7 @@ Enjoy...
 
 			if (exitCode != 0)
 				throw new InvalidOperationException(
-					"Failed to set the service recovery policy. Command: " + Environment.NewLine+ "sc " + arguments + Environment.NewLine + "Exit code: " + exitCode);
-		} 
+					"Failed to set the service recovery policy. Command: " + Environment.NewLine + "sc " + arguments + Environment.NewLine + "Exit code: " + exitCode);
+		}
 	}
 }
