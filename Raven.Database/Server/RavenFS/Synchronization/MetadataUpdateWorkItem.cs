@@ -1,38 +1,48 @@
 ﻿using System.Collections.Specialized;
 using System.Threading.Tasks;
 using Raven.Abstractions.Logging;
-using Raven.Client.RavenFS;
 using Raven.Database.Server.RavenFS.Storage;
+using Raven.Json.Linq;
+using Raven.Client.FileSystem;
+using Raven.Abstractions.FileSystem;
 
 namespace Raven.Database.Server.RavenFS.Synchronization
 {
 	public class MetadataUpdateWorkItem : SynchronizationWorkItem
 	{
-		private readonly NameValueCollection destinationMetadata;
+        private readonly RavenJObject destinationMetadata;
 		private readonly ILog log = LogManager.GetCurrentClassLogger();
 
-		public MetadataUpdateWorkItem(string fileName, string sourceServerUrl, NameValueCollection destinationMetadata,
-									  ITransactionalStorage storage)
-			: base(fileName, sourceServerUrl, storage)
-		{
-			this.destinationMetadata = destinationMetadata;
-		}
+        public MetadataUpdateWorkItem(string fileName, string sourceServerUrl, ITransactionalStorage storage)
+            : this(fileName, sourceServerUrl, new RavenJObject(), storage)
+        {            
+        }
+        public MetadataUpdateWorkItem(string fileName, string sourceServerUrl, RavenJObject destinationMetadata, ITransactionalStorage storage)
+            : base(fileName, sourceServerUrl, storage)
+        {
+            this.destinationMetadata = destinationMetadata;
+        }
 
 		public override SynchronizationType SynchronizationType
 		{
 			get { return SynchronizationType.MetadataUpdate; }
 		}
 
-        public override Task<SynchronizationReport> PerformAsync(RavenFileSystemClient.SynchronizationClient destination)
+        public override async Task<SynchronizationReport> PerformAsync(IAsyncFilesSynchronizationCommands destination)
 		{
 			AssertLocalFileExistsAndIsNotConflicted(FileMetadata);
 
 			var conflict = CheckConflictWithDestination(FileMetadata, destinationMetadata, ServerInfo.FileSystemUrl);
 
-			if (conflict != null)
-				return ApplyConflictOnDestinationAsync(conflict, destination, ServerInfo.FileSystemUrl, log);
+	        if (conflict != null)
+	        {
+				var report = await HandleConflict(destination, conflict, log);
 
-            return destination.UpdateMetadataAsync(FileName, FileMetadata, ServerInfo);
+				if (report != null)
+					return report;
+	        }
+
+            return await destination.UpdateMetadataAsync(FileName, FileMetadata, ServerInfo);
 		}
 
 		public override bool Equals(object obj)

@@ -5,7 +5,7 @@ import createDatabaseCommand = require("commands/createDatabaseCommand");
 import collection = require("models/collection");
 import dialogViewModelBase = require("viewmodels/dialogViewModelBase");
 import database = require("models/database");
-import commandBase = require("commands/commandBase");
+import getLicenseStatusCommand = require("commands/getLicenseStatusCommand");
 
 class createDatabase extends dialogViewModelBase {
 
@@ -13,10 +13,17 @@ class createDatabase extends dialogViewModelBase {
     creationTaskStarted = false;
 
     databaseName = ko.observable('');
+    nameCustomValidityError: KnockoutComputed<string>;
     databasePath = ko.observable('');
-    databaseLogs = ko.observable('');
-    databaseIndexes = ko.observable('');
+    pathCustomValidityError: KnockoutComputed<string>;
+    databaseLogsPath = ko.observable('');
+    logsCustomValidityError: KnockoutComputed<string>;
+    databaseIndexesPath = ko.observable('');
+    indexesCustomValidityError: KnockoutComputed<string>;
     databaseNameFocus = ko.observable(true);
+    storageEngine = ko.observable('');
+    private maxNameLength = 200;
+
     isCompressionBundleEnabled = ko.observable(false);
     isEncryptionBundleEnabled = ko.observable(false);
     isExpirationBundleEnabled = ko.observable(false);
@@ -24,20 +31,46 @@ class createDatabase extends dialogViewModelBase {
     isReplicationBundleEnabled = ko.observable(false);
     isSqlReplicationBundleEnabled = ko.observable(false);
     isVersioningBundleEnabled = ko.observable(false);
-    isPeriodicBackupBundleEnabled = ko.observable(true); // Old Raven Studio has this enabled by default
+    isPeriodicExportBundleEnabled = ko.observable(false); // Old Raven Studio has this enabled by default
     isScriptedIndexBundleEnabled = ko.observable(false);
 
-    private databases = ko.observableArray<database>();
-    private maxNameLength = 260 - 30;
-    private newCommandBase = new commandBase();
-    
-    constructor(databases) {
+    constructor(private databases: KnockoutObservableArray<database>, private licenseStatus: KnockoutObservable<licenseStatusDto>) {
         super();
-        this.databases = databases;
-    }
 
-    cancel() {
-        dialog.close(this);
+        this.licenseStatus = licenseStatus;
+        if (!!this.licenseStatus() && this.licenseStatus().IsCommercial && this.licenseStatus().Attributes.periodicBackup !== "true") {
+            this.isPeriodicExportBundleEnabled(false);
+        }
+
+        this.nameCustomValidityError = ko.computed(() => {
+            var errorMessage: string = '';
+            var newDatabaseName = this.databaseName();
+
+            if (this.isDatabaseNameExists(newDatabaseName, this.databases()) == true) {
+                errorMessage = "Database name already exists!";
+            }
+            else if ((errorMessage = this.checkName(newDatabaseName)) != '') { }
+
+            return errorMessage;
+        });
+
+        this.pathCustomValidityError = ko.computed(() => {
+            var newPath = this.databasePath();
+            var errorMessage: string = this.isPathLegal(newPath, "Path");
+            return errorMessage;
+        });
+
+        this.logsCustomValidityError = ko.computed(() => {
+            var newPath = this.databaseLogsPath();
+            var errorMessage: string = this.isPathLegal(newPath, "Logs");
+            return errorMessage;
+        });
+
+        this.indexesCustomValidityError = ko.computed(() => {
+            var newPath = this.databaseIndexesPath();
+            var errorMessage: string = this.isPathLegal(newPath, "Indexes");
+            return errorMessage;
+        });
     }
 
     attached() {
@@ -53,100 +86,87 @@ class createDatabase extends dialogViewModelBase {
         }
     }
 
+    cancel() {
+        dialog.close(this);
+    }
+
+    isBundleActive(name: string): boolean {
+        var licenseStatus: licenseStatusDto = this.licenseStatus();
+
+        if (licenseStatus == null || licenseStatus.IsCommercial == false) {
+            return true;
+        }
+        else {
+            var value = licenseStatus.Attributes[name];
+            return value === "true";
+        }
+    }
+
     nextOrCreate() {
         // Next needs to configure bundle settings, if we've selected some bundles.
         // We haven't yet implemented bundle configuration, so for now we're just 
         // creating the database.
-        var databaseName = this.databaseName();
-        var databasePath = this.databasePath();
-        var databaseLogs = this.databaseLogs();
-        var databaseIndexes = this.databaseIndexes();
 
-        if (this.isDatabaseNameLegal(databaseName) && this.arePathsLegal(databasePath, databaseLogs, databaseIndexes)) {
-            this.creationTaskStarted = true;
-            this.creationTask.resolve(databaseName, this.getActiveBundles(), databasePath, databaseLogs, databaseIndexes);
-            dialog.close(this);
-        }
+        this.creationTaskStarted = true;
+        dialog.close(this);
+        this.creationTask.resolve(this.databaseName(), this.getActiveBundles(), this.databasePath(), this.databaseLogsPath(), this.databaseIndexesPath(), this.storageEngine());
     }
 
-    private arePathsLegal(databasePath: string, databaseLogs: string, databaseIndexes: string) {
-        if (this.isPathLegal(databasePath, "Path") && this.isPathLegal(databaseLogs, "Logs") && this.isPathLegal(databaseIndexes, "Indexes")) {
-            return true;
+    private isDatabaseNameExists(databaseName: string, databases: database[]): boolean {
+        databaseName = databaseName.toLowerCase();
+        for (var i = 0; i < databases.length; i++) {
+            if (databaseName == databases[i].name.toLowerCase()) {
+                return true;
+            }
         }
         return false;
     }
 
-    private isPathLegal(name: string, pathName: string) {
-        var rg1 = /^[^\\*:\?"<>\|]+$/; // forbidden characters \ * : ? " < > |
+    private checkName(name: string): string {
+        var rg1 = /^[^\\/\*:\?"<>\|]+$/; // forbidden characters \ / * : ? " < > |
+        var rg2 = /^\./; // cannot start with dot (.)
+        var rg3 = /^(nul|prn|con|lpt[0-9]|com[0-9])(\.|$)/i; // forbidden file names
+
+        var message = "";
+        if (!$.trim(name)) {
+            message = "Please fill out the database name field!";
+        }
+        else if (name.length > this.maxNameLength) {
+            message = "The database name length can't exceed " + this.maxNameLength + " characters!";
+        }
+        else if (!rg1.test(name)) {
+            message = "The database name can't contain any of the following characters: \ / * : ?" + ' " ' + "< > |";
+        }
+        else if (rg2.test(name)) {
+            message = "The database name can't start with a dot!";
+        }
+        else if (rg3.test(name)) {
+            message = "The name '" + name + "' is forbidden for use!";
+        }
+        else if (name[name.length-1]==".") {
+            message = "The database name can't end with a dot!";
+        }
+        else if (name.toLocaleLowerCase() == "system") {
+            message = "This name is reserved for the actual system database!";
+        }
+        return message;
+    }
+
+    private isPathLegal(name: string, pathName: string): string {
+        var rg1 = /^[^*\?"<>\|]+$/; // forbidden characters \ * : ? " < > |
         var rg2 = /^(nul|prn|con|lpt[0-9]|com[0-9])(\.|$)/i; // forbidden file names
-        var errorMessage = null;
+        var errorMessage = "";
 
         if (!$.trim(name) == false) { // if name isn't empty or not consist of only whitepaces
-            if (name.length > this.maxNameLength) {
-                errorMessage = "The path name for the '" + pathName + "' can't exceed " + this.maxNameLength + " characters!";
+            if (name.length > 248) {
+                errorMessage = "The path name for the '" + pathName + "' can't exceed " + 248 + " characters!";
             } else if (!rg1.test(name)) {
                 errorMessage = "The " + pathName + " can't contain any of the following characters: * : ?" + ' " ' + "< > |";
             } else if (rg2.test(name)) {
                 errorMessage = "The name '" + name + "' is forbidden for use!";
             }
         }
-        if (errorMessage != null) {
-            this.newCommandBase.reportError(errorMessage);
-            return false;
-        }
-        return true;
-    }
-
-    private isDatabaseNameLegal(databaseName: string): boolean {
-        var errorMessage = null;
-
-        if (databaseName == null) {
-            errorMessage = "Please fill out the Database Name field";
-        }
-        else if (this.isDatabaseNameExists(databaseName, this.databases()) === true) {
-            errorMessage = "Database Name Already Exists!";
-        }
-        else if ((errorMessage = this.CheckName(databaseName)) != null) { }
-
-        if (errorMessage != null) {
-            this.newCommandBase.reportError(errorMessage);
-            this.databaseNameFocus(true);
-            return false;
-        }
-        return true;
-    }
-
-    private CheckName(name: string): string {
-        var rg1 = /^[^\\/\*:\?"<>\|]+$/; // forbidden characters \ / * : ? " < > |
-        var rg2 = /^\./; // cannot start with dot (.)
-        var rg3 = /^(nul|prn|con|lpt[0-9]|com[0-9])(\.|$)/i; // forbidden file names
-
-        var message = null;
-        if (!$.trim(name)) {
-            message = "An empty databse name is forbidden for use!";
-        }
-        else if (name.length > this.maxNameLength) {
-            message = "The database length can't exceed " + this.maxNameLength + " characters!";
-        }
-        else if (!rg1.test(name)) {
-            message = "The database name can't contain any of the following characters: \ / * : ?" + ' " ' +"< > |";
-        }
-        else  if (rg2.test(name)) {
-            message = "The database name can't start with a dot!";
-        }
-        else if (rg3.test(name)) {
-            message = "The name '" + name + "' is forbidden for use!";
-        }
-        return message;
-    }
-
-    private isDatabaseNameExists(databaseName: string, databases: database[]): boolean {
-        for (var i = 0; i < databases.length; i++) {
-            if (databaseName == databases[i].name) {
-                return true;
-            }
-        }
-        return false;
+        return errorMessage;
     }
 
     toggleCompressionBundle() {
@@ -162,8 +182,6 @@ class createDatabase extends dialogViewModelBase {
     }
 
     toggleQuotasBundle() {
-        if (this.isQuotasBundleEnabled() === false)
-            app.showMessage("Quotas Bundle configuration window is not implemented yet.", "Not implemented");
         this.isQuotasBundleEnabled.toggle();
     }
 
@@ -176,13 +194,11 @@ class createDatabase extends dialogViewModelBase {
     }
 
     toggleVersioningBundle() {
-        if (this.isVersioningBundleEnabled() === false)
-            app.showMessage("Versioning Bundle configuration window is not implemented yet.", "Not implemented");
         this.isVersioningBundleEnabled.toggle();
     }
 
-    togglePeriodicBackupBundle() {
-        this.isPeriodicBackupBundleEnabled.toggle();
+    togglePeriodicExportBundle() {
+        this.isPeriodicExportBundleEnabled.toggle();
     }
 
     toggleScriptedIndexBundle() {
@@ -219,13 +235,14 @@ class createDatabase extends dialogViewModelBase {
             activeBundles.push("Versioning");
         }
 
-        if (this.isPeriodicBackupBundleEnabled()) {
-            activeBundles.push("PeriodicBackups");
+        if (this.isPeriodicExportBundleEnabled()) {
+            activeBundles.push("PeriodicExport");
         }
 
         if (this.isScriptedIndexBundleEnabled()) {
             activeBundles.push("ScriptedIndexResults");
         }
+
         return activeBundles;
     }
 }

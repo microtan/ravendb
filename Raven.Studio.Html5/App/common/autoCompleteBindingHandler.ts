@@ -12,7 +12,7 @@
  * In the above sample, yourOwnResults is an array that you are responsible for populating. And 'name' is the property on the items in that array.
  */
 class autoCompleteBindingHandler {
-    
+
     static install() {
         if (!ko.bindingHandlers["autoComplete"]) {
             ko.bindingHandlers["autoComplete"] = new autoCompleteBindingHandler();
@@ -29,7 +29,11 @@ class autoCompleteBindingHandler {
         var inputId = valueAccessor();
         var input = $(inputId);
         if (input.length !== 1) {
-            throw new Error("Expected 1 auto complete item, '" + inputId + "', but found " + input.length);
+            // Don't throw an error here, because we may cancel navigation, and Durandal may pull the element out.
+            // Instead, we'll just issue a warning in the console and return.
+            //throw new Error("Expected 1 auto complete element, '" + inputId + "', but found " + input.length);
+            console.warn("Expected 1 auto complete element, '" + inputId + "', but found " + input.length);
+            return;
         }
 
         // Hide the auto complete container and size it to the same size as the textbox.
@@ -37,14 +41,23 @@ class autoCompleteBindingHandler {
         element.style.display = "none";
         element.style.position = "absolute";
         element.style.left = "auto";
-        element.style.width = input.width() + "px";
         element.style.top = (input.height() + 20) + "px";
+
+        //This makes elements with long names overflow the container... commenting it for the moment
+        //element.style.width = input.width() + "px";
 
         // Clicking an element in the auto complete list should hide it.
         $element.on('click', () => setTimeout(() => element.style.display = "none", 0));
 
         // Leaving the textbox should hide the auto complete list.
-        input.on('blur', (args) => setTimeout(() => element.style.display = "none", 200));
+        input.on('blur', (args: JQueryEventObject) => setTimeout(() => element.style.display = "none", 200));
+
+        // Putting the focus back on the textbox should show the auto complete list if we have items.
+        input.on('focus', (args: JQueryEventObject) => setTimeout(() =>
+            element.style.display = this.getAllAutoCompleteItems($element).length > 0 ? "block" : "none"));
+
+        // Up, down, enter all have special meaning.
+        input.on('keydown', (args: JQueryEventObject) => this.handleKeyPress(element, $element, input, args));
 
         // When the results change and we have 1 or more, display the auto complete container.
         var results: KnockoutObservableArray<any> = allBindings()['foreach'];
@@ -52,15 +65,82 @@ class autoCompleteBindingHandler {
             throw new Error("Unable to find results list for auto complete.");
         }
         var subscription = results.subscribe((array: any[]) => {
-            element.style.display = array.length === 0 ? "none" : "block";
+            element.style.display = array.length === 0 || !input.is(":focus") ? "none" : "block";
         });
 
         // Clean up after ourselves when the node is removed from the DOM.
         ko.utils.domNodeDisposal.addDisposeCallback(element, () => {
             input.off('blur');
             $element.off('click');
+            input.off('keydown');
             subscription.dispose();
         });
+    }
+
+    getAllAutoCompleteItems(resultContainer: JQuery): JQuery {
+        return resultContainer.children("li");
+    }
+
+    findAutoCompleteItemMatching(resultContainer: JQuery, text: string): HTMLLIElement {
+        var textLower = text.toLowerCase();
+        return this.getAllAutoCompleteItems(resultContainer)
+            .toArray()
+            .filter((el: HTMLLIElement) => el.textContent && el.textContent.trim().toLowerCase().indexOf(textLower) >= 0)[0];
+    }
+
+    handleKeyPress(element: HTMLElement, $element: JQuery, $input: JQuery, args: JQueryEventObject) {
+        var enter = 13;
+        var downArrow = 40;
+        var upArrow = 38;
+
+        var lis: JQuery, curSelected: JQuery;
+        if (element.style.display == "none" && args.which === downArrow) {
+            if ($element.children("li").length > 0 && $input.is(":focus")) {
+                setTimeout(() => element.style.display = "block", 0);
+                return true;
+            }
+        }
+
+        if (args.which === downArrow || args.which === upArrow || args.which === enter) {
+            lis = this.getAllAutoCompleteItems($element);
+            curSelected = $element.find('.selected');
+        }
+
+        if (args.which === downArrow) {
+            if (curSelected.length > 0) {
+                curSelected.removeClass("selected");
+                var nextSelected = curSelected.next();
+
+                if (nextSelected.length) {
+                    nextSelected.addClass("selected");
+                } else {
+                    lis.first().addClass('selected');
+                }
+
+            } else {
+                curSelected = lis.first().addClass("selected");
+            }
+        } else if (args.which === upArrow) {
+            if (curSelected.length > 0) {
+                curSelected.removeClass("selected");
+                var prevSelected = curSelected.prev();
+
+                if (prevSelected.length) {
+                    prevSelected.addClass("selected");
+                } else {
+                    lis.last().addClass('selected');
+                }
+
+            } else {
+                curSelected = lis.last().addClass("selected");
+            }
+        }
+        else if (args.which === enter) {
+            var itemToSelect = curSelected.length ? curSelected : $(this.findAutoCompleteItemMatching($element, $input.val()));
+            if (itemToSelect.length) {
+                itemToSelect.click();
+            }
+        }
     }
 }
 

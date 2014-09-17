@@ -13,10 +13,10 @@ using System.Web.Http;
 using System.Web.Http.Controllers;
 using System.Web.Http.Routing;
 using Raven.Abstractions;
+using Raven.Abstractions.Extensions;
 using Raven.Abstractions.Exceptions;
 using Raven.Abstractions.Logging;
 using Raven.Abstractions.Util.Streams;
-using Raven.Client.RavenFS;
 using Raven.Database.Config;
 using Raven.Database.Server.Controllers;
 using Raven.Database.Server.RavenFS.Infrastructure;
@@ -29,6 +29,10 @@ using Raven.Database.Server.RavenFS.Synchronization.Rdc.Wrapper;
 using Raven.Database.Server.Security;
 using Raven.Database.Server.Tenancy;
 using Raven.Database.Server.WebApi;
+using Raven.Json.Linq;
+using System.Collections.Generic;
+using Raven.Abstractions.FileSystem;
+using Raven.Abstractions.Data;
 
 namespace Raven.Database.Server.RavenFS.Controllers
 {
@@ -41,7 +45,7 @@ namespace Raven.Database.Server.RavenFS.Controllers
 
 	    private FileSystemsLandlord landlord;
 	    private RequestManager requestManager;
-
+        
         public RequestManager RequestManager
         {
             get
@@ -51,7 +55,7 @@ namespace Raven.Database.Server.RavenFS.Controllers
                 return (RequestManager)Configuration.Properties[typeof(RequestManager)];
             }
         }
-	    public RavenFileSystem RavenFileSystem
+	    public RavenFileSystem FileSystem
 		{
 			get
 			{
@@ -153,22 +157,22 @@ namespace Raven.Database.Server.RavenFS.Controllers
 
 		public NotificationPublisher Publisher
 		{
-			get { return RavenFileSystem.Publisher; }
+			get { return FileSystem.Publisher; }
 		}
 
 		public BufferPool BufferPool
 		{
-			get { return RavenFileSystem.BufferPool; }
+			get { return FileSystem.BufferPool; }
 		}
 
 		public SigGenerator SigGenerator
 		{
-			get { return RavenFileSystem.SigGenerator; }
+			get { return FileSystem.SigGenerator; }
 		}
 
 		public Historian Historian
 		{
-			get { return RavenFileSystem.Historian; }
+			get { return FileSystem.Historian; }
 		}
 
 	    public override InMemoryRavenConfiguration SystemConfiguration
@@ -183,42 +187,42 @@ namespace Raven.Database.Server.RavenFS.Controllers
 
 		protected ITransactionalStorage Storage
 		{
-			get { return RavenFileSystem.Storage; }
+			get { return FileSystem.Storage; }
 		}
 
 		protected IndexStorage Search
 		{
-			get { return RavenFileSystem.Search; }
+			get { return FileSystem.Search; }
 		}
 
 		protected FileLockManager FileLockManager
 		{
-			get { return RavenFileSystem.FileLockManager; }
+			get { return FileSystem.FileLockManager; }
 		}
 
 		protected ConflictArtifactManager ConflictArtifactManager
 		{
-			get { return RavenFileSystem.ConflictArtifactManager; }
+			get { return FileSystem.ConflictArtifactManager; }
 		}
 
 		protected ConflictDetector ConflictDetector
 		{
-			get { return RavenFileSystem.ConflictDetector; }
+			get { return FileSystem.ConflictDetector; }
 		}
 
 		protected ConflictResolver ConflictResolver
 		{
-			get { return RavenFileSystem.ConflictResolver; }
+			get { return FileSystem.ConflictResolver; }
 		}
 
 		protected SynchronizationTask SynchronizationTask
 		{
-			get { return RavenFileSystem.SynchronizationTask; }
+			get { return FileSystem.SynchronizationTask; }
 		}
 
 		protected StorageOperationsTask StorageOperationsTask
 		{
-			get { return RavenFileSystem.StorageOperationsTask; }
+			get { return FileSystem.StorageOperationsTask; }
 		}
 
 		protected PagingInfo Paging
@@ -347,10 +351,11 @@ namespace Raven.Database.Server.RavenFS.Controllers
 			public int Start;
 		}
 
-
-
         public override bool SetupRequestToProperDatabase(RequestManager rm)
         {
+            if (!RavenFileSystem.IsRemoteDifferentialCompressionInstalled)
+                throw new HttpException(503, "File Systems functionality is not supported. Remote Differential Compression is not installed.");
+
             var tenantId = FileSystemName;
 
             if (string.IsNullOrWhiteSpace(tenantId))
@@ -366,7 +371,7 @@ namespace Raven.Database.Server.RavenFS.Controllers
             }
             catch (Exception e)
             {
-                var msg = "Could open file system named: " + tenantId;
+                var msg = "Could not open file system named: " + tenantId;
                 Logger.WarnException(msg, e);
                 throw new HttpException(503, msg, e);
             }
@@ -394,7 +399,7 @@ namespace Raven.Database.Server.RavenFS.Controllers
                 }
                 catch (Exception e)
                 {
-                    var msg = "Could open file system named: " + tenantId;
+                    var msg = "Could not open file system named: " + tenantId;
                     Logger.WarnException(msg, e);
                     throw new HttpException(503, msg, e);
                 }
@@ -417,7 +422,100 @@ namespace Raven.Database.Server.RavenFS.Controllers
 
 	    public override void MarkRequestDuration(long duration)
 	    {
-	        RavenFileSystem.MetricsCounters.RequestDuationMetric.Update(duration);
-	    }
-	}
+	        FileSystem.MetricsCounters.RequestDuationMetric.Update(duration);
+	    }        
+
+        #region Metadata Headers Handling
+
+
+        private static readonly HashSet<string> HeadersToIgnoreClient = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+		{
+			// Raven internal headers
+			"Raven-Server-Build",
+			"Non-Authoritive-Information",
+			"Raven-Timer-Request",
+
+            //proxy
+            "Reverse-Via",
+
+            "Allow",
+            "Content-Disposition",
+            "Content-Encoding",
+            "Content-Language",
+            "Content-Location",
+            "Content-MD5",
+            "Content-Range",
+            "Content-Type",
+            "Expires",
+			// ignoring this header, we handle this internally
+			Constants.LastModified,
+			// Ignoring this header, since it may
+			// very well change due to things like encoding,
+			// adding metadata, etc
+			"Content-Length",
+			// Special things to ignore
+			"Keep-Alive",
+			"X-Powered-By",
+			"X-AspNet-Version",
+			"X-Requested-With",
+			"X-SourceFiles",
+			// Request headers
+			"Accept-Charset",
+			"Accept-Encoding",
+			"Accept",
+			"Accept-Language",
+			"Authorization",
+			"Cookie",
+			"Expect",
+			"From",
+			"Host",
+			"If-Match",
+			"If-Modified-Since",
+			"If-None-Match",
+			"If-Range",
+			"If-Unmodified-Since",
+			"Max-Forwards",
+			"Referer",
+			"TE",
+			"User-Agent",
+			//Response headers
+			"Accept-Ranges",
+			"Age",
+			"Allow",
+			Constants.MetadataEtagField,
+			"Location",
+			"Origin",
+			"Retry-After",
+			"Server",
+			"Set-Cookie2",
+			"Set-Cookie",
+			"Vary",
+			"Www-Authenticate",
+			// General
+			"Cache-Control",
+			"Connection",
+			"Date",
+			"Pragma",
+			"Trailer",
+			"Transfer-Encoding",
+			"Upgrade",
+			"Via",
+			"Warning",
+            
+            // Azure specific
+            "X-LiveUpgrade",
+            "DISGUISED-HOST",
+            "X-SITE-DEPLOYMENT-ID",
+		};
+
+        protected static readonly IList<string> ReadOnlyHeaders = new List<string> { Constants.LastModified, Constants.MetadataEtagField }.AsReadOnly();
+
+        protected virtual RavenJObject GetFilteredMetadataFromHeaders(HttpHeaders headers)
+        {            
+            return headers.FilterHeadersToObject();
+        }
+
+        #endregion Metadata Headers Handling
+
+    }
 }

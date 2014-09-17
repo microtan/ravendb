@@ -30,12 +30,12 @@ namespace Voron.Tests.Bugs
         }
 
 		[Theory]
-        [InlineData(0500)]
-        [InlineData(1000)]
-        [InlineData(2000)]
-        [InlineData(3000)]
-        [InlineData(4000)]
-        [InlineData(5000)]
+		[InlineData(0500)]
+		[InlineData(1000)]
+		[InlineData(2000)]
+		[InlineData(3000)]
+		[InlineData(4000)]
+		[InlineData(5000)]
 		public void MultiAdds_And_MultiDeletes_After_Causing_PageSplit_DoNot_Fail(int size)
 		{
 			using (var Env = new StorageEnvironment(StorageEnvironmentOptions.CreateMemoryOnly()))
@@ -57,7 +57,7 @@ namespace Voron.Tests.Bugs
 					var tree = tx.Environment.State.GetTree(tx,"foo");
 					foreach (var buffer in inputData)
 					{						
-						Assert.DoesNotThrow(() => tree.MultiAdd(tx, "ChildTreeKey", new Slice(buffer)));
+						Assert.DoesNotThrow(() => tree.MultiAdd("ChildTreeKey", new Slice(buffer)));
 					}
 					tx.Commit();
 				}
@@ -68,7 +68,7 @@ namespace Voron.Tests.Bugs
 					for (int i = 0; i < inputData.Count; i++)
 					{
 						var buffer = inputData[i];
-						Assert.DoesNotThrow(() => tree.MultiDelete(tx, "ChildTreeKey", new Slice(buffer)));
+						Assert.DoesNotThrow(() => tree.MultiDelete("ChildTreeKey", new Slice(buffer)));
 					}
 
 					tx.Commit();
@@ -125,7 +125,7 @@ namespace Voron.Tests.Bugs
 				using (var tx = env.NewTransaction(TransactionFlags.Read))
 				{
 					var tree = tx.Environment.State.GetTree(tx,"multi");
-					using (var iterator = tree.MultiRead(tx, "0"))
+					using (var iterator = tree.MultiRead("0"))
 					{
 						Assert.True(iterator.Seek(Slice.BeforeAllKeys));
 
@@ -153,7 +153,7 @@ namespace Voron.Tests.Bugs
 				using (var tx = env.NewTransaction(TransactionFlags.Read))
 				{
 					var tree = tx.Environment.State.GetTree(tx,"multi");
-					using (var iterator = tree.MultiRead(tx, "0"))
+					using (var iterator = tree.MultiRead("0"))
 					{
 						Assert.True(iterator.Seek(Slice.BeforeAllKeys));
 
@@ -190,7 +190,7 @@ namespace Voron.Tests.Bugs
 				using (var tx = env.NewTransaction(TransactionFlags.Read))
 				{
 					var tree = tx.Environment.State.GetTree(tx,"multitree0");
-					using (var it = tree.MultiRead(tx, "key"))
+					using (var it = tree.MultiRead("key"))
 					{
 						Assert.True(it.Seek(Slice.BeforeAllKeys));
 
@@ -203,13 +203,30 @@ namespace Voron.Tests.Bugs
 			}
 		}
 
+		[Fact]
+		public void PageNotSorted_ValidateDebugOption()
+		{
+			using (var env = new StorageEnvironment(StorageEnvironmentOptions.CreateMemoryOnly()))
+			{
+				env.DebugJournal = DebugJournal.FromFile("Bugs/Data/mapped", env);
+				env.DebugJournal.Replay();
+
+				using (var tx = env.NewTransaction(TransactionFlags.Read))
+				{
+					var tree = tx.ReadTree("mapped_results_by_view_and_reduce_key");
+
+					DebugStuff.RenderAndShow(tx, tree.State.RootPageNumber, 1);
+				}
+			}
+		}
+
 		private void ValidateRecords(StorageEnvironment env, IEnumerable<Tree> trees, int documentCount, int i)
 		{
 			using (var tx = env.NewTransaction(TransactionFlags.Read))
 			{
 				foreach (var tree in trees)
 				{
-					using (var iterator = tree.Iterate(tx))
+					using (var iterator = tree.Iterate())
 					{
 						Assert.True(iterator.Seek(Slice.BeforeAllKeys));
 
@@ -233,10 +250,11 @@ namespace Voron.Tests.Bugs
 			{
 				for (var j = 0; j < 10; j++)
 				{
+					
 					foreach (var treeName in trees)
 					{
 					    var tree = tx.Environment.State.GetTree(tx,treeName);
-						using (var iterator = tree.MultiRead(tx, (j % 10).ToString()))
+						using (var iterator = tree.MultiRead((j % 10).ToString()))
 						{
 							Assert.True(iterator.Seek(Slice.BeforeAllKeys));
 

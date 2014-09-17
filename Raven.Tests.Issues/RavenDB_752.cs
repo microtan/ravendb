@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.Net;
 using Raven.Abstractions.Connection;
 using Raven.Abstractions.Extensions;
+using Raven.Abstractions.Replication;
 using Raven.Abstractions.Util;
 using Raven.Client.Connection;
 using Raven.Client.Document;
@@ -19,13 +20,14 @@ namespace Raven.Tests.Issues
 {
 	public class RavenDB_752 : NoDisposalNeeded
 	{
+	    private const int MaxNumber = 2048;
 		[Fact]
 		public void ReplicationInformerShouldThrowAfterSecondTimeout()
 		{
             using (var replicationInformer = new ReplicationInformer(new DocumentConvention
             {
                 FailoverBehavior = FailoverBehavior.AllowReadsFromSecondariesAndWritesToSecondaries
-            })
+            }, new HttpJsonRequestFactory(MaxNumber))
             {
                 ReplicationDestinations =
 					{
@@ -37,16 +39,14 @@ namespace Raven.Tests.Issues
             {
                 var urlsTried = new List<string>();
 
-                var webException = Assert.Throws<WebException>(() =>
+                var webException = (WebException)Assert.Throws<AggregateException>(() =>
                 {
-                    replicationInformer.ExecuteWithReplication("GET", "http://localhost:1", new OperationCredentials(null, CredentialCache.DefaultNetworkCredentials), 1, 1, url =>
+                    replicationInformer.ExecuteWithReplicationAsync<int>("GET", "http://localhost:1", new OperationCredentials(null, CredentialCache.DefaultNetworkCredentials), 1, 1, url =>
                     {
                         urlsTried.Add(url.Url);
                         throw new WebException("Timeout", WebExceptionStatus.Timeout);
-
-                        return 1;
-                    });
-                });
+                    }).Wait();
+                }).ExtractSingleInnerException();
 
                 Assert.Equal(2, urlsTried.Count);
                 Assert.Equal("http://localhost:1", urlsTried[0]);
@@ -62,7 +62,7 @@ namespace Raven.Tests.Issues
             using (var replicationInformer = new ReplicationInformer(new DocumentConvention
             {
                 FailoverBehavior = FailoverBehavior.ReadFromAllServers
-            })
+            }, new HttpJsonRequestFactory(MaxNumber))
             {
                 ReplicationDestinations =
 					{
@@ -74,16 +74,14 @@ namespace Raven.Tests.Issues
             {
                 var urlsTried = new List<string>();
 
-                var webException = Assert.Throws<WebException>(() =>
+                var webException = (WebException) Assert.Throws<AggregateException>(() =>
                 {
-                    replicationInformer.ExecuteWithReplication("GET", "http://localhost:1", new OperationCredentials(null, CredentialCache.DefaultNetworkCredentials), 1, 1, url =>
+                    replicationInformer.ExecuteWithReplicationAsync<int>("GET", "http://localhost:1", new OperationCredentials(null, CredentialCache.DefaultNetworkCredentials), 1, 1, url =>
                     {
                         urlsTried.Add(url.Url);
                         throw new WebException("Timeout", WebExceptionStatus.Timeout);
-
-                        return 1;
-                    });
-                });
+                    }).Wait();
+                }).ExtractSingleInnerException();
 
                 Assert.Equal(2, urlsTried.Count);
                 Assert.Equal("http://localhost:3", urlsTried[0]); // striped
@@ -99,7 +97,7 @@ namespace Raven.Tests.Issues
             using (var replicationInformer = new ReplicationInformer(new DocumentConvention
             {
                 FailoverBehavior = FailoverBehavior.AllowReadsFromSecondariesAndWritesToSecondaries
-            })
+            }, new HttpJsonRequestFactory(MaxNumber))
             {
                 ReplicationDestinations =
 					{
@@ -136,7 +134,7 @@ namespace Raven.Tests.Issues
             using (var replicationInformer = new ReplicationInformer(new DocumentConvention
             {
                 FailoverBehavior = FailoverBehavior.ReadFromAllServers
-            })
+            }, new HttpJsonRequestFactory(MaxNumber))
             {
                 ReplicationDestinations =
 					{

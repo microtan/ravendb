@@ -1,29 +1,40 @@
-﻿/// <reference path="../models/dto.ts" />
-
-import viewModelBase = require("viewmodels/viewModelBase");
+﻿import viewModelBase = require("viewmodels/viewModelBase");
 import transformer = require("models/transformer");
 import getTransformersCommand = require("commands/getTransformersCommand");
 import appUrl = require("common/appUrl");
 import deleteTransformerConfirm = require("viewmodels/deleteTransformerConfirm");
 import dialog = require("plugins/dialog");
 import app = require("durandal/app");
+import changeSubscription = require("models/changeSubscription");
+import shell = require("viewmodels/shell");
+import copyTransformerDialog = require("viewmodels/copyTransformerDialog");
 
-//todo: implement refresh from db
 class Transformers extends viewModelBase {
 
     newTransformerUrl = appUrl.forCurrentDatabase().newTransformer;
-    
+    appUrls: computedAppUrls;
     transformersGroups = ko.observableArray<{ entityName: string; transformers: KnockoutObservableArray<transformer> }>();
-    containerSelector ="#transformersContainer";
+    containerSelector = "#transformersContainer";
+    transformersMutex = true;
+    allTransformersExpanded = ko.observable(true);
+    expandCollapseTitle = ko.computed(() => this.allTransformersExpanded() ? "Collapse all" : "Expand all");
 
 
     constructor() {
         super();
+
+        this.appUrls = appUrl.forCurrentDatabase();
     }
 
-    activate(args) {
-        this.fetchTransformers();
-        super.activate(args);
+    canActivate(args: any): any {
+        super.canActivate(args);
+
+        var deferred = $.Deferred();
+        var db = this.activeDatabase();
+        if (db) {
+            this.fetchTransformers(db).done(() => deferred.resolve({ can: true }));
+        }
+        return deferred;
     }
 
     attached() {
@@ -31,20 +42,45 @@ class Transformers extends viewModelBase {
         ko.postbox.publish("SetRawJSONUrl", appUrl.forTransformersRawData(this.activeDatabase()));
     }
 
-    modelPolling() {
-        this.fetchTransformers();
-    }
-
-    fetchTransformers() {
-        new getTransformersCommand(this.activeDatabase())
+    private fetchTransformers(db) {
+        return new getTransformersCommand(db)
             .execute()
-            .done((transformers: transformerDto[])=> {
+            .done((transformers: transformerDto[]) => {
                 transformers
                     .map(curTransformer=> new transformer().initFromLoad(curTransformer))
                     .forEach(i=> this.putTransformerIntoGroups(i));
             });
     }
 
+    createNotifications(): Array<changeSubscription> {
+        return [shell.currentResourceChangesApi().watchAllTransformers((e: transformerChangeNotificationDto) => this.processTransformerEvent(e))];
+    }
+
+    private processTransformerEvent(e: transformerChangeNotificationDto) {
+        if (e.Type == "TransformerRemoved") {
+            this.removeTransformersFromAllGroups(this.findTransformersByName(e.Name));
+        } else {
+            if (this.transformersMutex == true) {
+                this.transformersMutex = false;
+                setTimeout(() => {
+                    this.fetchTransformers(this.activeDatabase()).always(() => this.transformersMutex = true);
+                }, 5000);
+            }
+        }
+    }
+
+    findTransformersByName(transformerName: string) {
+        var result = new Array<transformer>();
+        this.transformersGroups().forEach(g => {
+            g.transformers().forEach(i => {
+                if (i.name() == transformerName) {
+                    result.push(i);
+                }
+            });
+        });
+
+        return result;
+    }
 
     putTransformerIntoGroups(trans: transformer) {
         
@@ -62,12 +98,9 @@ class Transformers extends viewModelBase {
         }
     }
 
-    collapseAll() {
-        $(".index-group-content").collapse('hide');
-    }
-
-    expandAll() {
-        $(".index-group-content").collapse('show');
+    toggleExpandAll() {
+        $(".index-group-content").collapse("toggle");
+        this.allTransformersExpanded.toggle();
     }
 
     deleteAllTransformers() {
@@ -82,19 +115,26 @@ class Transformers extends viewModelBase {
         return all.distinct();
     }
 
-
     deleteTransformer(transformerToDelete: transformer) {
         this.promptDeleteTransformers([transformerToDelete]);
     }
 
-    promptDeleteTransformers(transformers: Array<transformer>) {
+    pasteTransformer() {
+        app.showDialog(new copyTransformerDialog('', this.activeDatabase(), true));
+    }
+
+    copyTransformer(t: transformer) {
+        app.showDialog(new copyTransformerDialog(t.name(), this.activeDatabase(), false));
+    }
+
+    private promptDeleteTransformers(transformers: Array<transformer>) {
         var db = this.activeDatabase();
         var deleteViewmodel = new deleteTransformerConfirm(transformers.map(i => i.name()), db);
         deleteViewmodel.deleteTask.done(() => this.removeTransformersFromAllGroups(transformers));
         app.showDialog(deleteViewmodel);
     }
 
-    removeTransformersFromAllGroups(transformers: Array<transformer>) {
+    private removeTransformersFromAllGroups(transformers: Array<transformer>) {
         this.transformersGroups().forEach(transGroup => transGroup.transformers.removeAll(transformers));
         this.transformersGroups.remove((item: { entityName: string; transformers: KnockoutObservableArray<transformer> }) => item.transformers().length === 0);
     }

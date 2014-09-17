@@ -2,31 +2,34 @@ import luceneField = require("models/luceneField");
 import spatialIndexField = require("models/spatialIndexField");
 
 class indexDefinition {
+    name = ko.observable<string>().extend({ required: true });
+    map = ko.observable<string>().extend({ required: true });
+    maps = ko.observableArray<KnockoutObservable<string>>().extend({ required: true });
+    reduce = ko.observable<string>().extend({ required: true });
+    luceneFields = ko.observableArray<luceneField>();
+    numOfLuceneFields = ko.computed(() => this.luceneFields().length).extend({ required: true });
+
+    // This is an amalgamation of several properties from the index (Fields, Stores, Indexes, SortOptions, Analyzers, Suggestions, TermVectors) 
+    // Stored as multiple luceneFields for the sake of data binding.
+    // Each luceneField corresponds to a Field box in the index editor UI.
+    spatialFields = ko.observableArray<spatialIndexField>();
+    numOfSpatialFields = ko.computed(() => this.spatialFields().length).extend({ required: true });
+
+    maxIndexOutputsPerDocument = ko.observable<number>(0).extend({ required: true });
+
     analyzers: any;
-    fields = ko.observableArray<string>().extend({ required: true });
+    fields = ko.observableArray<string>();
     indexes: any;
     internalFieldsMapping: any;
     isCompiled: boolean;
     isMapReduce: boolean;
     lockMode: string;
-    map = ko.observable<string>().extend({ required: true });
-    maps = ko.observableArray<KnockoutObservable<string>>().extend({ required: true });
-    name = ko.observable<string>().extend({ required: true });
-    reduce = ko.observable<string>().extend({ required: true });
     sortOptions: any;
     spatialIndexes: any;
     stores: any;
     suggestions: any;
     termVectors: any;
-    transformResults = ko.observable<string>().extend({ required: true });
     type: string;
-    maxIndexOutputsPerDocument = ko.observable<number>(0);
-
-    // This is an amalgamation of several properties from the index (Fields, Stores, Indexes, SortOptions, Analyzers, Suggestions, TermVectors) 
-    // Stored as multiple luceneFields for the sake of data binding.
-    // Each luceneField corresponds to a Field box in the index editor UI.
-    luceneFields = ko.observableArray<luceneField>();
-    spatialFields = ko.observableArray<spatialIndexField>().extend({ required: true });
 
     constructor(dto: indexDefinitionDto) {
         this.analyzers = dto.Analyzers;
@@ -45,7 +48,6 @@ class indexDefinition {
         this.stores = dto.Stores;
         this.suggestions = dto.Suggestions;
         this.termVectors = dto.TermVectors;
-        this.transformResults(dto.TransformResults);
         this.type = dto.Type;
 
         this.luceneFields(this.parseFields());
@@ -72,9 +74,8 @@ class indexDefinition {
             Stores: this.makeFieldObject(f => f.stores() === "Yes", f => f.stores()),
             Suggestions: this.makeFieldObject(f => f.suggestionDistance() !== "None", f => f.toSuggestionDto()),
             TermVectors: this.makeFieldObject(f => f.termVector() !== "No", f => f.termVector()),
-            TransformResults: this.transformResults(),
             Type: this.type,
-            MaxIndexOutputsPerDocument: this.maxIndexOutputsPerDocument()? this.maxIndexOutputsPerDocument()> 0 ? this.maxIndexOutputsPerDocument() :null:null
+            MaxIndexOutputsPerDocument: this.maxIndexOutputsPerDocument() ? this.maxIndexOutputsPerDocument()> 0 ? this.maxIndexOutputsPerDocument() : null : null
         };
     }
 
@@ -96,7 +97,6 @@ class indexDefinition {
             Stores: {},
             Suggestions: {},
             TermVectors: {},
-            TransformResults: null,
             Type: "Map",
             MaxIndexOutputsPerDocument:null
         });
@@ -121,7 +121,7 @@ class indexDefinition {
             .filter(name => this.analyzers[name] != null || this.indexes[name] != null || this.sortOptions[name] != null || this.stores[name] != null || this.suggestions[name] != null || this.termVectors[name] != null) // A field is configured and shows up in the index edit UI as a field when it appears in one of the aforementioned objects.
             .map(fieldName => {
                 var suggestion: any = this.suggestions && this.suggestions[fieldName] ? this.suggestions[fieldName] : {};
-                return new luceneField(fieldName, this.stores[fieldName], this.indexes[fieldName], this.sortOptions[fieldName], this.analyzers[fieldName], suggestion['Distance'], suggestion['Accuracy'], this.termVectors[fieldName]);
+                return new luceneField(fieldName, this.stores[fieldName], this.indexes[fieldName], this.sortOptions[fieldName], this.analyzers[fieldName], suggestion['Distance'], suggestion['Accuracy'], this.termVectors[fieldName], this.fields());
             });        
     }
 

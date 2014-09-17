@@ -3,6 +3,7 @@
 //     Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 // </copyright>
 //-----------------------------------------------------------------------
+using System;
 using System.ComponentModel.Composition;
 using System.IO;
 using System.Threading;
@@ -26,20 +27,11 @@ namespace Raven.Bundles.Replication.Triggers
 	[ExportMetadata("Bundle", "Replication")]
 	[ExportMetadata("Order", 10000)]
 	[InheritedExport(typeof(AbstractAttachmentDeleteTrigger))]
+    [Obsolete("Use RavenFS instead.")]
 	public class VirtualAttachmentDeleteTrigger : AbstractAttachmentDeleteTrigger
 	{
 		readonly ThreadLocal<RavenJArray> deletedHistory = new ThreadLocal<RavenJArray>();
-		internal ReplicationHiLo HiLo
-		{
-			get
-			{
-				return (ReplicationHiLo)Database.ExtensionsState.GetOrAdd(typeof(ReplicationHiLo).AssemblyQualifiedName, o => new ReplicationHiLo
-				{
-					Database = Database
-				});
-			}
-		}
-
+	
 		public override void OnDelete(string key)
 		{
 			using(Database.DisableAllTriggersForCurrentThread())
@@ -65,7 +57,7 @@ namespace Raven.Bundles.Replication.Triggers
 				{Constants.RavenDeleteMarker, true},
 				{Constants.RavenReplicationHistory, deletedHistory.Value},
 				{Constants.RavenReplicationSource, Database.TransactionalStorage.Id.ToString()},
-				{Constants.RavenReplicationVersion, HiLo.NextId()}
+				{Constants.RavenReplicationVersion, ReplicationHiLo.NextId(Database)}
 			};
 			deletedHistory.Value = null;
 			Database.TransactionalStorage.Batch(accessor =>

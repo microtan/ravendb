@@ -6,6 +6,7 @@ import document = require("models/document");
 class apiKey extends document {
 
     public name = ko.observable<string>();
+    savedName: string;
     secret = ko.observable<string>();
     fullApiKey: KnockoutComputed<string>;
     connectionString: KnockoutComputed<string>;
@@ -14,11 +15,13 @@ class apiKey extends document {
     public metadata: documentMetadata;
     databases = ko.observableArray<databaseAccess>();
     visible = ko.observable(true);
+    nameCustomValidity = ko.observable<string>('');
 
     constructor(dto: apiKeyDto) {
         super(dto);
 
         this.name(dto.Name);
+        this.savedName = dto.Name;
         this.secret(dto.Secret);
         this.enabled(dto.Enabled);
         this.databases(dto.Databases.map(d => new databaseAccess(d)));
@@ -33,7 +36,7 @@ class apiKey extends document {
         });
 
         this.connectionString = ko.computed(() => {
-            if (!this.fullApiKey()) {
+            if (!this.name() || !this.secret()) {
                 return "Requires name and secret";
             }
 
@@ -41,19 +44,16 @@ class apiKey extends document {
         });
 
         this.directLink = ko.computed(() => {
-            if (!this.fullApiKey()) {
+            if (!this.name() || !this.secret()) {
                 return "Requires name and secret";
             }
-
-
-
-            return appUrl.forServer() + "/raven/studio.html#/home?api-key=" + this.fullApiKey();
+            return appUrl.forServer() + "/studio/index.html#api-key=" + this.fullApiKey();
         });
     }
 
     static empty(): apiKey {
         return new apiKey({
-            Databases: [],
+            Databases: [databaseAccess.empty().toDto()],
             Enabled: false,
             Name: "",
             Secret: ""
@@ -94,22 +94,28 @@ class apiKey extends document {
         this.secret(randomSecret);
     }
 
-    addEmptyApiKeyDatabase() {
+    addEmptyDatabase() {
         var newItem: databaseAccessDto = { TenantId: '', Admin: false, ReadOnly: false };
         this.databases.push(new databaseAccess(newItem));
     }
 
-    removeApiKeyDatabase(database) {
+    removeDatabase(database) {
         this.databases.remove(database);
     }
 
     setIdFromName() {
         this.__metadata.id = "Raven/ApiKeys/" + this.name();
+
+        if (this.savedName !== this.name()) {
+            this.__metadata.etag = null;
+            this.savedName = this.name();
+        }
     }
 
-    isValid(): boolean {
+    isValid(index): boolean {
+        var isApiKeyNameValid = this.name().indexOf("\\") == -1;
         var requiredValues = [this.name(), this.secret()];
-        return requiredValues.every(v => v != null && v.length > 0);
+        return requiredValues.every(v => v != null && v.length > 0) && isApiKeyNameValid;
     }
 
     private static randomString(length: number, chars: string) {

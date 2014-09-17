@@ -30,7 +30,9 @@ namespace Raven.Tests.Common.Util
             totalRead = 0;
             totalWrite = 0;
             isRunning = true;
+#pragma warning disable 4014
             ListenToConnection();
+#pragma warning restore 4014
         }
 
         private async Task ListenToConnection()
@@ -38,7 +40,9 @@ namespace Raven.Tests.Common.Util
             while (isRunning)
             {
                 var client = await listener.AcceptTcpClientAsync();
+#pragma warning disable 4014
                 Task.Run(() => AcceptRequests(client));
+#pragma warning restore 4014
             }
         }
 
@@ -78,12 +82,41 @@ namespace Raven.Tests.Common.Util
                     }
 
                     d.Write(buffer, 0, read);
+                    if (IsEndOfChunkEncoding(buffer, 0, read))
+                    {
+                        break;
+                    }
                 }
             }
             catch (IOException)
             {
             }
 
+        }
+
+        private static bool IsEndOfChunkEncoding(byte[] buffer, int offset, int count)
+        {
+            // end of chunk encoding:
+            // 0x30, 0x0d, 0x0a, 0x0d, 0x0a
+            // 0     \r    \n    \r    \n
+
+            var expectedEnd = new byte[] { 0x30, 0x0d, 0x0a, 0x0d, 0x0a };
+            
+            if (count < expectedEnd.Length)
+            {
+                return false;
+            }
+
+            var bufferStartPos = offset + count - expectedEnd.Length;
+            for (var i = 0; i < expectedEnd.Length; i++)
+            {
+                if (buffer[bufferStartPos + i] != expectedEnd[i])
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         public void Dispose()

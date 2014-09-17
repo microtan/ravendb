@@ -1,31 +1,29 @@
-﻿namespace Raven.Database.Storage.Voron.StorageActions
+﻿using Raven.Abstractions;
+using Raven.Abstractions.Connection;
+using Raven.Abstractions.Data;
+using Raven.Abstractions.Exceptions;
+using Raven.Abstractions.Extensions;
+using Raven.Abstractions.Logging;
+using Raven.Abstractions.MEF;
+using Raven.Abstractions.Util;
+using Raven.Abstractions.Util.Streams;
+using Raven.Database.Impl;
+using Raven.Database.Plugins;
+using Raven.Database.Storage.Voron.Impl;
+using Raven.Json.Linq;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using Voron;
+using Voron.Impl;
+using Constants = Raven.Abstractions.Data.Constants;
+
+namespace Raven.Database.Storage.Voron.StorageActions
 {
-	using System.Linq;
-
-	using Raven.Abstractions.Logging;
-	using Raven.Abstractions.Util;
-
-	using System;
-	using System.Collections.Generic;
-	using System.IO;
-	using System.Text;
-
-	using Raven.Abstractions;
-	using Raven.Abstractions.Data;
-	using Raven.Abstractions.Exceptions;
-	using Raven.Abstractions.MEF;
-    using Raven.Abstractions.Util.Streams;
-	using Raven.Database.Impl;
-	using Raven.Database.Plugins;
-	using Raven.Database.Storage.Voron.Impl;
-	using Raven.Json.Linq;
-	using Raven.Abstractions.Extensions;
-
-	using global::Voron;
-	using global::Voron.Impl;
-
-	using Constants = Raven.Abstractions.Data.Constants;
-
 	public class DocumentsStorageActions : StorageActionsBase, IDocumentStorageActions
 	{
 		private readonly Reference<WriteBatch> writeBatch;
@@ -82,10 +80,10 @@
 
 					var key = GetKeyFromCurrent(iterator);
 
-					var document = DocumentByKey(key, null);
+					var document = DocumentByKey(key);
 					if (document == null) //precaution - should never be true
 					{
-						throw new ApplicationException(string.Format("Possible data corruption - the key = '{0}' was found in the documents indice, but matching document was not found.", key));
+						throw new InvalidDataException(string.Format("Possible data corruption - the key = '{0}' was found in the documents indice, but matching document was not found.", key));
 					}
 
 					yield return document;
@@ -95,7 +93,7 @@
 			}
 		}
 
-		public IEnumerable<JsonDocument> GetDocumentsAfter(Etag etag, int take, long? maxSize = null, Etag untilEtag = null)
+		public IEnumerable<JsonDocument> GetDocumentsAfter(Etag etag, int take, CancellationToken cancellationToken, long? maxSize = null, Etag untilEtag = null, TimeSpan? timeout = null)
 		{
 			if (take < 0)
 				throw new ArgumentException("must have zero or positive value", "take");
@@ -104,12 +102,21 @@
 			if (string.IsNullOrEmpty(etag))
 				throw new ArgumentNullException("etag");
 
+			Stopwatch duration = null;
+			if (timeout != null)
+				duration = Stopwatch.StartNew();
+
 			using (var iterator = tableStorage.Documents.GetIndex(Tables.Documents.Indices.KeyByEtag)
 											.Iterate(Snapshot, writeBatch.Value))
 			{
-				if (!iterator.Seek(Slice.BeforeAllKeys))
-				{
+				Slice slice = etag.ToString();
+				if (iterator.Seek(slice) == false) 
 					yield break;
+
+				if (iterator.CurrentKey.Equals(slice)) // need gt, not ge
+				{
+					if(iterator.MoveNext() == false)
+						yield break;
 				}
 
 				long fetchedDocumentTotalSize = 0;
@@ -117,14 +124,12 @@
 
 				do
 				{
-					if (iterator.CurrentKey == null || iterator.CurrentKey.Equals(Slice.Empty))
-						yield break;
+					cancellationToken.ThrowIfCancellationRequested();
 
+					
 					var docEtag = Etag.Parse(iterator.CurrentKey.ToString());
-
-					if (!EtagUtil.IsGreaterThan(docEtag, etag)) continue;
-
-					if (untilEtag != null && fetchedDocumentCount > 0)
+					
+					if (untilEtag != null)
 					{
 						if (EtagUtil.IsGreaterThan(docEtag, untilEtag))
 							yield break;
@@ -132,10 +137,15 @@
 
 					var key = GetKeyFromCurrent(iterator);
 
-					var document = DocumentByKey(key, null);
+					var document = DocumentByKey(key);
 					if (document == null) //precaution - should never be true
 					{
-						throw new ApplicationException(string.Format("Possible data corruption - the key = '{0}' was found in the documents indice, but matching document was not found", key));
+						throw new InvalidDataException(string.Format("Data corruption - the key = '{0}' was found in the documents indice, but matching document was not found", key));
+					}
+
+					if (!document.Etag.Equals(docEtag))
+					{
+						throw new InvalidDataException(string.Format("Data corruption - the etag for key ='{0}' is different between document and its indice",key));
 					}
 
 					fetchedDocumentTotalSize += document.SerializedSizeOnDisk;
@@ -148,6 +158,12 @@
 					}
 
 					yield return document;
+
+					if (timeout != null)
+					{
+						if (duration.Elapsed > timeout.Value)
+							yield break;
+					}
 				} while (iterator.MoveNext() && fetchedDocumentCount < take);
 			}
 		}
@@ -163,7 +179,7 @@
 			return key;
 		}
 
-		public IEnumerable<JsonDocument> GetDocumentsWithIdStartingWith(string idPrefix, int start, int take)
+		public IEnumerable<JsonDocument> GetDocumentsWithIdStartingWith(string idPrefix, int start, int take, string skipAfter)
 		{
 			if (string.IsNullOrEmpty(idPrefix))
 				throw new ArgumentNullException("idPrefix");
@@ -178,15 +194,20 @@
 			using (var iterator = tableStorage.Documents.Iterate(Snapshot, writeBatch.Value))
 			{
 				iterator.RequiredPrefix = idPrefix.ToLowerInvariant();
-				if (iterator.Seek(iterator.RequiredPrefix) == false || !iterator.Skip(start))
+				var seekStart = skipAfter == null ? iterator.RequiredPrefix : skipAfter.ToLowerInvariant();
+				if (iterator.Seek(seekStart) == false || !iterator.Skip(start))
 					yield break;
+
+				if (skipAfter != null && !iterator.MoveNext())
+					yield break; // move to the _next_ one
+					
 
 				var fetchedDocumentCount = 0;
 				do
 				{
 					var key = iterator.CurrentKey.ToString();
 
-					var fetchedDocument = DocumentByKey(key, null);
+					var fetchedDocument = DocumentByKey(key);
 					if (fetchedDocument == null) continue;
 
 					fetchedDocumentCount++;
@@ -200,7 +221,7 @@
 			return tableStorage.GetEntriesCount(tableStorage.Documents);
 		}
 
-		public JsonDocument DocumentByKey(string key, TransactionInformation transactionInformation)
+		public JsonDocument DocumentByKey(string key)
 		{
 			if (string.IsNullOrEmpty(key))
 			{
@@ -222,11 +243,10 @@
 				return null;
 			}
 
-			var documentData = ReadDocumentData(key, metadataDocument.Etag, metadataDocument.Metadata);
+			int sizeOnDisk;
+			var documentData = ReadDocumentData(key, metadataDocument.Etag, metadataDocument.Metadata,out sizeOnDisk);
 
 			logger.Debug("DocumentByKey() by key ='{0}'", key);
-
-			var docSize = tableStorage.Documents.GetDataSize(Snapshot, lowerKey);
 
 			var metadataSize = metadataIndex.GetDataSize(Snapshot, lowerKey);
 
@@ -236,12 +256,12 @@
 				Etag = metadataDocument.Etag,
 				Key = metadataDocument.Key, //original key - with user specified casing, etc.
 				Metadata = metadataDocument.Metadata,
-				SerializedSizeOnDisk = docSize + metadataSize,
+				SerializedSizeOnDisk = sizeOnDisk + metadataSize,
 				LastModified = metadataDocument.LastModified
 			};
 		}
 
-		public JsonDocumentMetadata DocumentMetadataByKey(string key, TransactionInformation transactionInformation)
+		public JsonDocumentMetadata DocumentMetadataByKey(string key)
 		{
 			if (string.IsNullOrEmpty(key))
 				throw new ArgumentNullException("key");
@@ -277,7 +297,7 @@
 			if (!metadataIndex.Contains(Snapshot, loweredKey, writeBatch.Value)) //data exists, but metadata is not --> precaution, should never be true
 			{
 				var errorString = string.Format("Document with key '{0}' was found, but its metadata wasn't found --> possible data corruption", key);
-				throw new ApplicationException(errorString);
+				throw new InvalidDataException(errorString);
 			}
 
 			var existingEtag = EnsureDocumentEtagMatch(key, etag, "DELETE");
@@ -391,7 +411,7 @@
 			if (etag == null) throw new ArgumentNullException("etag");
 
 			using (var iter = tableStorage.Documents.GetIndex(Tables.Documents.Indices.KeyByEtag)
-											.Iterate(Snapshot, writeBatch.Value))
+													.Iterate(Snapshot, writeBatch.Value))
 			{
 				if (!iter.Seek(etag.ToString()) &&
 					!iter.Seek(Slice.BeforeAllKeys)) //if parameter etag not found, scan from beginning. if empty --> return original etag
@@ -400,6 +420,7 @@
 				do
 				{
 					var docEtag = Etag.Parse(iter.CurrentKey.ToString());
+					
 					if (EtagUtil.IsGreaterThan(docEtag, etag))
 						return docEtag;
 				} while (iter.MoveNext());
@@ -530,7 +551,6 @@
 
             var dataStream = CreateStream();
 
-
 			using (var finalDataStream = documentCodecs.Aggregate((Stream) new UndisposableStream(dataStream),
 				(current, codec) => codec.Encode(loweredKey, data, metadata, current)))
 			{
@@ -539,7 +559,7 @@
 			}
  
 			dataStream.Position = 0;
-			tableStorage.Documents.Add(writeBatch.Value, loweredKey, dataStream, existingVersion); 
+			tableStorage.Documents.Add(writeBatch.Value, loweredKey, dataStream, existingVersion ?? 0); 
 
 			newEtag = uuidGenerator.CreateSequentialUuid(UuidType.Documents);
 			savedAt = SystemTime.UtcNow;
@@ -551,13 +571,18 @@
 			return isUpdated;
 		}
 
-		private RavenJObject ReadDocumentData(string key, Etag existingEtag, RavenJObject metadata)
+		private RavenJObject ReadDocumentData(string key, Etag existingEtag, RavenJObject metadata, out int size)
 		{
 			var loweredKey = CreateKey(key);
 
+			size = -1;
+			
 			var existingCachedDocument = documentCacher.GetCachedDocument(loweredKey, existingEtag);
 			if (existingCachedDocument != null)
+			{
+				size = existingCachedDocument.Size;
 				return existingCachedDocument.Document;
+			}
 
 			var documentReadResult = tableStorage.Documents.Read(Snapshot, loweredKey, writeBatch.Value);
 			if (documentReadResult == null) //non existing document
@@ -568,10 +593,15 @@
 				using (var decodedDocumentStream = documentCodecs.Aggregate(stream,
 						(current, codec) => codec.Value.Decode(loweredKey, metadata, current)))
 				{
+					var streamToUse = decodedDocumentStream;
+					if(stream != decodedDocumentStream)
+						streamToUse = new CountingStream(decodedDocumentStream);
+
 					var documentData = decodedDocumentStream.ToJObject();
 
-					documentCacher.SetCachedDocument(loweredKey, existingEtag, documentData, metadata, (int)stream.Length);
+					size = (int)Math.Max(stream.Position, streamToUse.Position);
 
+					documentCacher.SetCachedDocument(loweredKey, existingEtag, documentData, metadata, size);
 					return documentData;	
 				}
 			}
@@ -579,8 +609,57 @@
 
 		public DebugDocumentStats GetDocumentStatsVerySlowly()
 		{
-			//TODO : write implementation _before_ finishing merge of Voron stuff into 3.0
-			throw new NotImplementedException();
+			var sp = Stopwatch.StartNew();
+			var stat = new DebugDocumentStats { Total = GetDocumentsCount() };
+
+			var documentsByEtag = tableStorage.Documents.GetIndex(Tables.Documents.Indices.KeyByEtag);
+			using (var iterator = documentsByEtag.Iterate(Snapshot, writeBatch.Value))
+			{
+				if (!iterator.Seek(Slice.BeforeAllKeys))
+				{
+					stat.TimeToGenerate = sp.Elapsed;
+					return stat;
+				}
+
+				do
+				{
+					var key = GetKeyFromCurrent(iterator);
+                    var doc = DocumentByKey(key);
+                    var size = doc.SerializedSizeOnDisk;
+				    stat.TotalSize += size;
+				    if (key.StartsWith("Raven/", StringComparison.OrdinalIgnoreCase))
+				    {
+                        stat.System++;
+				        stat.SystemSize += size;
+				    }
+						
+
+					var metadata = ReadDocumentMetadata(key);
+
+					var entityName = metadata.Metadata.Value<string>(Constants.RavenEntityName);
+				    if (string.IsNullOrEmpty(entityName))
+				    {
+                        stat.NoCollection++;
+				        stat.NoCollectionSize += size;
+				    }
+				        
+				    else
+				    {
+  
+                        stat.IncrementCollection(entityName, size);
+ 				    }
+						
+
+					if (metadata.Metadata.ContainsKey(Constants.RavenDeleteMarker))
+						stat.Tombstones++;
+
+				}
+				while (iterator.MoveNext());
+                var sortedStat = stat.Collections.OrderByDescending(x => x.Value.Size).ToDictionary(x => x.Key, x => x.Value);
+                stat.TimeToGenerate = sp.Elapsed;
+			    stat.Collections = sortedStat;
+                return stat;
+			}
 		}
 	}
 }

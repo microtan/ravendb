@@ -10,58 +10,60 @@ namespace Voron.Trees
 	{
 		private readonly Tree _tree;
 		private readonly Transaction _tx;
-		private readonly SliceComparer _cmp;
 		private Cursor _cursor;
 		private Page _currentPage;
-		private readonly Slice _currentKey = new Slice(SliceOptions.Key);
+		private Slice _currentKey = new Slice(SliceOptions.Key);
+		private MemorySlice _currentInternalKey;
 
-		public TreeIterator(Tree tree, Transaction tx, SliceComparer cmp)
+		public TreeIterator(Tree tree, Transaction tx)
 		{
 			_tree = tree;
 			_tx = tx;
-			_cmp = cmp;
-		}
 
+			if (tree.KeysPrefixing)
+				_currentInternalKey = new PrefixedSlice(SliceOptions.Key);
+			else
+				_currentInternalKey = new Slice(SliceOptions.Key); 
+		}
 
 		public int GetCurrentDataSize()
 		{
 			return NodeHeader.GetDataSize(_tx, Current);
 		}
 
-		public IIterator CreateMutliValueIterator()
-		{
-			var item = Current;
-			if (item->Flags == NodeFlags.MultiValuePageRef)
-			{
-				var tree = _tree.OpenOrCreateMultiValueTree(_tx, _currentKey, item);
-
-				return tree.Iterate(_tx);
-			}
-
-			return new SingleEntryIterator(_cmp, item, _tx);
-		}
-
 		public bool Seek(Slice key)
 		{
 			Lazy<Cursor> lazy;
-			_currentPage = _tree.FindPageFor(_tx, key, out lazy);
+			NodeHeader* node;
+			_currentPage = _tree.FindPageFor(key, out node, out lazy);
 			_cursor = lazy.Value;
 			_cursor.Pop();
-			var node = _currentPage.Search(key, _cmp);
-			if (node == null)
-			{
-				return false;
-			}
-			_currentKey.Set(node);
-			return this.ValidateCurrentKey(Current, _cmp);
+
+		    if (node != null)
+		    {
+			    _currentPage.SetNodeKey(node, ref _currentInternalKey);
+				_currentKey = _currentInternalKey.ToSlice();
+				return this.ValidateCurrentKey(Current, _currentPage);
+		    }
+		    
+            // The key is not found in the db, but we are Seek()ing for equals or starts with.
+		    // We know that the exact value isn't there, but it is possible that the next page has values 
+		    // that is actually greater than the key, so we need to check it as well.
+
+		    _currentPage.LastSearchPosition = _currentPage.NumberOfEntries; // force next MoveNext to move to the next _page_.
+		    return MoveNext();
 		}
 
 		public Slice CurrentKey
 		{
 			get
 			{
-				if (_currentPage == null || _currentPage.LastSearchPosition >= _currentPage.NumberOfEntries)
+				if (_currentPage == null)
 					throw new InvalidOperationException("No current page was set");
+
+				if (_currentPage.LastSearchPosition >= _currentPage.NumberOfEntries)
+					throw new InvalidOperationException(string.Format("Current page is invalid. Search position ({0}) exceeds number of entries ({1}). Page: {2}.", _currentPage.LastSearchPosition, _currentPage.NumberOfEntries, _currentPage));
+					
 				return _currentKey;
 			}
 		}
@@ -72,7 +74,7 @@ namespace Voron.Trees
 		/// </summary>
 		public bool DeleteCurrentAndMoveNext()
 		{
-			_tree.Delete(_tx, CurrentKey);
+			_tree.Delete(CurrentKey);
 			return MovePrev() && MoveNext();
 		}
 
@@ -80,8 +82,12 @@ namespace Voron.Trees
 		{
 			get
 			{
-				if (_currentPage == null || _currentPage.LastSearchPosition >= _currentPage.NumberOfEntries)
+				if (_currentPage == null)
 					throw new InvalidOperationException("No current page was set");
+
+				if (_currentPage.LastSearchPosition >= _currentPage.NumberOfEntries)
+					throw new InvalidOperationException(string.Format("Current page is invalid. Search position ({0}) exceeds number of entries ({1}). Page: {2}.", _currentPage.LastSearchPosition, _currentPage.NumberOfEntries, _currentPage));
+					
 				return _currentPage.GetNode(_currentPage.LastSearchPosition);
 			}
 		}
@@ -102,9 +108,11 @@ namespace Voron.Trees
 						_currentPage.LastSearchPosition = _currentPage.NumberOfEntries - 1;
 					}
 					var current = _currentPage.GetNode(_currentPage.LastSearchPosition);
-					if (this.ValidateCurrentKey(current, _cmp) == false)
+					if (this.ValidateCurrentKey(current, _currentPage) == false)
 						return false;
-					_currentKey.Set(current);
+
+					_currentPage.SetNodeKey(current, ref _currentInternalKey);
+					_currentKey = _currentInternalKey.ToSlice();
 					return true;// there is another entry in this page
 				}
 				if (_cursor.PageCount == 0)
@@ -132,9 +140,11 @@ namespace Voron.Trees
 						_currentPage.LastSearchPosition = 0;
 					}
 					var current = _currentPage.GetNode(_currentPage.LastSearchPosition);
-					if (this.ValidateCurrentKey(current, _cmp) == false)
+					if (this.ValidateCurrentKey(current, _currentPage) == false)
 						return false;
-					_currentKey.Set(current);
+
+					_currentPage.SetNodeKey(current, ref _currentInternalKey);
+					_currentKey = _currentInternalKey.ToSlice();
 					return true;// there is another entry in this page
 				}
 				if (_cursor.PageCount == 0)
@@ -157,23 +167,12 @@ namespace Voron.Trees
 				}
 			}
 
-			return _currentPage != null && this.ValidateCurrentKey(Current, _cmp);
+			return _currentPage != null && this.ValidateCurrentKey(Current, _currentPage);
 		}
 
 		public ValueReader CreateReaderForCurrent()
 		{
 			return NodeHeader.Reader(_tx, Current);
-		}
-
-		public IEnumerable<string> DumpValues()
-		{
-			if(Seek(Slice.BeforeAllKeys) == false)
-				yield break;
-
-			do
-			{
-				yield return CurrentKey.ToString();
-			} while (MoveNext());
 		}
 
 		public void Dispose()
@@ -192,18 +191,29 @@ namespace Voron.Trees
 
 	public static class IteratorExtensions
 	{
-		public unsafe static bool ValidateCurrentKey(this IIterator self, NodeHeader* node, SliceComparer cmp)
+		public static IEnumerable<string> DumpValues(this IIterator self)
+		{
+			if (self.Seek(Slice.BeforeAllKeys) == false)
+				yield break;
+
+			do
+			{
+				yield return self.CurrentKey.ToString();
+			} while (self.MoveNext());
+		}
+
+		public unsafe static bool ValidateCurrentKey(this IIterator self, NodeHeader* node, Page page)
 		{
 			if (self.RequiredPrefix != null)
 			{
-				var currentKey = new Slice(node);
-				if (currentKey.StartsWith(self.RequiredPrefix, cmp) == false)
+				var currentKey = page.GetNodeKey(node);
+				if (currentKey.StartsWith(self.RequiredPrefix) == false)
 					return false;
 			}
 			if (self.MaxKey != null)
 			{
-				var currentKey = new Slice(node);
-				if (currentKey.Compare(self.MaxKey, cmp) >= 0)
+				var currentKey = page.GetNodeKey(node);
+				if (currentKey.Compare(self.MaxKey) >= 0)
 					return false;
 			}
 			return true;

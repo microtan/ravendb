@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -10,14 +11,21 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Http;
+using Lucene.Net.Documents;
 using Raven.Abstractions;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Exceptions;
 using Raven.Abstractions.Extensions;
 using Raven.Abstractions.Indexing;
 using Raven.Abstractions.Logging;
+using Raven.Abstractions.MEF;
+using Raven.Client.Indexes;
 using Raven.Database.Data;
 using Raven.Database.Extensions;
+using Raven.Database.Indexing;
+using Raven.Database.Linq;
+using Raven.Database.Linq.PrivateExtensions;
+using Raven.Database.Plugins;
 using Raven.Database.Queries;
 using Raven.Database.Server.WebApi.Attributes;
 using Raven.Database.Storage;
@@ -49,7 +57,7 @@ namespace Raven.Database.Server.Controllers
 		public HttpResponseMessage IndexGet(string id)
 		{
             using (var cts = new CancellationTokenSource())
-            using (cts.TimeoutAfter(DatabasesLandlord.SystemConfiguration.DatbaseOperationTimeout))
+            using (cts.TimeoutAfter(DatabasesLandlord.SystemConfiguration.DatabaseOperationTimeout))
             {
                 var index = id;
                 if (string.IsNullOrEmpty(GetQueryStringValue("definition")) == false) 
@@ -74,9 +82,18 @@ namespace Raven.Database.Server.Controllers
 		public async Task<HttpResponseMessage> IndexPut(string id)
 		{
 			var index = id;
-			var data = await ReadJsonObjectAsync<IndexDefinition>();
+			var jsonIndex = await ReadJsonAsync();
+
+			var data = jsonIndex.JsonDeserialization<IndexDefinition>();
+
 			if (data == null || (data.Map == null && (data.Maps == null || data.Maps.Count == 0)))
 				return GetMessageWithString("Expected json document with 'Map' or 'Maps' property", HttpStatusCode.BadRequest);
+
+			// older clients (pre 3.0) might try to create the index without MaxIndexOutputsPerDocument set
+			// in order to ensure that they don't reset the default value for old clients, we force the default
+			// value to maintain the existing behavior
+			if (jsonIndex.ContainsKey("MaxIndexOutputsPerDocument") == false)
+				data.MaxIndexOutputsPerDocument = 16*1024;
 
 			try
 			{
@@ -119,6 +136,15 @@ namespace Raven.Database.Server.Controllers
 				Database.IndexStorage.ForceWriteToDisk(index);
 				return GetEmptyMessage();
 			}
+
+            if ("hasChanged".Equals(GetQueryStringValue("op"), StringComparison.InvariantCultureIgnoreCase))
+            {
+                var data = await ReadJsonObjectAsync<IndexDefinition>();
+                if (data == null || (data.Map == null && (data.Maps == null || data.Maps.Count == 0)))
+                    return GetMessageWithString("Expected json document with 'Map' or 'Maps' property", HttpStatusCode.BadRequest);
+
+                return GetMessageWithObject(new { Name = index, Changed = Database.Indexes.IndexHasChanged(index, data) });
+            }
 
 			if ("lockModeChange".Equals(GetQueryStringValue("op"), StringComparison.InvariantCultureIgnoreCase))
 				return HandleIndexLockModeChange(index);
@@ -178,6 +204,21 @@ namespace Raven.Database.Server.Controllers
 			return GetEmptyMessage();
 		}
 
+		[HttpGet]
+        [Route("c-sharp-index-definition/{*fullIndexName}")]
+		[Route("databases/{databaseName}/c-sharp-index-definition/{*fullIndexName}")]
+		public HttpResponseMessage GenerateCSharpIndexDefinition(string fullIndexName)
+		{
+			var indexDefinition = Database.Indexes.GetIndexDefinition(fullIndexName);
+			if (indexDefinition == null)
+				return GetEmptyMessage(HttpStatusCode.NotFound);
+
+		    var text = new IndexDefinitionCodeGenerator(indexDefinition).Generate();
+
+		    return GetMessageWithObject(text);
+		}
+
+	
 		private HttpResponseMessage GetIndexDefinition(string index)
 		{
 			var indexDefinition = Database.Indexes.GetIndexDefinition(index);
@@ -198,13 +239,15 @@ namespace Raven.Database.Server.Controllers
 			if (viewGenerator == null)
 				return GetEmptyMessage(HttpStatusCode.NotFound);
 
-			return GetMessageWithObject(viewGenerator.SourceCode);
+			return GetMessageWithString(viewGenerator.SourceCode);
 		}
 
 		private HttpResponseMessage DebugIndex(string index)
 		{
 			switch (GetQueryStringValue("debug").ToLowerInvariant())
 			{
+                case "docs":
+			        return GetDocsStartsWith(index);
 				case "map":
 					return GetIndexMappedResult(index);
 				case "reduce":
@@ -222,6 +265,22 @@ namespace Raven.Database.Server.Controllers
 			}
 		}
 
+        private HttpResponseMessage GetDocsStartsWith(string index)
+        {
+            var definition = Database.IndexDefinitionStorage.GetIndexDefinition(index);
+            if (definition == null)
+                return GetEmptyMessage(HttpStatusCode.NotFound);
+
+            var prefix = GetQueryStringValue("startsWith");
+            List<string> keys = null;
+            Database.TransactionalStorage.Batch(accessor =>
+            {
+                keys = accessor.MapReduce.GetSourcesForIndexForDebug(definition.IndexId, prefix, GetPageSize(Database.Configuration.MaxPageSize))
+                    .ToList(); 
+            });
+            return GetMessageWithObject(new { keys.Count, Results = keys });
+        }
+
 		private HttpResponseMessage GetIndexMappedResult(string index)
 		{
 			var definition = Database.IndexDefinitionStorage.GetIndexDefinition(index);
@@ -231,18 +290,21 @@ namespace Raven.Database.Server.Controllers
 			var key = GetQueryStringValue("key");
 			if (string.IsNullOrEmpty(key))
 			{
+                var startsWith = GetQueryStringValue("startsWith");
+				var sourceId = GetQueryStringValue("sourceId");
+
 				List<string> keys = null;
 				Database.TransactionalStorage.Batch(accessor =>
 				{
-					keys = accessor.MapReduce.GetKeysForIndexForDebug(definition.IndexId, GetStart(), GetPageSize(Database.Configuration.MaxPageSize))
+                    keys = accessor.MapReduce.GetKeysForIndexForDebug(definition.IndexId, startsWith, sourceId, GetStart(), GetPageSize(Database.Configuration.MaxPageSize))
 						.ToList();
 				});
 
 				return GetMessageWithObject(new
 				{
-					Error = "Query string argument \'key\' is required",
-					Keys = keys
-				}, HttpStatusCode.BadRequest);
+					keys.Count,
+					Results = keys
+				});
 			}
 
 			List<MappedResultInfo> mappedResult = null;
@@ -253,9 +315,9 @@ namespace Raven.Database.Server.Controllers
 			});
 			return GetMessageWithObject(new
 			{
-				Error = "Query string argument \'key\' is required",
+				mappedResult.Count,
 				Results = mappedResult
-			}, HttpStatusCode.BadRequest);
+			});
 		}
 
 		private HttpResponseMessage GetExplanation(string index)
@@ -293,7 +355,7 @@ namespace Raven.Database.Server.Controllers
 			var includes = GetQueryStringValues("include") ?? new string[0];
 			var loadedIds = new HashSet<string>(
 				queryResult.Results
-					.Where(x => x["@metadata"] != null)
+					.Where(x => x != null && x["@metadata"] != null)
 					.Select(x => x["@metadata"].Value<string>("@id"))
 					.Where(x => x != null)
 				);
@@ -305,10 +367,7 @@ namespace Raven.Database.Server.Controllers
 			}
 			command.AlsoInclude(queryResult.IdsToInclude);
 
-			if (queryResult.NonAuthoritativeInformation)
-				return GetEmptyMessage(HttpStatusCode.NonAuthoritativeInformation, indexEtag);
-		    
-			return GetMessageWithObject(queryResult, HttpStatusCode.OK, indexEtag);
+			return GetMessageWithObject(queryResult, queryResult.NonAuthoritativeInformation ? HttpStatusCode.NonAuthoritativeInformation : HttpStatusCode.OK, indexEtag);
 		}
 
 		private QueryResultWithIncludes ExecuteQuery(string index, out Etag indexEtag, HttpResponseMessage msg, CancellationToken token)
@@ -542,18 +601,39 @@ namespace Raven.Database.Server.Controllers
 		private HttpResponseMessage GetIndexEntries(string index)
 		{
 			var indexQuery = GetIndexQuery(Database.Configuration.MaxPageSize);
+			var reduceKeysArray = GetQueryStringValue("reduceKeys");
+
+			if (string.IsNullOrEmpty(indexQuery.Query) == false && string.IsNullOrEmpty(reduceKeysArray))
+			{
+				return GetMessageWithObject(new
+				{
+					Error = "Cannot specity 'query' and 'reducedKeys' at the same time"
+				}, HttpStatusCode.BadRequest);
+			}
+
+			List<string> reduceKeys = null;
+
+			if (reduceKeysArray != null)
+			{
+                reduceKeys = reduceKeysArray.Split(',').Select(x => x.Trim()).ToList();
+                // overwrite indexQueryPagining as __reduce_key field is not indexed, and we don't have simple method to obtain column alias
+			    indexQuery.Start = 0;
+			    indexQuery.PageSize = int.MaxValue;
+			}
+				
+
 			var totalResults = new Reference<int>();
 
 			var isDynamic = index.StartsWith("dynamic/", StringComparison.OrdinalIgnoreCase)
 							|| index.Equals("dynamic", StringComparison.OrdinalIgnoreCase);
 
 			if (isDynamic)
-				return GetIndexEntriesForDynamicIndex(index, indexQuery, totalResults);
+				return GetIndexEntriesForDynamicIndex(index, indexQuery, reduceKeys, totalResults);
 
-			return GetIndexEntriesForExistingIndex(index, indexQuery, totalResults);
+			return GetIndexEntriesForExistingIndex(index, indexQuery, reduceKeys, totalResults);
 		}
 
-		private HttpResponseMessage GetIndexEntriesForDynamicIndex(string index, IndexQuery indexQuery, Reference<int> totalResults)
+		private HttpResponseMessage GetIndexEntriesForDynamicIndex(string index, IndexQuery indexQuery, List<string> reduceKeys, Reference<int> totalResults)
 		{
 			string entityName;
 			var dynamicIndexName = GetDynamicIndexName(index, indexQuery, out entityName);
@@ -561,14 +641,14 @@ namespace Raven.Database.Server.Controllers
 			if (dynamicIndexName == null)
 				return GetEmptyMessage(HttpStatusCode.NotFound);
 
-			return GetIndexEntriesForExistingIndex(dynamicIndexName, indexQuery, totalResults);
+			return GetIndexEntriesForExistingIndex(dynamicIndexName, indexQuery, reduceKeys, totalResults);
 		}
 
-		private HttpResponseMessage GetIndexEntriesForExistingIndex(string index, IndexQuery indexQuery, Reference<int> totalResults)
+		private HttpResponseMessage GetIndexEntriesForExistingIndex(string index, IndexQuery indexQuery, List<string> reduceKeys, Reference<int> totalResults)
 		{
 			var results = Database
 					.IndexStorage
-					.IndexEntires(index, indexQuery, Database.IndexQueryTriggers, totalResults)
+					.IndexEntires(index, indexQuery, reduceKeys, Database.IndexQueryTriggers, totalResults)
 					.ToArray();
 
 			Tuple<DateTime, Etag> indexTimestamp = null;
@@ -611,10 +691,12 @@ namespace Raven.Database.Server.Controllers
 		private HttpResponseMessage GetIndexStats(string index)
 		{
 			IndexStats stats = null;
+			Etag lastEtag = null;
 			var instance = Database.IndexStorage.GetIndexInstance(index);
 			Database.TransactionalStorage.Batch(accessor =>
 			{
 				stats = accessor.Indexing.GetIndexStats(instance.indexId);
+				lastEtag = accessor.Staleness.GetMostRecentDocumentEtag();
 			});
 
 			if (stats == null)
@@ -622,7 +704,7 @@ namespace Raven.Database.Server.Controllers
 
 			stats.LastQueryTimestamp = Database.IndexStorage.GetLastQueryTime(instance.indexId);
 			stats.Performance = Database.IndexStorage.GetIndexingPerformance(instance.indexId);
-
+			stats.SetLastDocumentEtag(lastEtag);
 			return GetMessageWithObject(stats);
 		}
 	}

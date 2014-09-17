@@ -11,6 +11,7 @@
     <AssemblyName>Raven.SlowTests</AssemblyName>
     <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
+    <TargetFrameworkProfile />
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -20,6 +21,7 @@
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <NoWarn>618</NoWarn>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -59,6 +61,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Bugs\AsyncSetBasedOps.cs" />
     <Compile Include="Bugs\ManyDocumentWithMapReduce.cs" />
     <Compile Include="Bugs\TimeoutTester.cs" />
     <Compile Include="Bugs\VeryBigResultSet.cs" />
@@ -68,6 +71,7 @@
     <Compile Include="Bundles\Replication\Bugs\AddingAndDeletingRemote.cs" />
     <Compile Include="Bundles\Replication\ReadStriping.cs" />
     <Compile Include="Faceted\FacetPaging.cs" />
+    <Compile Include="Indexes\MapReduceIndexOnLargeDataSet.cs" />
     <Compile Include="Issues\RavenDB_1033.cs" />
     <Compile Include="Issues\RavenDB_1280.cs" />
     <Compile Include="Issues\RavenDB_1280_ReOpen.cs" />
@@ -77,6 +81,9 @@
     <Compile Include="Issues\RavenDB_1603.cs" />
     <Compile Include="Issues\RavenDB_1754.cs" />
     <Compile Include="Issues\RavenDB_1829.cs" />
+    <Compile Include="Issues\RavenDB_2134.cs" />
+    <Compile Include="Issues\RavenDB_2143.cs" />
+    <Compile Include="Issues\RavenDB_2660 .cs" />
     <Compile Include="Issues\RavenDB_560.cs" />
     <Compile Include="MailingList\FailingBulkInsertTest.cs" />
     <Compile Include="MailingList\Jalchr.cs" />
@@ -89,7 +96,6 @@
     <Compile Include="Security\OAuth\ReplicationWithOAuthMultipleKeys.cs" />
     <Compile Include="Storage\Voron\DocumentsStorageActionsTests.cs" />
     <Compile Include="Synchronization\IndexationTests.cs" />
-    <Compile Include="Syncronization\IndexationTests.cs" />
     <Compile Include="Voron\Class1.cs" />
   </ItemGroup>
   <ItemGroup>
@@ -120,6 +126,10 @@
       <Project>{381234CC-8AA7-41FF-8CAD-22330E15F993}</Project>
       <Name>Raven.Tests.Common</Name>
     </ProjectReference>
+    <ProjectReference Include="..\Raven.Tests.Helpers\Raven.Tests.Helpers.csproj">
+      <Project>{1B88473F-743B-4F6B-8E5E-97BB816E6C68}</Project>
+      <Name>Raven.Tests.Helpers</Name>
+    </ProjectReference>
     <ProjectReference Include="..\Raven.Tests.Issues\Raven.Tests.Issues.csproj">
       <Project>{d8bdd718-6e21-41b7-9c41-d0fbe0532df4}</Project>
       <Name>Raven.Tests.Issues</Name>
@@ -132,7 +142,7 @@
   <ItemGroup>
     <Service Include="{82A7F48D-3B50-4B1E-B82E-3ADA8210C358}" />
   </ItemGroup>
-  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" Condition="'$(TasksTargetsImported)' == ''" />
   <PropertyGroup>
     <PreBuildEvent>
     </PreBuildEvent>
@@ -147,4 +157,5 @@
   <Target Name="AfterBuild">
   </Target>
   -->
+  <Import Project="..\Imports\Tasks.targets" Condition="'$(TasksTargetsImported)' == ''" />
 </Project>

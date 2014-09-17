@@ -1,18 +1,19 @@
 ﻿using System.Collections.Generic;
 using Raven.Database.Server.RavenFS.Storage;
+using Raven.Abstractions.FileSystem;
 
 namespace Raven.Database.Server.RavenFS.Synchronization
 {
-	internal class FileHeaderNameEqualityComparer : IEqualityComparer<FileHeader>
+    internal class FileHeaderNameEqualityComparer : IEqualityComparer<FileHeader>
 	{
-		public bool Equals(FileHeader x, FileHeader y)
+        public bool Equals(FileHeader x, FileHeader y)
 		{
-			return x.Name == y.Name;
+            return x.FullPath == y.FullPath;
 		}
 
-		public int GetHashCode(FileHeader header)
+        public int GetHashCode(FileHeader header)
 		{
-			return (header.Name != null ? header.Name.GetHashCode() : 0);
+            return (header.FullPath != null ? header.FullPath.GetHashCode() : 0);
 		}
 	}
 }

@@ -30,12 +30,12 @@ namespace Raven.Tests.Document
 {
 	public class DocumentStoreServerTests : RavenTest
 	{
-		private readonly IDocumentStore documentStore;
+        private readonly IDocumentStore documentStore;
 
-		public DocumentStoreServerTests()
-		{
-			documentStore = NewRemoteDocumentStore();
-		}
+        public DocumentStoreServerTests()
+        {
+            documentStore = NewRemoteDocumentStore();
+        }
 
 		[Fact]
 		public void Should_insert_into_db_and_set_id()
@@ -58,6 +58,7 @@ namespace Raven.Tests.Document
 		[Fact]
 		public void Can_get_index_def()
 		{
+			documentStore.Conventions.PrettifyGeneratedLinqExpressions = false;
 			documentStore.DatabaseCommands.PutIndex("Companies/Name", new IndexDefinitionBuilder<Company, Company>
 			                                                          	{
 			                                                          		Map = companies => from c in companies
@@ -580,7 +581,7 @@ namespace Raven.Tests.Document
 
 			using (var session = documentStore.OpenSession())
 			{
-				var companies = session.Load<Company>("1", "2");
+				var companies = session.Load<Company>(new [] { "1", "2" });
 				Assert.Equal(2, companies.Length);
 				Assert.Equal("Company A", companies[0].Name);
 				Assert.Equal("Company B", companies[1].Name);

@@ -22,11 +22,11 @@ namespace Raven.SlowTests.Issues
 		protected readonly string path;
 		protected readonly DocumentStore documentStore;
 		private readonly RavenDbServer ravenDbServer;
-		private bool closed = false;
 
 		public RavenDB_1594()
 		{
 		    path = NewDataPath();
+		    pathsToDelete.Add("~/Databases");
 			Raven.Database.Extensions.IOExtensions.DeleteDirectory(path);
 			var config = new Raven.Database.Config.RavenConfiguration
 			             	{
@@ -91,11 +91,11 @@ namespace Raven.SlowTests.Issues
 				Id = "DestDB",
 				Settings = {{"Raven/DataDir", "~\\Databases\\DestDB"}}
 			});
-			//setup periodic backup
+			//setup periodic export
 			using (var session = documentStore.OpenSession("SourceDB"))
 			{
-				session.Store(new PeriodicBackupSetup {LocalFolderName = backupFolder.FullName, IntervalMilliseconds = 500},
-					PeriodicBackupSetup.RavenDocumentKey);
+				session.Store(new PeriodicExportSetup {LocalFolderName = backupFolder.FullName, IntervalMilliseconds = 500},
+					PeriodicExportSetup.RavenDocumentKey);
 				session.SaveChanges();
 			}
 
@@ -112,9 +112,8 @@ namespace Raven.SlowTests.Issues
 			}
 
 			var connection = new RavenConnectionStringOptions {Url = documentStore.Url, DefaultDatabase = "DestDB"};
-			var smugglerApi = new SmugglerApi();
-			await
-				smugglerApi.ImportData(new SmugglerImportOptions { FromFile = backupFolder.FullName, To = connection }, new SmugglerOptions { Incremental = true });
+			var smugglerApi = new SmugglerApi {SmugglerOptions = {Incremental = true}};
+			await smugglerApi.ImportData(new SmugglerImportOptions { FromFile = backupFolder.FullName, To = connection });
 
 			using (var session = documentStore.OpenSession())
 			{

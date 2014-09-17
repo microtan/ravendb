@@ -6,6 +6,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using Raven.Abstractions.Data;
 using Raven.Imports.Newtonsoft.Json;
 using Raven.Imports.Newtonsoft.Json.Linq;
@@ -16,34 +17,73 @@ using System.Linq;
 namespace Raven.Abstractions.Smuggler
 {
     using System.Text.RegularExpressions;
+
     public class SmugglerOptions
-    {
+	{
+        public const int DefaultDocumentSizeInChunkLimitInBytes = 8 * 1024 * 1024;
+	    private int chunkSize;
         private int batchSize;
 	    private TimeSpan timeout;
+	    private long? totalDocumentSizeInChunkLimitInBytes;
 
-	    public SmugglerOptions()
-        {
-            Filters = new List<FilterSetting>();
-            BatchSize = 1024;
+		public SmugglerOptions()
+		{
+			Filters = new List<FilterSetting>();
+            BatchSize = 16 * 1024;
+		    ChunkSize = int.MaxValue;
             OperateOnTypes = ItemType.Indexes | ItemType.Documents | ItemType.Attachments | ItemType.Transformers;
             Timeout = TimeSpan.FromSeconds(30);
-            ShouldExcludeExpired = false;
+			ShouldExcludeExpired = false;
+			Limit = int.MaxValue;
 	        StartDocsDeletionEtag = StartAttachmentsDeletionEtag = StartAttachmentsEtag = StartDocsEtag = Etag.Empty;
-            Limit = int.MaxValue;
 		    MaxStepsForTransformScript = 10*1000;
 	        ExportDeletions = false;
-        }
+		    TotalDocumentSizeInChunkLimitInBytes = DefaultDocumentSizeInChunkLimitInBytes;
+			CancelToken = new CancellationTokenSource();
+		}
 
-        public bool ExportDeletions { get; set; }
+		public CancellationTokenSource CancelToken;
 
-        /// <summary>
+		/// <summary>
+		/// Limit total size of documents in each chunk
+		/// </summary>
+		public long? TotalDocumentSizeInChunkLimitInBytes
+		{
+			get { return totalDocumentSizeInChunkLimitInBytes; }
+			set
+			{
+				if (value < 1024)
+					throw new InvalidOperationException("Total document size in a chunk cannot be less than 1kb");
+
+				totalDocumentSizeInChunkLimitInBytes = value;
+			}
+		}
+
+		/// <summary>
+		/// The number of documents to import before new connection will be opened.
+		/// </summary>
+		public int ChunkSize
+		{
+			get { return chunkSize; }
+			set
+			{
+				if (value < 1)
+					throw new InvalidOperationException("Chunk size cannot be zero or a negative number");
+				chunkSize = value;
+			}
+		}
+
+	    public bool ExportDeletions { get; set; }
+
+		/// <summary>
         /// Start exporting from the specified documents etag
-        /// </summary>
+		/// </summary>
         public Etag StartDocsEtag { get; set; }
 
         /// <summary>
         /// Start exporting from the specified attachments etag
         /// </summary>
+        [Obsolete("Use RavenFS instead.")]
         public Etag StartAttachmentsEtag { get; set; }
 
         /// <summary>
@@ -54,34 +94,35 @@ namespace Raven.Abstractions.Smuggler
         /// <summary>
         /// Start exporting from the specified attachment deletion etag
         /// </summary>
+        [Obsolete("Use RavenFS instead.")]
         public Etag StartAttachmentsDeletionEtag { get; set; }
 
         /// <summary>
         /// The number of document or attachments or indexes or transformers to load in each call to the RavenDB database.
         /// </summary>
         public int BatchSize
-        {
+		{
             get { return batchSize; }
             set
-            {
+			{
                 if (value < 1)
                     throw new InvalidOperationException("Batch size cannot be zero or a negative number");
                 batchSize = value;
-            }
-        }
+			}
+		}
 
-        /// <summary>
+		/// <summary>
         /// Specify the types to operate on. You can specify more than one type by combining items with the OR parameter.
         /// Default is all items.
         /// Usage example: OperateOnTypes = ItemType.Indexes | ItemType.Transformers | ItemType.Documents | ItemType.Attachments.
-        /// </summary>
+		/// </summary>
         public ItemType OperateOnTypes { get; set; }
 
         public int Limit { get; set; }
 
-        /// <summary>
+		/// <summary>
         /// Filters to use to filter the documents that we will export/import.
-        /// </summary>
+		/// </summary>
         public List<FilterSetting> Filters { get; set; }
 
 		public virtual bool MatchFilters(RavenJToken item)
@@ -113,35 +154,35 @@ namespace Raven.Abstractions.Smuggler
 			return true;
 		}
 
-        /// <summary>
-        /// Should we exclude any documents which have already expired by checking the expiration meta property created by the expiration bundle
-        /// </summary>
-        public bool ShouldExcludeExpired { get; set; }
+		/// <summary>
+		/// Should we exclude any documents which have already expired by checking the expiration meta property created by the expiration bundle
+		/// </summary>
+		public bool ShouldExcludeExpired { get; set; }
 
-        public virtual bool ExcludeExpired(RavenJToken item, DateTime now)
-        {
-            var metadata = item.Value<RavenJObject>("@metadata");
+		public virtual bool ExcludeExpired(RavenJToken item, DateTime now)
+		{
+			var metadata = item.Value<RavenJObject>("@metadata");
 
-            const string RavenExpirationDate = "Raven-Expiration-Date";
+			const string RavenExpirationDate = "Raven-Expiration-Date";
 
-            // check for expired documents and exclude them if expired
-            if (metadata == null)
-            {
-                return false;
-            }
-            var property = metadata[RavenExpirationDate];
-            if (property == null)
-                return false;
+			// check for expired documents and exclude them if expired
+			if (metadata == null)
+			{
+				return false;
+			}
+			var property = metadata[RavenExpirationDate];
+			if (property == null)
+				return false;
 
-            DateTime dateTime;
-            try
-            {
-                dateTime = property.Value<DateTime>();
-            }
-            catch (FormatException)
-            {
-                return false;
-            }
+			DateTime dateTime;
+			try
+			{
+				dateTime = property.Value<DateTime>();
+			}
+			catch (FormatException)
+			{
+				return false;
+			}
 
             return dateTime < now;
 		}
@@ -154,7 +195,7 @@ namespace Raven.Abstractions.Smuggler
 		    get
 		    {
 				return timeout;
-		    }
+	}
 		    set
 		    {
 			    if (value < TimeSpan.FromSeconds(5))
@@ -222,6 +263,7 @@ namespace Raven.Abstractions.Smuggler
 	{
 		Documents = 0x1,
 		Indexes = 0x2,
+        [Obsolete("Use RavenFS instead.")]
 		Attachments = 0x4,
 		Transformers = 0x8,
 

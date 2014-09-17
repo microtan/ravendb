@@ -18,7 +18,9 @@ namespace Raven.Tests.Indexes
 
 		private class Result
 		{
+#pragma warning disable 649
 			public string[] Tags;
+#pragma warning restore 649
 		}
 
 		[Fact]
@@ -43,9 +45,9 @@ namespace Raven.Tests.Indexes
 					session.SaveChanges();
 				}
 
-				while (store.DocumentDatabase.Statistics.StaleIndexes.Length > 0)
-					Thread.Sleep(100);
-				Assert.Empty(store.DocumentDatabase.Statistics.Errors);
+				WaitForIndexing(store);
+
+                Assert.Empty(store.DatabaseCommands.GetStatistics().Errors);
 
 				using (var session = store.OpenSession())
 				{
@@ -53,6 +55,7 @@ namespace Raven.Tests.Indexes
 						.Search(d => d.Tags, "only-one")
 						.As<InputData>()
 						.ToList();
+
 
 					Assert.Single(results);
 				}
@@ -63,7 +66,7 @@ namespace Raven.Tests.Indexes
 		public void CorrectlyUseExtensionMethodsOnConvertedType()
 		{
 			var indexDefinition = new PainfulIndex { Conventions = new DocumentConvention() }.CreateIndexDefinition();
-			Assert.Contains("((String[]) doc.Tags.Split(", indexDefinition.Map);
+			Assert.Contains("((String[])doc.Tags.Split(", indexDefinition.Map);
 		}
 
 		private class PainfulIndex : AbstractMultiMapIndexCreationTask<Result>

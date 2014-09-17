@@ -27,88 +27,20 @@ namespace Voron.Tests
 
 			using (var tx = Env.NewTransaction(TransactionFlags.ReadWrite))
 			{
-				tx.Environment.State.GetTree(tx,"foo").MultiAdd(tx, "ChildTreeKey", new Slice(buffer));
+				tx.Environment.State.GetTree(tx,"foo").MultiAdd("ChildTreeKey", new Slice(buffer));
 				tx.Commit();
 			}
 
 			using (var tx = Env.NewTransaction(TransactionFlags.Read))
 			{
-				using (var fetchedDataIterator = tx.Environment.State.GetTree(tx,"foo").MultiRead(tx, "ChildTreeKey"))
+				using (var fetchedDataIterator = tx.Environment.State.GetTree(tx,"foo").MultiRead("ChildTreeKey"))
 				{
 					fetchedDataIterator.Seek(Slice.BeforeAllKeys);
 
-					Assert.True(fetchedDataIterator.CurrentKey.Compare(new Slice(buffer), Env.SliceComparer) == 0);
+					Assert.True(fetchedDataIterator.CurrentKey.Compare(new Slice(buffer)) == 0);
 				}
 			}
 		}
-
-		[Fact]
-		public void Can_add_value_to_multi_value()
-		{
-			using (var tx = Env.NewTransaction(TransactionFlags.ReadWrite))
-			{
-				Env.CreateTree(tx, "foo");
-
-				tx.Commit();
-			}
-
-			using (var tx = Env.NewTransaction(TransactionFlags.ReadWrite))
-			{
-				tx.Environment.State.GetTree(tx, "foo").MultiAdd(tx, "ChildTreeKey", "1", new MemoryStream(BitConverter.GetBytes(55)));
-				tx.Environment.State.GetTree(tx, "foo").MultiAdd(tx, "ChildTreeKey", "2", new MemoryStream(BitConverter.GetBytes(12)));
-				tx.Commit();
-			}
-
-			using (var tx = Env.NewTransaction(TransactionFlags.Read))
-			{
-				using (var fetchedDataIterator = tx.Environment.State.GetTree(tx, "foo").MultiRead(tx, "ChildTreeKey"))
-				{
-					Assert.True(fetchedDataIterator.Seek(Slice.BeforeAllKeys));
-
-					Assert.True(fetchedDataIterator.CurrentKey.Compare("1", Env.SliceComparer) == 0);
-					Assert.Equal(55, fetchedDataIterator.CreateReaderForCurrent().ReadInt32());
-
-					Assert.True(fetchedDataIterator.MoveNext());
-
-					Assert.True(fetchedDataIterator.CurrentKey.Compare("2", Env.SliceComparer) == 0);
-					Assert.Equal(12, fetchedDataIterator.CreateReaderForCurrent().ReadInt32());
-				}
-			}
-		}
-
-		[Fact]
-		public void When_deleting_to_last_one_wont_lose_stream_value()
-		{
-			using (var tx = Env.NewTransaction(TransactionFlags.ReadWrite))
-			{
-				Env.CreateTree(tx, "foo");
-
-				tx.Commit();
-			}
-
-			using (var tx = Env.NewTransaction(TransactionFlags.ReadWrite))
-			{
-				tx.Environment.State.GetTree(tx, "foo").MultiAdd(tx, "ChildTreeKey", "1", new MemoryStream(BitConverter.GetBytes(55)));
-				tx.Environment.State.GetTree(tx, "foo").MultiAdd(tx, "ChildTreeKey", "2", new MemoryStream(BitConverter.GetBytes(12)));
-
-				tx.Environment.State.GetTree(tx, "foo").MultiDelete(tx, "ChildTreeKey", "2");
-				tx.Commit();
-			}
-
-			using (var tx = Env.NewTransaction(TransactionFlags.Read))
-			{
-				using (var fetchedDataIterator = tx.Environment.State.GetTree(tx, "foo").MultiRead(tx, "ChildTreeKey"))
-				{
-					Assert.True(fetchedDataIterator.Seek(Slice.BeforeAllKeys));
-
-					Assert.True(fetchedDataIterator.CurrentKey.Compare("1", Env.SliceComparer) == 0);
-					Assert.Equal(55, fetchedDataIterator.CreateReaderForCurrent().ReadInt32());
-
-					Assert.False(fetchedDataIterator.MoveNext());
-				}
-			}
-		}
-
 
 		[Fact]
 		public void MultiDelete_Remains_One_Entry_The_Data_Is_Retrieved_With_MultiRead()
@@ -127,7 +59,7 @@ namespace Voron.Tests
 		    {
 		        for (int i = 0; i < INPUT_COUNT; i++)
 		        {
-		            tx.State.Root.MultiAdd(tx, CHILDTREE_KEY, inputData[i]);
+		            tx.State.Root.MultiAdd(CHILDTREE_KEY, inputData[i]);
 		        }
 		        tx.Commit();
 		    }
@@ -136,7 +68,7 @@ namespace Voron.Tests
 		    {
 		        for (int i = 0; i < INPUT_COUNT - 1; i++)
 		        {
-		            tx.State.Root.MultiDelete(tx, CHILDTREE_KEY, inputData[i]);
+		            tx.State.Root.MultiDelete(CHILDTREE_KEY, inputData[i]);
 		            inputData.Remove(inputData[i]);
 		        }
 		        tx.Commit();
@@ -162,7 +94,7 @@ namespace Voron.Tests
 			{
 				for (int i = 0; i < INPUT_COUNT; i++)
 				{
-                    tx.State.Root.MultiAdd(tx, CHILDTREE_KEY, inputData[i]);
+                    tx.State.Root.MultiAdd(CHILDTREE_KEY, inputData[i]);
 				}
 				tx.Commit();
 			}
@@ -171,14 +103,14 @@ namespace Voron.Tests
 			{
 				for (int i = 0; i < INPUT_COUNT; i++)
 				{
-                    tx.State.Root.MultiDelete(tx, CHILDTREE_KEY, inputData[i]);
+                    tx.State.Root.MultiDelete(CHILDTREE_KEY, inputData[i]);
 				}
 				tx.Commit();
 			}
 
 			using (var tx = Env.NewTransaction(TransactionFlags.Read))
 			{
-				var iterator = tx.State.Root.MultiRead(tx, CHILDTREE_KEY);
+				var iterator = tx.State.Root.MultiRead(CHILDTREE_KEY);
 				iterator.Seek(Slice.BeforeAllKeys);
 				Assert.False(iterator.MoveNext());
 			}
@@ -199,19 +131,19 @@ namespace Voron.Tests
 
 			using (var tx = Env.NewTransaction(TransactionFlags.ReadWrite))
 			{
-				tx.Environment.State.GetTree(tx,"foo").MultiAdd(tx, "ChildTreeKey", new Slice(buffer));
+				tx.Environment.State.GetTree(tx,"foo").MultiAdd("ChildTreeKey", new Slice(buffer));
 				tx.Commit();
 			}
 
 			using (var tx = Env.NewTransaction(TransactionFlags.ReadWrite))
 			{
-				tx.Environment.State.GetTree(tx,"foo").MultiDelete(tx, "ChildTreeKey", new Slice(buffer));
+				tx.Environment.State.GetTree(tx,"foo").MultiDelete("ChildTreeKey", new Slice(buffer));
 				tx.Commit();
 			}
 
 			using (var tx = Env.NewTransaction(TransactionFlags.Read))
 			{
-				Assert.Equal(typeof(EmptyIterator), tx.Environment.State.GetTree(tx,"foo").MultiRead(tx, "ChildTreeKey").GetType());
+				Assert.Equal(typeof(EmptyIterator), tx.Environment.State.GetTree(tx,"foo").MultiRead("ChildTreeKey").GetType());
 			}
 		}
 
@@ -233,10 +165,10 @@ namespace Voron.Tests
 		    {
 		        for (int i = 0; i < INPUT_COUNT; i++)
 		        {
-		            tx.State.Root.MultiAdd(tx, CHILDTREE_KEY, inputData[i]);
+		            tx.State.Root.MultiAdd(CHILDTREE_KEY, inputData[i]);
 		        }
 
-		        tx.State.Root.MultiDelete(tx, CHILDTREE_KEY, inputData[indexToDelete]);
+		        tx.State.Root.MultiDelete(CHILDTREE_KEY, inputData[indexToDelete]);
 		        tx.Commit();
 		    }
 
@@ -268,10 +200,10 @@ namespace Voron.Tests
 			{
 				for (int i = 0; i < INPUT_COUNT; i++)
 				{
-					tx.Environment.State.GetTree(tx,"foo").MultiAdd(tx, CHILDTREE_KEY, inputData[i]);
+					tx.Environment.State.GetTree(tx,"foo").MultiAdd(CHILDTREE_KEY, inputData[i]);
 				}
 
-				tx.Environment.State.GetTree(tx,"foo").MultiDelete(tx, CHILDTREE_KEY, inputData[indexToDelete]);
+				tx.Environment.State.GetTree(tx,"foo").MultiDelete(CHILDTREE_KEY, inputData[indexToDelete]);
 				tx.Commit();
 			}
 
@@ -303,7 +235,7 @@ namespace Voron.Tests
 			{
 				for (int i = 0; i < INPUT_COUNT; i++)
 				{
-					tx.Environment.State.GetTree(tx,"foo").MultiAdd(tx, CHILDTREE_KEY, inputData[i]);
+					tx.Environment.State.GetTree(tx,"foo").MultiAdd(CHILDTREE_KEY, inputData[i]);
 				}
 				tx.Commit();
 			}
@@ -312,7 +244,7 @@ namespace Voron.Tests
 
 			using (var tx = Env.NewTransaction(TransactionFlags.ReadWrite))
 			{
-				tx.Environment.State.GetTree(tx,"foo").MultiDelete(tx, CHILDTREE_KEY, inputData[indexToDelete]);
+				tx.Environment.State.GetTree(tx,"foo").MultiDelete(CHILDTREE_KEY, inputData[indexToDelete]);
 				tx.Commit();
 			}
 
@@ -328,20 +260,20 @@ namespace Voron.Tests
 			const string CHILDTREE_VALUE = "Foo";
 			using (var tx = Env.NewTransaction(TransactionFlags.ReadWrite))
 			{
-				tx.State.Root.MultiAdd(tx, CHILDTREE_KEY, CHILDTREE_VALUE);
-				tx.State.Root.MultiAdd(tx, CHILDTREE_KEY, CHILDTREE_VALUE);
+				tx.State.Root.MultiAdd(CHILDTREE_KEY, CHILDTREE_VALUE);
+				tx.State.Root.MultiAdd(CHILDTREE_KEY, CHILDTREE_VALUE);
 				tx.Commit();
 			}
 
 			using (var tx = Env.NewTransaction(TransactionFlags.ReadWrite))
 			{
-				Assert.DoesNotThrow(() => tx.State.Root.MultiDelete(tx, CHILDTREE_KEY, CHILDTREE_VALUE));
+				Assert.DoesNotThrow(() => tx.State.Root.MultiDelete(CHILDTREE_KEY, CHILDTREE_VALUE));
 				tx.Commit();
 			}
 
 			using (var tx = Env.NewTransaction(TransactionFlags.Read))
 			{
-				Assert.Equal(0, tx.State.Root.ReadVersion(tx, CHILDTREE_KEY));
+				Assert.Equal(0, tx.State.Root.ReadVersion(CHILDTREE_KEY));
 			}
 		}
 		
@@ -362,7 +294,7 @@ namespace Voron.Tests
 			{
 				for (int i = 0; i < INPUT_COUNT; i++)
 				{
-					tx.State.Root.MultiAdd(tx, CHILDTREE_KEY, inputData[i]);
+					tx.State.Root.MultiAdd(CHILDTREE_KEY, inputData[i]);
 				}
 				tx.Commit();
 			}
@@ -373,7 +305,7 @@ namespace Voron.Tests
 
 			using (var tx = Env.NewTransaction(TransactionFlags.ReadWrite))
 			{
-				tx.State.Root.MultiDelete(tx, CHILDTREE_KEY, inputData[indexToDelete]);
+				tx.State.Root.MultiDelete(CHILDTREE_KEY, inputData[indexToDelete]);
 				tx.Commit();
 			}
 
@@ -399,7 +331,7 @@ namespace Voron.Tests
 			{
 				for (int i = 0; i < INPUT_COUNT; i++)
 				{
-					tx.State.Root.MultiAdd(tx, CHILDTREE_KEY, inputData[i]);
+					tx.State.Root.MultiAdd(CHILDTREE_KEY, inputData[i]);
 				}
 				tx.Commit();
 			}
@@ -415,7 +347,7 @@ namespace Voron.Tests
 
 				int fetchedEntryCount = 0;
 				var inputEntryCount = inputData.Count;
-				using (var fetchedDataIterator = targetTree.MultiRead(tx, childtreeKey))
+				using (var fetchedDataIterator = targetTree.MultiRead(childtreeKey))
 				{
 					fetchedDataIterator.Seek(Slice.BeforeAllKeys);
 					do

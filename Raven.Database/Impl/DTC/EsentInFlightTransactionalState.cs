@@ -5,12 +5,17 @@
 // -----------------------------------------------------------------------
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using Microsoft.Isam.Esent.Interop;
 using Raven.Abstractions;
 using Raven.Abstractions.Data;
+using Raven.Abstractions.Exceptions;
+using Raven.Abstractions.Json;
 using Raven.Abstractions.Logging;
 using Raven.Database.Storage;
+using Raven.Imports.Newtonsoft.Json;
 using Raven.Json.Linq;
 using Raven.Storage.Esent;
 
@@ -18,6 +23,7 @@ namespace Raven.Database.Impl.DTC
 {
 	public class EsentInFlightTransactionalState : InFlightTransactionalState, IDisposable
 	{
+		private readonly DocumentDatabase _database;
 		private readonly TransactionalStorage storage;
 		private readonly CommitTransactionGrbit txMode;
 		private readonly ConcurrentDictionary<string, EsentTransactionContext> transactionContexts =
@@ -26,9 +32,10 @@ namespace Raven.Database.Impl.DTC
 		private long transactionContextNumber;
 		private readonly Timer timer;
 
-		public EsentInFlightTransactionalState(TransactionalStorage storage, CommitTransactionGrbit txMode, Func<string, Etag, RavenJObject, RavenJObject, TransactionInformation, PutResult> databasePut, Func<string, Etag, TransactionInformation, bool> databaseDelete)
+		public EsentInFlightTransactionalState(DocumentDatabase database,TransactionalStorage storage, CommitTransactionGrbit txMode, Func<string, Etag, RavenJObject, RavenJObject, TransactionInformation, PutResult> databasePut, Func<string, Etag, TransactionInformation, bool> databaseDelete)
 			: base(databasePut, databaseDelete)
 		{
+			_database = database;
 			this.storage = storage;
 			this.txMode = txMode;
 			timer = new Timer(CleanupOldTransactions, null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
@@ -51,7 +58,14 @@ namespace Raven.Database.Impl.DTC
 				if (age.TotalMinutes >= 5)
 				{
 					log.Info("Rolling back DTC transaction {0} because it is too old {1}", ctx.Key, age);
-					Rollback(ctx.Key);
+					try
+					{
+						Rollback(ctx.Key);
+					}
+					catch (Exception e)
+					{
+						log.WarnException("Could not properly rollback transaction", e);
+					}
 				}
 			}
 		}
@@ -67,8 +81,54 @@ namespace Raven.Database.Impl.DTC
 				//using(context.Session) - disposing the session is actually done in the rollback, which is always called
 				using (context.EnterSessionContext())
 				{
+					if (context.DocumentIdsToTouch != null)
+					{
+						using (storage.SetTransactionContext(context))
+						{
+							storage.Batch(accessor =>
+							{
+								foreach (var docId in context.DocumentIdsToTouch)
+								{
+									_database.Indexes.CheckReferenceBecauseOfDocumentUpdate(docId,accessor);
+
+									Etag preTouchEtag;
+									Etag afterTouchEtag;
+									accessor.Documents.TouchDocument(docId, out preTouchEtag, out afterTouchEtag);
+								}
+							});
+						}
+					}
+
 					context.Transaction.Commit(txMode);
 
+					if (context.DocumentIdsToTouch != null)
+					{
+						using (_database.DocumentLock.Lock())
+						{
+							using (storage.DisableBatchNesting())
+							{
+								storage.Batch(accessor =>
+								{
+									foreach (var docId in context.DocumentIdsToTouch)
+									{
+										_database.Indexes.CheckReferenceBecauseOfDocumentUpdate(docId, accessor);
+										try
+										{
+											Etag preTouchEtag;
+											Etag afterTouchEtag;
+											accessor.Documents.TouchDocument(docId, out preTouchEtag, out afterTouchEtag);
+										}
+										catch (ConcurrencyException)
+										{
+                                            log.Info("Concurrency exception when touching {0}", docId);
+               
+										}
+									}
+								});
+							}
+						}
+					}
+					
 					foreach (var afterCommit in context.ActionsAfterCommit)
 					{
 						afterCommit();
@@ -77,7 +137,7 @@ namespace Raven.Database.Impl.DTC
 			}
 		}
 
-		public override void Prepare(string id)
+		public override void Prepare(string id, Guid? resourceManagerId, byte[] recoveryInformation)
 		{
 			EsentTransactionContext context;
 			if (transactionContexts.TryGetValue(id, out context) == false)
@@ -93,12 +153,42 @@ namespace Raven.Database.Impl.DTC
 						myContext.Dispose();
 				}
 			}
+
 			try
 			{
+			    List<DocumentInTransactionData> changes = null;
 				using (storage.SetTransactionContext(context))
 				{
-					storage.Batch(accessor => RunOperationsInTransaction(id));
+					storage.Batch(accessor =>
+					{
+					    var documentsToTouch = RunOperationsInTransaction(id, out changes);
+					    context.DocumentIdsToTouch = documentsToTouch;
+					});
 				}
+
+			    if (changes == null) 
+                    return;
+
+			    // independent storage transaction, will actually commit here
+			    storage.Batch(accessor =>
+			    {
+			        var data = new RavenJObject
+			        {
+			            {"Changes", RavenJToken.FromObject(changes, new JsonSerializer
+			            {
+			                Converters =
+			                {
+			                    new JsonToJsonConverter(),
+                                new EtagJsonConverter()
+			}
+			            })
+			            },
+			            {"ResourceManagerId", resourceManagerId.ToString()},
+			            {"RecoveryInformation", recoveryInformation}
+			        };
+			        accessor.Lists.Set("Raven/Transactions/Pending", id, data,
+			            UuidType.DocumentTransactions);
+			    });
 			}
 			catch (Exception)
 			{
@@ -115,7 +205,19 @@ namespace Raven.Database.Impl.DTC
 			if (transactionContexts.TryRemove(id, out context) == false)
 				return;
 
+			var lockTaken = false;
+			Monitor.Enter(context, ref lockTaken);
+			try
+			{
+                storage.Batch(accessor => accessor.Lists.Remove("Raven/Transactions/Pending", id));
+
 			context.Dispose();
+		}
+			finally
+			{
+				if (lockTaken)
+					Monitor.Exit(context);
+			}
 		}
 
 		public void Dispose()

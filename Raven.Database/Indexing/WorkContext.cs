@@ -6,6 +6,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Security;
 using System.Threading;
 using System.Threading.Tasks;
@@ -28,7 +29,7 @@ namespace Raven.Database.Indexing
 
 		private readonly SizeLimitedConcurrentSet<string> recentlyDeleted = new SizeLimitedConcurrentSet<string>(100, StringComparer.OrdinalIgnoreCase);
 
-		private readonly SizeLimitedConcurrentSet<ActualIndexingBatchSize> lastActualIndexingBatchSize = new SizeLimitedConcurrentSet<ActualIndexingBatchSize>(25);
+		private readonly SizeLimitedConcurrentSet<IndexingBatchInfo> lastActualIndexingBatchInfo = new SizeLimitedConcurrentSet<IndexingBatchInfo>(25);
 		private readonly ConcurrentQueue<ServerError> serverErrors = new ConcurrentQueue<ServerError>();
 		private readonly object waitForWork = new object();
 		private volatile bool doWork = true;
@@ -40,9 +41,9 @@ namespace Raven.Database.Indexing
 
 	    public WorkContext()
 	    {
-	        DoNotTouchAgainIfMissingReferences = new ConcurrentDictionary<int, ConcurrentSet<string>>();
             CurrentlyRunningQueries = new ConcurrentDictionary<string, ConcurrentSet<ExecutingQueryInfo>>(StringComparer.OrdinalIgnoreCase);
             MetricsCounters = new MetricsCountersManager();
+	        InstallGauges();
         }
 
 		public OrderedPartCollection<AbstractIndexUpdateTrigger> IndexUpdateTriggers { get; set; }
@@ -70,6 +71,8 @@ namespace Raven.Database.Indexing
         //collection that holds information about currently running queries, in the form of [Index name -> (When query started,IndexQuery data)]
         public ConcurrentDictionary<string,ConcurrentSet<ExecutingQueryInfo>> CurrentlyRunningQueries { get; private set; }
 
+	    private int nextQueryId = 0;
+
 		public InMemoryRavenConfiguration Configuration { get; set; }
 		public IndexStorage IndexStorage { get; set; }
 
@@ -96,6 +99,11 @@ namespace Raven.Database.Indexing
 		{
 			return WaitForWork(timeout, ref workerWorkCounter, null, name);
 		}
+
+        private void InstallGauges()
+        {
+            MetricsCounters.AddGauge(GetType(), "RunningQueriesCount", () => CurrentlyRunningQueries.Count);
+        }
 
 		public bool WaitForWork(TimeSpan timeout, ref int workerWorkCounter, Action beforeWait, string name)
 		{
@@ -227,12 +235,13 @@ namespace Raven.Database.Indexing
 
 		public void ClearErrorsFor(string name)
 		{
+
 			var list = new List<ServerError>();
 
 			ServerError error;
 			while (serverErrors.TryDequeue(out error))
 			{
-				if (StringComparer.OrdinalIgnoreCase.Equals(error.Index, name) == false)
+				if (StringComparer.OrdinalIgnoreCase.Equals(error.IndexName, name) == false)
 					list.Add(error);
 			}
 
@@ -247,14 +256,17 @@ namespace Raven.Database.Indexing
 		private bool disposed;
 
         public MetricsCountersManager MetricsCounters { get; private set; }
-        
-		public void ReportIndexingActualBatchSize(int size)
+
+		public void ReportIndexingBatchStarted(int documentsCount, long documentsSize)
 		{
-			lastActualIndexingBatchSize.Add(new ActualIndexingBatchSize
+			var indexingBatchInfo = new IndexingBatchInfo
 			{
-				Size = size,
+				TotalDocumentCount = documentsCount,
+				TotalDocumentSize = documentsSize,
 				Timestamp = SystemTime.UtcNow
-			});
+			};
+
+			lastActualIndexingBatchInfo.Add(indexingBatchInfo);
 		}
 
 		public ConcurrentSet<FutureBatchStats> FutureBatchStats
@@ -262,13 +274,12 @@ namespace Raven.Database.Indexing
 			get { return futureBatchStats; }
 		}
 
-		public SizeLimitedConcurrentSet<ActualIndexingBatchSize> LastActualIndexingBatchSize
+		public SizeLimitedConcurrentSet<IndexingBatchInfo> LastActualIndexingBatchInfo
 		{
-			get { return lastActualIndexingBatchSize; }
+			get { return lastActualIndexingBatchInfo; }
 		}
 
 		public DocumentDatabase Database { get; set; }
-        public ConcurrentDictionary<int, ConcurrentSet<string>> DoNotTouchAgainIfMissingReferences { get; private set; }
 
 	    public void AddFutureBatch(FutureBatchStats futureBatchStat)
 		{
@@ -315,5 +326,10 @@ namespace Raven.Database.Indexing
 		{
 			recentlyDeleted.Add(key);
 		}
+
+        public int GetNextQueryId()
+        {
+            return Interlocked.Increment(ref nextQueryId);
+        }
 	}
 }

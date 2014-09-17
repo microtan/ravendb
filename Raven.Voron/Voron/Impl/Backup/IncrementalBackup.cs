@@ -10,8 +10,10 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Threading.Tasks;
 using Voron.Impl.Journal;
 using Voron.Impl.Paging;
+using Voron.Platform.Win32;
 using Voron.Trees;
 using Voron.Util;
 
@@ -30,8 +32,11 @@ namespace Voron.Impl.Backup
             }
         }
 
-        public long ToFile(StorageEnvironment env, string backupPath, CompressionLevel compression = CompressionLevel.Optimal)
+        public long ToFile(StorageEnvironment env, string backupPath, CompressionLevel compression = CompressionLevel.Optimal,
+			Action<string> infoNotify = null)
         {
+			infoNotify = infoNotify ?? (s => { });
+
             if (env.Options.IncrementalBackupEnabled == false)
                 throw new InvalidOperationException("Incremental backup is disabled for this storage");
 
@@ -76,6 +81,8 @@ namespace Voron.Impl.Backup
 
                         for (var journalNum = firstJournalToBackup; journalNum <= backupInfo.LastCreatedJournal; journalNum++)
                         {
+                            var num = journalNum;
+
                             var journalFile = env.Journal.Files.FirstOrDefault(x => x.Number == journalNum); // first check journal files currently being in use
                             if (journalFile == null)
                             {
@@ -112,6 +119,8 @@ namespace Voron.Impl.Backup
                             using (var stream = part.Open())
                             {
                                 copier.ToStream(journalFile, startBackupAt, pagesToCopy, stream);
+                                infoNotify(string.Format("Voron Incr copy journal number {0}", num));
+
                             }
 
                             lastBackedUpFile = journalFile.Number;
@@ -148,7 +157,7 @@ namespace Voron.Impl.Backup
                         {
                             if (backupSuccess) // if backup succeeded we can remove journals
                             {
-                                if (jrnl.Number != lastWrittenLogFile) // prevent deletion of the current journal
+                                if (jrnl.Number < lastWrittenLogFile) // prevent deletion of the current journal and journals with a greater number
                                 {
                                     jrnl.DeleteOnClose = true;
                                 }
@@ -157,7 +166,7 @@ namespace Voron.Impl.Backup
                             jrnl.Release();
                         }
                     }
-
+                    infoNotify(string.Format("Voron Incr Backup total {0} pages", numberOfBackedUpPages));
                     return numberOfBackedUpPages;
                 }
             }
@@ -266,8 +275,8 @@ namespace Voron.Impl.Backup
 
                             env.Options.DataPager.Sync();
 
-                            txw.State.Root = Tree.Open(txw, env._sliceComparer, &lastTxHeader->Root);
-                            txw.State.FreeSpaceRoot = Tree.Open(txw, env._sliceComparer, &lastTxHeader->FreeSpace);
+                            txw.State.Root = Tree.Open(txw, &lastTxHeader->Root);
+                            txw.State.FreeSpaceRoot = Tree.Open(txw, &lastTxHeader->FreeSpace);
 
                             txw.State.FreeSpaceRoot.Name = Constants.FreeSpaceTreeName;
                             txw.State.Root.Name = Constants.RootTreeName;

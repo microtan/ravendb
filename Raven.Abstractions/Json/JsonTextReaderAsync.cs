@@ -313,7 +313,7 @@ namespace Raven.Imports.Newtonsoft.Json
 
 			int attemptCharReadCount = _chars.Length - _charsUsed - 1;
 
-			int charsRead = await _reader.ReadAsync(_chars, _charsUsed, attemptCharReadCount);
+			int charsRead = await _reader.ReadAsync(_chars, _charsUsed, attemptCharReadCount).ConfigureAwait(false);
 
 			_charsUsed += charsRead;
 
@@ -1580,7 +1580,7 @@ namespace Raven.Imports.Newtonsoft.Json
       _value = null;
 
 			if (CloseInput && _reader != null)
-#if !(NETFX_CORE || PORTABLE)
+#if !(PORTABLE)
 				_reader.Close();
 #else
         _reader.Dispose();

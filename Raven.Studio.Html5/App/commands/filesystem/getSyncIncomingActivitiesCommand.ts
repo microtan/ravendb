@@ -1,7 +1,6 @@
 ﻿import commandBase = require("commands/commandBase");
 import filesystem = require("models/filesystem/filesystem");
-import synchronizationDetails = require("models/filesystem/synchronizationDetails");
-import synchronizationReport = require("models/filesystem/synchronizationReport");
+import synchronizationDetail = require("models/filesystem/synchronizationDetail");
 
 class getSyncIncomingActivitiesCommand extends commandBase {
 
@@ -9,14 +8,27 @@ class getSyncIncomingActivitiesCommand extends commandBase {
         super();
     }
 
-    execute(): JQueryPromise<any> {
+    execute(): JQueryPromise<synchronizationDetail[]> {
 
-        // Incoming: All the finished activities. 
-        var url = "/synchronization/finished";
+        var doneTask = $.Deferred();
+        var start = 0;
+        var pageSize = 50;
 
-        return this.query<filesystemListPageDto<filesystemSynchronizationReportDto>>(url, null, this.fs)
-                 .then(x => synchronizationDetails.fromIncomingActivities(x.Items));
+        this.getIncomingActivity(start, pageSize)
+            .done(x => doneTask.resolve(x.Items.map(x => new synchronizationDetail(x, "Pending", x.Type))))
+            .fail((xhr) => {
+                this.reportError("Failed to get synchronization incoming activities.");
+                doneTask.reject(xhr);
+            });
+
+        return doneTask;
+    }
+
+    getIncomingActivity(skip: number, take: number): JQueryPromise<filesystemListPageDto<filesystemSynchronizationDetailsDto>> {
+        var incomingUrl = "/synchronization/incoming";
+        var resultsSelector = (x: filesystemListPageDto<filesystemSynchronizationDetailsDto>) => { x.Items.map((item: filesystemSynchronizationDetailsDto) => item.Direction = synchronizationDirection.Incoming); return x; };
+        return this.query<filesystemListPageDto<filesystemSynchronizationDetailsDto>>(incomingUrl, { start: skip, pageSize: take }, this.fs, resultsSelector);
     }
 }
 
-export = getSyncIncomingActivitiesCommand;
+export = getSyncIncomingActivitiesCommand; 

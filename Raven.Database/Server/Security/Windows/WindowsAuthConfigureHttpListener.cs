@@ -24,7 +24,8 @@ namespace Raven.Database.Server.Security.Windows
 		{
 			var authHeader = request.Headers["Authorization"];
 			var hasApiKey = "True".Equals(request.Headers["Has-Api-Key"], StringComparison.CurrentCultureIgnoreCase);
-			var hasSingleUseToken = string.IsNullOrEmpty(request.Headers["Single-Use-Auth-Token"]) == false;
+			var hasSingleUseToken = string.IsNullOrEmpty(request.Headers["Single-Use-Auth-Token"]) == false ||
+					 string.IsNullOrEmpty(request.QueryString["singleUseAuthToken"]) == false;
 			var hasOAuthTokenInCookie = request.Cookies["OAuth-Token"] != null;
 			if (hasApiKey || hasOAuthTokenInCookie || hasSingleUseToken  ||
 					string.IsNullOrEmpty(authHeader) == false && authHeader.StartsWith("Bearer "))
@@ -37,8 +38,10 @@ namespace Raven.Database.Server.Security.Windows
 				return AuthenticationSchemes.Anonymous;
 
 			//CORS pre-flight.
-			if(!String.IsNullOrEmpty(configuration.AccessControlAllowOrigin) && request.HttpMethod == "OPTIONS") 
-				{ return AuthenticationSchemes.Anonymous; }
+			if (configuration.AccessControlAllowOrigin.Count > 0 && request.HttpMethod == "OPTIONS")
+			{
+				return AuthenticationSchemes.Anonymous;
+			}
 
 			if (IsAdminRequest.IsMatch(request.RawUrl) && 
 				configuration.AnonymousUserAccessMode != AnonymousUserAccessMode.Admin)

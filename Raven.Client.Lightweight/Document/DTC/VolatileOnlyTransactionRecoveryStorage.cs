@@ -25,7 +25,12 @@ namespace Raven.Client.Document.DTC
 			throw new NotSupportedException();
 		}
 
-		public void Dispose()
+	    public byte[] GetRecoveryInformation(System.Transactions.PreparingEnlistment preparingEnlistment)
+	    {
+	        return null;
+	    }
+
+        public void Dispose()
 		{
 			
 		}

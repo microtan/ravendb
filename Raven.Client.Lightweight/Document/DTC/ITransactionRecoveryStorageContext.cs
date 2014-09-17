@@ -10,5 +10,6 @@ namespace Raven.Client.Document.DTC
 		void DeleteFile(string name);
 		IEnumerable<string> GetFileNames(string filter);
 		Stream OpenRead(string name);
-	}
+	    byte[] GetRecoveryInformation(System.Transactions.PreparingEnlistment preparingEnlistment);
+    }
 }

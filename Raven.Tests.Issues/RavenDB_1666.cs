@@ -8,7 +8,7 @@ using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Web.Http;
-using Raven.Client.RavenFS;
+using Raven.Database.Counters.Controllers;
 using Raven.Database.Server.Controllers;
 using Raven.Database.Server.Controllers.Admin;
 using Raven.Database.Server.RavenFS.Controllers;
@@ -24,9 +24,15 @@ namespace Raven.Tests.Issues
     {
 
         private readonly List<MethodInfo> ignoredMethods = new List<MethodInfo>();
+        private readonly List<String> ignoredNamespaces = new List<string>(); 
         private void RegisterRouteForOnlySysDb<T>(Expression<Action<T>> a)
         {
             ignoredMethods.Add(((MethodCallExpression) a.Body).Method);
+        }
+
+        private void RegisterNoSysDbForControllersInThisNamespace<TController>()
+        {
+            ignoredNamespaces.Add(typeof(TController).Namespace);
         }
 
         [Fact]
@@ -46,15 +52,27 @@ namespace Raven.Tests.Issues
         [Fact]
         public void CheckRoutes()
         {
-            
+            RegisterNoSysDbForControllersInThisNamespace<FilesController>();
+            RegisterNoSysDbForControllersInThisNamespace<CountersController>();
+
+			RegisterRouteForOnlySysDb<StudioTasksController>(a => a.GetLatestServerBuildVersion(false));
             RegisterRouteForOnlySysDb<AdminController>(a => a.Stats());
+			RegisterRouteForOnlySysDb<AdminController>(a => a.OnAdminLogsConfig());
+			RegisterRouteForOnlySysDb<AdminController>(a => a.OnAdminLogsFetch());
+			RegisterRouteForOnlySysDb<AdminController>(a => a.InfoPackage());
+            RegisterRouteForOnlySysDb<AdminController>(a => a.Compact());
             RegisterRouteForOnlySysDb<AdminController>(a => a.Gc());
             RegisterRouteForOnlySysDb<AdminController>(a => a.LohCompaction());
             RegisterRouteForOnlySysDb<AdminDatabasesController>(a => a.DatabasesGet(string.Empty));
-            RegisterRouteForOnlySysDb<AdminDatabasesController>(a => a.DatabasePost(string.Empty));
+			RegisterRouteForOnlySysDb<AdminDatabasesController>(a => a.DatabasesPut(string.Empty));
             RegisterRouteForOnlySysDb<AdminDatabasesController>(a => a.DatabasesDelete(string.Empty));
-            RegisterRouteForOnlySysDb<AdminDatabasesController>(a => a.DatabasesPut(string.Empty));
-            RegisterRouteForOnlySysDb<DatabasesController>(a => a.Databases());
+			RegisterRouteForOnlySysDb<AdminDatabasesController>(a => a.DatabasesBatchDelete());
+            RegisterRouteForOnlySysDb<AdminDatabasesController>(a => a.DatabaseToggleDisable(string.Empty, false));
+			RegisterRouteForOnlySysDb<AdminDatabasesController>(a => a.DatabaseToggleDisable(string.Empty, true));
+			RegisterRouteForOnlySysDb<AdminDatabasesController>(a => a.DatabaseBatchToggleDisable(false));
+			RegisterRouteForOnlySysDb<AdminDatabasesController>(a => a.DatabaseBatchToggleDisable(true));
+            RegisterRouteForOnlySysDb<DatabasesController>(a => a.Databases(false));
+			RegisterRouteForOnlySysDb<DatabasesController>(a => a.Databases(true));
             RegisterRouteForOnlySysDb<DebugController>(a => a.Routes());
             RegisterRouteForOnlySysDb<HardRouteController>(a => a.FaviconGet());
             RegisterRouteForOnlySysDb<HardRouteController>(a => a.ClientaccessPolicyGet());
@@ -65,60 +83,16 @@ namespace Raven.Tests.Issues
             RegisterRouteForOnlySysDb<PluginController>(a => a.PlugingsStatusGet());
             RegisterRouteForOnlySysDb<StudioController>(a => a.RavenUiGet(null));
             RegisterRouteForOnlySysDb<StudioController>(a => a.GetStudioFile(null));
-            RegisterRouteForOnlySysDb<SilverlightController>(a => a.SilverlightUi(string.Empty));
-            RegisterRouteForOnlySysDb<ConfigController>(a => a.Get());
-            RegisterRouteForOnlySysDb<ConfigController>(a => a.Get(string.Empty));
-            RegisterRouteForOnlySysDb<ConfigController>(a => a.ConfigNamesStartingWith(string.Empty));
-            RegisterRouteForOnlySysDb<ConfigController>(a => a.Put(string.Empty));
-            RegisterRouteForOnlySysDb<ConfigController>(a => a.Delete(string.Empty));
-            RegisterRouteForOnlySysDb<FilesController>(a => a.Get());
-            RegisterRouteForOnlySysDb<FilesController>(a => a.Get(string.Empty));
-            RegisterRouteForOnlySysDb<FilesController>(a => a.Head(string.Empty));
-            RegisterRouteForOnlySysDb<FilesController>(a => a.Put(string.Empty, null));
-            RegisterRouteForOnlySysDb<FilesController>(a => a.Delete(string.Empty));
-            RegisterRouteForOnlySysDb<FilesController>(a => a.Patch(string.Empty, string.Empty));
-            RegisterRouteForOnlySysDb<FilesController>(a => a.Post(string.Empty));
-            RegisterRouteForOnlySysDb<FoldersController>(a => a.Subdirectories(null));
-            RegisterRouteForOnlySysDb<RdcController>(a => a.Signatures(string.Empty));
-            RegisterRouteForOnlySysDb<RdcController>(a => a.Stats());
-            RegisterRouteForOnlySysDb<RdcController>(a => a.Manifest(string.Empty));
-            RegisterRouteForOnlySysDb<SearchController>(a => a.Terms());
-            RegisterRouteForOnlySysDb<SearchController>(a => a.Get(string.Empty, new string[] {}));
-            RegisterRouteForOnlySysDb<StaticFSController>(a => a.ClientAccessPolicy());
-            RegisterRouteForOnlySysDb<StaticFSController>(a => a.RavenStudioXap());
-            RegisterRouteForOnlySysDb<StaticFSController>(a => a.FavIcon());
-            RegisterRouteForOnlySysDb<StaticFSController>(a => a.Root());
-            RegisterRouteForOnlySysDb<StaticFSController>(a => a.Id());
-            RegisterRouteForOnlySysDb<StatsController>(a => a.Get());
-            RegisterRouteForOnlySysDb<StorageController>(a => a.RetryRenaming());
-            RegisterRouteForOnlySysDb<StorageController>(a => a.CleanUp());
-            RegisterRouteForOnlySysDb<SynchronizationController>(a => a.ToDestinations(false));
-            RegisterRouteForOnlySysDb<SynchronizationController>(a => a.Start(string.Empty));
-            RegisterRouteForOnlySysDb<SynchronizationController>(a => a.MultipartProceed());
-            RegisterRouteForOnlySysDb<SynchronizationController>(a => a.UpdateMetadata(string.Empty));
-            RegisterRouteForOnlySysDb<SynchronizationController>(a => a.Delete(string.Empty));
-            RegisterRouteForOnlySysDb<SynchronizationController>(a => a.Rename(string.Empty, string.Empty));
-            RegisterRouteForOnlySysDb<SynchronizationController>(a => a.Confirm());
-            RegisterRouteForOnlySysDb<SynchronizationController>(a => a.Finished());
-            RegisterRouteForOnlySysDb<SynchronizationController>(a => a.Active());
-            RegisterRouteForOnlySysDb<SynchronizationController>(a => a.Pending());
-            RegisterRouteForOnlySysDb<SynchronizationController>(a => a.Conflicts());
-            RegisterRouteForOnlySysDb<SynchronizationController>(a => a.ResolveConflict(string.Empty, ConflictResolutionStrategy.CurrentVersion));
-            RegisterRouteForOnlySysDb<SynchronizationController>(a => a.ApplyConflict(string.Empty, 0, string.Empty, string.Empty));
-            RegisterRouteForOnlySysDb<SynchronizationController>(a => a.LastSynchronization(Guid.Empty));
-            RegisterRouteForOnlySysDb<SynchronizationController>(a => a.IncrementLastETag(Guid.Empty, string.Empty, Guid.Empty));
-            RegisterRouteForOnlySysDb<SynchronizationController>(a => a.Status(null));
-			RegisterRouteForOnlySysDb<AdminFileSystemController>(a => a.Put(null));
-            RegisterRouteForOnlySysDb<FileSystemsController>(a => a.Stats());
-            RegisterRouteForOnlySysDb<FileSystemsController>(a => a.Names());
-
             RegisterRouteForOnlySysDb<StudioTasksController>(a => a.GetNewEncryption(null));
             RegisterRouteForOnlySysDb<StudioTasksController>(a => a.IsBase64Key(null));
+            RegisterRouteForOnlySysDb<SilverlightController>(a => a.SilverlightUi(null));
+            RegisterRouteForOnlySysDb<SilverlightController>(a => a.SilverlightEnsureStartup());
 
             const string nonSystemDbPrefix = "databases/{databaseName}/";
 
             var routeMethods = typeof (RavenDbApiController).Assembly
                                                             .DefinedTypes
+                                                            .Where(t=> ignoredNamespaces.Contains(t.Namespace) == false)
                                                             .SelectMany(t => t.GetMethods())
                                                             .Where(m => m.CustomAttributes.Any(a => a.AttributeType == typeof(RouteAttribute)));
 

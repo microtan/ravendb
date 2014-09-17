@@ -11,6 +11,9 @@ class documentMetadata {
     etag: string;
     nonStandardProps: Array<string>;
 
+    lastModifiedFullDate: KnockoutComputed<string>;
+    now = ko.observable(new Date());
+
     constructor(dto?: documentMetadataDto) {
         if (dto) {
             this.ravenEntityName = dto['Raven-Entity-Name'];
@@ -19,11 +22,31 @@ class documentMetadata {
             this.id = dto['@id'];
             this.tempIndexScore = dto['Temp-Index-Score'];
             this.lastModified = dto['Last-Modified'];
+
+            this.lastModifiedFullDate = ko.computed(() => {
+                if (!!this.lastModified) {
+                    var lastModifiedMoment = moment(this.lastModified);
+                    var timeSince = lastModifiedMoment.from(this.now());
+                    var fullTimeSinceUtc = lastModifiedMoment.utc().format("DD/MM/YYYY HH:mm (UTC)");
+                    return timeSince + " (" + fullTimeSinceUtc + ")";
+                }
+                return "";
+            });
+            setInterval(() => this.now(new Date()), 60*1000);
+
             this.ravenLastModified = dto['Raven-Last-Modified'];
             this.etag = dto['@etag'];
 
             for (var property in dto) {
-                if (property !== 'Raven-Entity-Name' && property !== 'Raven-Clr-Type' && property !== 'Non-Authoritative-Information' && property !== '@id' && property !== 'Temp-Index-Score' && property !== 'Last-Modified' && property !== 'Raven-Last-Modified' && property !== '@etag') {
+                if (property.toUpperCase() !== 'Raven-Entity-Name'.toUpperCase() &&
+                    property.toUpperCase() !== 'Raven-Clr-Type'.toUpperCase() &&
+                    property.toUpperCase() !== 'Non-Authoritative-Information'.toUpperCase() &&
+                    property.toUpperCase() !== '@id'.toUpperCase() &&
+                    property.toUpperCase() !== 'Temp-Index-Score'.toUpperCase() &&
+                    property.toUpperCase() !== 'Last-Modified'.toUpperCase() &&
+                    property.toUpperCase() !== 'Raven-Last-Modified'.toUpperCase() &&
+                    property.toUpperCase() !== '@etag'.toUpperCase() &&
+                    property.toUpperCase() !== 'toDto'.toUpperCase()) {
                     this.nonStandardProps = this.nonStandardProps || [];
                     this[property] = dto[property];
                     this.nonStandardProps.push(property);

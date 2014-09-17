@@ -2,15 +2,14 @@
 using System.Collections.Specialized;
 using Raven.Database.Server.RavenFS.Storage;
 using Xunit;
+using Raven.Json.Linq;
+using Raven.Database.Server.RavenFS.Extensions;
 
 namespace RavenFS.Tests.Bugs
 {
 	public class ReadingFileIfFileWithGreaterNameExists : StorageTest
 	{
-		private readonly NameValueCollection metadataWithEtag = new NameValueCollection
-			                                                        {
-				                                                        {"ETag", "\"" + Guid.Empty + "\""}
-			                                                        };
+		private readonly RavenJObject metadataWithEtag = new RavenJObject().WithETag(Guid.Empty);
 
 		[Fact]
 		public void Should_work()
@@ -44,7 +43,7 @@ namespace RavenFS.Tests.Bugs
 						accessor.CompleteFileUpload(greaterFileName);
 					});
 
-			FileAndPages fileAndPages = null;
+			FileAndPagesInformation fileAndPages = null;
 			transactionalStorage.Batch(accessor => fileAndPages = accessor.GetFile(filename, 0, 32));
 
 			Assert.Equal(2, fileAndPages.Pages.Count);

@@ -54,7 +54,7 @@ namespace Voron.Impl.FileHeaders
 				_env.Options.WriteHeader(HeaderFileNames[0], f1);
 				_env.Options.WriteHeader(HeaderFileNames[1], f2);
 
-                NativeMethods.memcpy((byte*)_theHeader, (byte*)f1, sizeof(FileHeader));
+				StdLib.memcpy((byte*)_theHeader, (byte*)f1, sizeof(FileHeader));
                 return true; // new
 			}
 
@@ -72,7 +72,8 @@ namespace Voron.Impl.FileHeaders
 			}
 
 			if (f1->Version != Constants.CurrentVersion)
-				throw new InvalidDataException("This is a db file for version " + f1->Version + ", which is not compatible with the current version " + Constants.CurrentVersion);
+				throw new InvalidDataException("This is a db file for version " + f1->Version + ", which is not compatible with the current version " + Constants.CurrentVersion + Environment.NewLine +
+					"Error at " + _env.Options.BasePath);
 
 			if (f1->TransactionId < 0)
 				throw new InvalidDataException("The transaction number cannot be negative");
@@ -80,11 +81,11 @@ namespace Voron.Impl.FileHeaders
 
 			if (f1->HeaderRevision > f2->HeaderRevision)
 			{
-			    NativeMethods.memcpy((byte*) _theHeader, (byte*) f1, sizeof (FileHeader));
+				StdLib.memcpy((byte*) _theHeader, (byte*) f1, sizeof (FileHeader));
 			}
 			else
 			{
-                NativeMethods.memcpy((byte*)_theHeader, (byte*)f2, sizeof(FileHeader));
+				StdLib.memcpy((byte*)_theHeader, (byte*)f2, sizeof(FileHeader));
 			}
 			_revision = _theHeader->HeaderRevision;
 			return false;

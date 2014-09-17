@@ -70,7 +70,7 @@ namespace Raven.Database.Server.WebApi.Handlers
 				response.RequestMessage.Headers.AcceptEncoding != null && 
 				response.RequestMessage.Headers.AcceptEncoding.Count != 0 && 
 				response.Content != null &&
-				response.Content is ChangesPushContent == false &&
+				response.Content is IEventsTransport == false &&
 				response.Content is CompressedContent == false &&
 				response.Content is CompressedStreamContent == false &&
 				response.Content is CompressedStringContent == false)
@@ -89,8 +89,12 @@ namespace Raven.Database.Server.WebApi.Handlers
 		{
 			private readonly HttpContent originalContent;
 			private readonly string encodingType;
+		    public HttpContent OriginalContent
+		    {
+		        get { return originalContent; }
+		    }
 
-			public CompressedContent(HttpContent content, string encodingType)
+		    public CompressedContent(HttpContent content, string encodingType)
 			{
 				if (content == null)
 				{

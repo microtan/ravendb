@@ -36,7 +36,7 @@ namespace Raven.Database.Storage.Voron
             Staleness = new StalenessStorageActions(storage, snapshotReference, writeBatchReference, bufferPool);
             MapReduce = new MappedResultsStorageActions(storage, generator, documentCodecs, snapshotReference, writeBatchReference, bufferPool);
             Attachments = new AttachmentsStorageActions(storage.Attachments, writeBatchReference, snapshotReference, generator, storage, transactionalStorage, bufferPool);
-            General = new GeneralStorageActions(storage, storage.General, writeBatchReference, snapshotReference, bufferPool);
+            General = new GeneralStorageActions(storage, writeBatchReference, snapshotReference, bufferPool);
 		}
 
 
@@ -57,6 +57,7 @@ namespace Raven.Database.Storage.Voron
 
 		public IStalenessStorageActions Staleness { get; private set; }
 
+        [Obsolete("Use RavenFS instead.")]
 		public IAttachmentsStorageActions Attachments { get; private set; }
 
 		public IIndexingStorageActions Indexing { get; private set; }

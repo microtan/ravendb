@@ -1,4 +1,4 @@
-﻿using Raven.Tests.Common;
+﻿using Raven.Tests.Helpers;
 
 using Xunit;
 
@@ -42,7 +42,7 @@ namespace Raven.Tests.MailingList
                 using (var session = store.OpenSession())
                 {
                     var doc = session
-                        .Load<Document>(docIdWithPlusSign, docIdWithoutPlusSign);
+                        .Load<Document>(new[] { docIdWithPlusSign, docIdWithoutPlusSign });
 
                     // pass
                     Assert.NotNull(doc[1]);

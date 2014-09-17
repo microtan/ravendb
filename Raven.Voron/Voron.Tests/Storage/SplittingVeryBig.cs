@@ -1,4 +1,5 @@
-﻿using Voron.Impl;
+﻿using System.Linq;
+using Voron.Impl;
 using Voron.Impl.Paging;
 
 namespace Voron.Tests.Storage
@@ -30,18 +31,19 @@ namespace Voron.Tests.Storage
 
 			using (var tx = Env.NewTransaction(TransactionFlags.ReadWrite))
 			{
-				tx.Environment.State.GetTree(tx,"tree").Add(tx, "key1", new MemoryStream(buffer));
+				tx.Environment.State.GetTree(tx,"tree").Add("key1", new MemoryStream(buffer));
 				tx.Commit();
 			}
 
 			using (var tx = Env.NewTransaction(TransactionFlags.Read))
 			{
-			    var read = tx.Environment.State.GetTree(tx,"tree").Read(tx, "key1");
+			    var read = tx.Environment.State.GetTree(tx,"tree").Read("key1");
 			    Assert.NotNull(read);
 
 			    var reader = read.Reader;
 			    Assert.Equal(buffer.Length, read.Reader.Length);
-			    Assert.Equal(buffer, reader.ReadBytes(read.Reader.Length));
+				int used;
+				Assert.Equal(buffer, reader.ReadBytes(read.Reader.Length, out used).Take(used).ToArray());
 			}
 		}
 
@@ -67,7 +69,7 @@ namespace Voron.Tests.Storage
 
 				using (var tx = env.NewTransaction(TransactionFlags.ReadWrite))
 				{
-					tx.Environment.State.GetTree(tx,"tree").Add(tx, "key1", new MemoryStream(buffer));
+					tx.Environment.State.GetTree(tx,"tree").Add("key1", new MemoryStream(buffer));
 					tx.Commit();
 				}
 			}
@@ -85,12 +87,13 @@ namespace Voron.Tests.Storage
 
 				using (var tx = env.NewTransaction(TransactionFlags.Read))
 				{
-					var read = tx.Environment.State.GetTree(tx,"tree").Read(tx, "key1");
+					var read = tx.Environment.State.GetTree(tx,"tree").Read("key1");
 					Assert.NotNull(read);
 
 					{
 						Assert.Equal(buffer.Length, read.Reader.Length);
-						Assert.Equal(buffer, read.Reader.ReadBytes(read.Reader.Length));
+						int used;
+						Assert.Equal(buffer, read.Reader.ReadBytes(read.Reader.Length, out used).Take(used).ToArray());
 					}
 				}
 			}

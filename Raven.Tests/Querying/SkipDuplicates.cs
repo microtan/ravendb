@@ -19,7 +19,7 @@ namespace Raven.Tests.Querying
 			{
 				store.DatabaseCommands.PutIndex(
 					"BlogPosts/PostsCountByTag",
-					new IndexDefinitionBuilder<BlogPost>
+					new IndexDefinitionBuilder<BlogPost>()
 					{
 						Map = posts => from post in posts
 							from tag in post.Tags
@@ -66,7 +66,7 @@ namespace Raven.Tests.Querying
 
 					WaitForIndexing(store);
 
-					var result = store.DocumentDatabase.Queries.Query("BlogPosts/PostsCountByTag", new IndexQuery{SkipDuplicateChecking = true}, CancellationToken.None);
+					var result = store.SystemDatabase.Queries.Query("BlogPosts/PostsCountByTag", new IndexQuery{SkipDuplicateChecking = true}, CancellationToken.None);
 					Assert.Equal(2, result.Results.Count);
 				}
 			}

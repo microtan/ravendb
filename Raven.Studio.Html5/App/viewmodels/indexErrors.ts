@@ -1,6 +1,8 @@
 import viewModelBase = require("viewmodels/viewModelBase");
 import getDatabaseStatsCommand = require("commands/getDatabaseStatsCommand");
 import moment = require("moment");
+import changeSubscription = require("models/changeSubscription");
+import shell = require("viewmodels/shell");
 
 class indexErrors extends viewModelBase {
 
@@ -14,10 +16,18 @@ class indexErrors extends viewModelBase {
         super();
 
         this.updateCurrentNowTime();
+        
     }
 
-    modelPolling() {
-        return this.fetchIndexErrors();
+    createNotifications(): Array<changeSubscription> {
+        return [
+            shell.currentResourceChangesApi().watchAllIndexes((e) => this.fetchIndexErrors()),
+        ];
+    }
+
+    activate(args) {
+        super.activate(args);
+        this.fetchIndexErrors();
     }
 
     deactivate() {

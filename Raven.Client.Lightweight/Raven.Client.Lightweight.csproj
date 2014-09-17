@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
@@ -16,7 +16,7 @@
     </TargetFrameworkProfile>
     <SolutionDir Condition="$(SolutionDir) == '' Or $(SolutionDir) == '*Undefined*'">..\..\ravendb\</SolutionDir>
     <RestorePackages>true</RestorePackages>
-    <FodyPath>..\packages\Fody.1.14.0</FodyPath>
+    <NuGetPackageImportStamp>9ceba09c</NuGetPackageImportStamp>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -26,7 +26,7 @@
     <DefineConstants>TRACE;DEBUG;CLIENT</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <DocumentationFile>bin\Debug\Raven.Client.Lightweight.xml</DocumentationFile>
     <NoWarn>1573, 1587, 1591</NoWarn>
     <Prefer32Bit>false</Prefer32Bit>
@@ -39,9 +39,10 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <StyleCopTreatErrorsAsWarnings>false</StyleCopTreatErrorsAsWarnings>
-    <DocumentationFile>bin\Release\Raven.Client.Lightweight.xml</DocumentationFile>
+    <DocumentationFile>bin\Release\Raven.Client.Lightweight.XML</DocumentationFile>
     <Prefer32Bit>false</Prefer32Bit>
     <Prefer32Bit>false</Prefer32Bit>
+    <NoWarn>1591</NoWarn>
   </PropertyGroup>
   <PropertyGroup>
     <SignAssembly>true</SignAssembly>
@@ -59,43 +60,46 @@
     <Reference Include="System.Net" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Net.Http.WebRequest" />
-    <Reference Include="System.Reactive.Core, Version=2.2.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\packages\Rx-Core.2.2.2\lib\net45\System.Reactive.Core.dll</HintPath>
+    <Reference Include="System.Reactive.Core">
+      <HintPath>..\packages\Rx-Core.2.2.4\lib\net45\System.Reactive.Core.dll</HintPath>
     </Reference>
-    <Reference Include="System.Reactive.Interfaces, Version=2.2.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
+    <Reference Include="System.Reactive.Interfaces, Version=2.2.4.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\packages\Rx-Interfaces.2.2.2\lib\net45\System.Reactive.Interfaces.dll</HintPath>
+      <HintPath>..\packages\Rx-Interfaces.2.2.4\lib\net45\System.Reactive.Interfaces.dll</HintPath>
     </Reference>
     <Reference Include="System.Runtime.Serialization" />
     <Reference Include="System.Transactions" />
     <Reference Include="System.Web" />
-    <Reference Include="System.Web.Http, Version=5.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
+    <Reference Include="System.Web.Http">
       <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\packages\Microsoft.AspNet.WebApi.Core.5.0.0\lib\net45\System.Web.Http.dll</HintPath>
+      <HintPath>..\packages\Microsoft.AspNet.WebApi.Core.5.1.2\lib\net45\System.Web.Http.dll</HintPath>
     </Reference>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\CommonAssemblyInfo.cs">
       <Link>Properties\CommonAssemblyInfo.cs</Link>
     </Compile>
-    <Compile Include="..\Raven.Client.WinRT\MissingFromWinRT\ThreadSleep.cs">
-      <Link>Extensions\ThreadSleep.cs</Link>
-    </Compile>
     <Compile Include="Bundles\MoreLikeThis\MoreLikeThisExtensions.cs" />
     <Compile Include="Bundles\Versioning\VersioningExtensions.cs" />
+    <Compile Include="Changes\IConnectableChanges.cs" />
+    <Compile Include="Changes\IChangesConnectionState.cs" />
+    <Compile Include="Changes\IConnectableChanges`1.cs" />
+    <Compile Include="Changes\RemoteChangesClientBase.cs" />
+    <Compile Include="Changes\RemoteDatabaseChanges.cs" />
     <Compile Include="Connection\AdminRequestCreator.cs" />
     <Compile Include="Connection\AdminServerClient.cs" />
     <Compile Include="Connection\Async\AsyncAdminServerClient.cs" />
+    <Compile Include="Connection\Async\AsyncServerClientBase.cs" />
     <Compile Include="Connection\ConnectionOptions.cs" />
     <Compile Include="Connection\CompressedStreamContent.cs" />
     <Compile Include="Connection\HttpContentExtentions.cs" />
     <Compile Include="Connection\IDocumentStoreReplicationInformer.cs" />
     <Compile Include="Connection\IReplicationInformerBase.cs" />
     <Compile Include="Connection\Operation.cs" />
-    <Compile Include="Connection\NameValueCollectionExtensions.cs" />
     <Compile Include="Connection\OperationMetadata.cs" />
     <Compile Include="Connection\ReplicationInformer.cs" />
+    <Compile Include="Counters\Connections\CounterConvention.cs" />
+    <Compile Include="Counters\RavenCountersClient.cs" />
     <Compile Include="Document\Batches\LazyMoreLikeThisOperation.cs" />
     <Compile Include="Document\Batches\LazyTransformerLoadOperation.cs" />
     <Compile Include="Document\DTC\IsolatedStorageTransactionRecoveryContext.cs" />
@@ -108,52 +112,69 @@
     <Compile Include="Document\ResponseTimeInformation.cs" />
     <Compile Include="Document\SessionOperations\LoadTransformerOperation.cs" />
     <Compile Include="Convention.cs" />
+    <Compile Include="Extensions\Internal\HttpJsonRequestExtensions.cs" />
+    <Compile Include="FileSystem\AbstractFilesQuery.cs" />
+    <Compile Include="FileSystem\AsyncFilesSession.cs" />
+    <Compile Include="FileSystem\Changes\FilesChangesClient.cs" />
+    <Compile Include="FileSystem\Changes\FilesConnectionState.cs" />
+    <Compile Include="FileSystem\Connection\FilesReplicationInformer.cs" />
+    <Compile Include="FileSystem\Connection\IAsyncFilesCommandsImpl.cs" />
+    <Compile Include="FileSystem\Connection\IFilesReplicationInformer.cs" />
+    <Compile Include="FileSystem\Extensions\FilesSynchronizationExtensions.cs" />
+    <Compile Include="FileSystem\Extensions\FilesTenancyExtensions.cs" />
+    <Compile Include="FileSystem\AsyncFilesQuery.cs" />
+    <Compile Include="FileSystem\IAbstractFilesQuery.cs" />
+    <Compile Include="FileSystem\IAsyncFilesQuery.cs" />
+    <Compile Include="FileSystem\IAsyncFilesQueryBase.cs" />
+    <Compile Include="FileSystem\Impl\DeleteFileOperation.cs" />
+    <Compile Include="FileSystem\Impl\IFilesOperation.cs" />
+    <Compile Include="FileSystem\FilesQueryStatistics.cs" />
+    <Compile Include="FileSystem\FilesSessionListeners.cs" />
+    <Compile Include="FileSystem\FilesConvention.cs" />
+    <Compile Include="FileSystem\FilesStore.cs" />
+    <Compile Include="FileSystem\IAdvancedFilesSessionOperations.cs" />
+    <Compile Include="FileSystem\IAsyncAdvancedFilesSessionOperations.cs" />
+    <Compile Include="FileSystem\IAsyncFilesCommands.cs" />
+    <Compile Include="FileSystem\IAsyncFilesSession.cs" />
+    <Compile Include="FileSystem\IFilesChanges.cs" />
+    <Compile Include="FileSystem\Impl\RenameFileOperation.cs" />
+    <Compile Include="FileSystem\Impl\UpdateMetadataOperation.cs" />
+    <Compile Include="FileSystem\Impl\UploadFileOperation.cs" />
+    <Compile Include="FileSystem\InMemoryFilesSessionOperations.cs" />
+    <Compile Include="FileSystem\Listeners\IFilesConflictListener.cs" />
+    <Compile Include="FileSystem\Listeners\IFilesDeleteListener.cs" />
+    <Compile Include="FileSystem\IFilesStore.cs" />
+    <Compile Include="FileSystem\Listeners\IMetadataChangeListener.cs" />
+    <Compile Include="FileSystem\OpenFilesSessionOptions.cs" />
+    <Compile Include="FileSystem\Shard\IShardAccessStrategy.cs" />
+    <Compile Include="FileSystem\Shard\IShardResolutionStrategy.cs" />
     <Compile Include="Indexes\RavenMethodAttribute.cs" />
     <Compile Include="Linq\AggregationQuery.cs" />
     <Compile Include="Linq\DynamicAggregationQuery.cs" />
-    <Compile Include="RavenFS\AsyncExtensions.cs" />
-    <Compile Include="RavenFS\Changes\ImmutableList.cs" />
-    <Compile Include="RavenFS\Changes\IServerNotifications.cs" />
-    <Compile Include="RavenFS\Changes\NotificationSubject.cs" />
-    <Compile Include="RavenFS\Changes\ServerNotifications.cs" />
-    <Compile Include="RavenFS\Changes\TaskErrorExtensions.cs" />
-    <Compile Include="RavenFS\Connections\FileConvention.cs" />
-    <Compile Include="RavenFS\Connections\IFileSystemClientReplicationInformer.cs" />
-    <Compile Include="RavenFS\Connections\RavenFileSystemReplicationInformer.cs" />
-    <Compile Include="RavenFS\ExceptionExtensions.cs" />
-    <Compile Include="RavenFS\Extensions\FileSystemTenancyExtensions.cs" />
-    <Compile Include="RavenFS\Extensions\RavenFileSystemClientExtensions.cs" />
-    <Compile Include="RavenFS\ListenableStream.cs" />
-    <Compile Include="RavenFS\ListPage.cs" />
-    <Compile Include="RavenFS\NameValueCollectionJsonConverter.cs" />
-    <Compile Include="RavenFS\NotificationJSonUtilities.cs" />
-    <Compile Include="RavenFS\RavenFileSystemClient.cs" />
-    <Compile Include="RavenFS\Shard\DefaultShardResolutionStrategy.cs" />
-    <Compile Include="RavenFS\Shard\IShardAccessStrategy.cs" />
-    <Compile Include="RavenFS\Shard\IShardResolutionStrategy.cs" />
-    <Compile Include="RavenFS\Shard\SequentialShardAccessStrategy.cs" />
-    <Compile Include="RavenFS\Shard\ShardedRavenFileSystemClient.cs" />
-    <Compile Include="RavenFS\Shard\ShardPagingInfo.cs" />
-    <Compile Include="RavenFS\Shard\ShardRequestData.cs" />
-    <Compile Include="RavenFS\Shard\ShardStrategy.cs" />
-    <Compile Include="RavenFS\SourceSynchronizationInformation.cs" />
-    <Compile Include="RavenFS\StringUtils.cs" />
-    <Compile Include="RavenFS\SynchronizationDestination.cs" />
-    <Compile Include="RavenFS\Util\TaskExtensions.cs" />
+    <Compile Include="Extensions\AsyncExtensions.cs" />
+    <Compile Include="FileSystem\Extensions\ExceptionExtensions.cs" />
+    <Compile Include="Util\BlockingStream.cs" />
+    <Compile Include="Util\ListenableStream.cs" />
+    <Compile Include="FileSystem\AsyncFilesServerClient.cs" />
+    <Compile Include="FileSystem\Shard\DefaultShardResolutionStrategy.cs" />
+    <Compile Include="FileSystem\Shard\SequentialShardAccessStrategy.cs" />
+    <Compile Include="FileSystem\Shard\AsyncShardedFilesServerClient.cs" />
+    <Compile Include="FileSystem\Shard\ShardPagingInfo.cs" />
+    <Compile Include="FileSystem\Shard\ShardRequestData.cs" />
+    <Compile Include="FileSystem\Shard\ShardStrategy.cs" />
     <Compile Include="RavenPagingInformation.cs" />
     <Compile Include="Shard\ShardedRavenQueryInspector.cs" />
     <Compile Include="Spatial\SpatialCriteria.cs" />
     <Compile Include="Spatial\SpatialCriteriaFactory.cs" />
     <Compile Include="Util\EvictItemsFromCacheBasedOnChanges.cs" />
     <Compile Include="Changes\IDatabaseChanges.cs" />
-    <Compile Include="Changes\LocalConnectionState.cs" />
-    <Compile Include="Changes\RemoteDatabaseChanges.cs" />
+    <Compile Include="Changes\DatabaseConnectionState.cs" />
     <Compile Include="Changes\TaskedObservable.cs" />
     <Compile Include="Changes\TaskErrorExtensions.cs" />
     <Compile Include="Document\RavenLoadConfiguration.cs" />
     <Compile Include="ILoadConfiguration.cs" />
     <Compile Include="Indexes\AbstractResultsTransformer.cs" />
-    <Compile Include="Listeners\IExtendedDocumentConversionListener.cs" />
+    <Compile Include="Listeners\IDocumentConversionListener.cs" />
     <Compile Include="Util\CSharpClassName.cs" />
     <Compile Include="Connection\Async\AsyncDatabaseCommandsExtensions.cs" />
     <Compile Include="Connection\Async\AsyncServerClient.cs" />
@@ -178,7 +199,7 @@
     <Compile Include="Connection\RavenTransactionAccessor.cs" />
     <Compile Include="Connection\RavenUrlExtensions.cs" />
     <Compile Include="Connection\ReplicationInformerBase.cs" />
-    <Compile Include="Connection\ReplicationInformerCache.cs" />
+    <Compile Include="Connection\ReplicationInformerLocalCache.cs" />
     <Compile Include="Connection\SerializationHelper.cs" />
     <Compile Include="Connection\ServerClient.cs" />
     <Compile Include="Connection\ServerHash.cs" />
@@ -220,7 +241,6 @@
     <Compile Include="Document\DocumentSession.cs" />
     <Compile Include="Document\DocumentStore.cs" />
     <Compile Include="Document\DTC\PendingTransactionRecovery.cs" />
-    <Compile Include="Document\FailoverBehavior.cs" />
     <Compile Include="Document\HiLoKeyGenerator.cs" />
     <Compile Include="Document\HiLoKeyGeneratorBase.cs" />
     <Compile Include="Document\IAbstractDocumentQuery.cs" />
@@ -243,7 +263,6 @@
     <Compile Include="Exceptions\NonAuthoritiveInformationException.cs" />
     <Compile Include="Exceptions\NonUniqueObjectException.cs" />
     <Compile Include="Exceptions\ReadVetoException.cs" />
-    <Compile Include="Extensions\DatabaseCommandsExtensions.cs" />
     <Compile Include="Extensions\MultiDatabase.cs" />
     <Compile Include="Extensions\MultiTenancyExtensions.cs" />
     <Compile Include="Extensions\StringExtensions.cs" />
@@ -262,7 +281,6 @@
     <Compile Include="Linq\ReflectionExtensions.cs" />
     <Compile Include="Listeners\IDocumentConflictListener.cs" />
     <Compile Include="PublicExtensions\SearchOptions.cs" />
-    <Compile Include="Listeners\IDocumentConversionListener.cs" />
     <Compile Include="Listeners\IDocumentDeleteListener.cs" />
     <Compile Include="IDocumentQuery.cs" />
     <Compile Include="IDocumentQueryBase.cs" />
@@ -309,10 +327,8 @@
     <Compile Include="Shard\ShardedObservableWithTask.cs" />
     <Compile Include="Shard\ShardRequestData.cs" />
     <Compile Include="Shard\ShardStrategy.cs" />
-    <Compile Include="StoredEntityEventArgs.cs" />
     <Compile Include="Util\GlobalLastEtagHolder.cs" />
     <Compile Include="Util\JSBeautify.cs" />
-    <Compile Include="Util\ConcatObservable.cs" />
     <Compile Include="Changes\TaskObservable.cs" />
     <Compile Include="Util\Inflector.cs" />
     <Compile Include="Util\LastEtagHolder.cs" />
@@ -326,6 +342,7 @@
     <None Include="..\Raven.Database\RavenDB.snk">
       <Link>RavenDB.snk</Link>
     </None>
+    <None Include="app.config" />
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
@@ -337,10 +354,12 @@
   <ItemGroup>
     <Content Include="FodyWeavers.xml" />
   </ItemGroup>
-  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <Import Project="$(MSBuildProjectDirectory)\..\Tools\StyleCop\StyleCop.Targets" />
-  <Import Project="$(SolutionDir)\.nuget\nuget.targets" />
-  <Import Project="$(SolutionDir)\Imports\Fody\Fody.targets" Condition="$(Configuration) != 'Debug'" />
+  <ItemGroup />
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" Condition="'$(TasksTargetsImported)' == ''" />
+  <Import Project="$(MSBuildProjectDirectory)\..\Tools\StyleCop\StyleCop.Targets" Condition="'$(TasksTargetsImported)' == ''" />
+  <Import Project="$(SolutionDir)\.nuget\nuget.targets" Condition="'$(TasksTargetsImported)' == ''" />
   <Target Name="AfterBuild">
   </Target>
+  <Import Project="..\Imports\Fody\Fody.targets" Condition="$(Configuration) == 'Release'" />
+  <Import Project="..\Imports\Tasks.targets" Condition="'$(TasksTargetsImported)' == ''" />
 </Project>

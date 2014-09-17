@@ -165,7 +165,6 @@ namespace Raven.Client
 		/// <summary>
 		/// Execute the transformation function on the results of this query.
 		/// </summary>
-		[Obsolete("Use Result Transformers instead.")]
 		IDocumentQueryCustomization TransformResults(Func<IndexQuery,IEnumerable<object>, IEnumerable<object>> resultsTransformer);
 
 		/// <summary>
@@ -201,6 +200,13 @@ namespace Raven.Client
 		/// <param name="postTag">Postfix tag.</param>
 		IDocumentQueryCustomization SetHighlighterTags(string preTag, string postTag);
 
+        /// <summary>
+        /// If set to true, this property will send multiple index entries from the same document (assuming the index project them)
+        /// to the result transformer function. Otherwise, those entries will be consolidate an the transformer will be 
+        /// called just once for each document in the result set
+        /// </summary>
+	    IDocumentQueryCustomization SetAllowMultipleIndexEntriesForSameDocumentToResultTransformer(bool val);
+
 		/// <summary>
 		///   Sets the tags to highlight matches with.
 		/// </summary>
@@ -218,5 +224,10 @@ namespace Raven.Client
 		/// Disables caching for query results.
 		/// </summary>
 		IDocumentQueryCustomization NoCaching();
+
+		/// <summary>
+		/// Enables calculation of timings for various parts of a query (Lucene search, loading documents, transforming results). Default: false
+		/// </summary>
+		IDocumentQueryCustomization ShowTimings();
 	}
 }

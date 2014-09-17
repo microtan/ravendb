@@ -60,6 +60,11 @@ namespace Raven.Storage.Esent.StorageActions
 				}
 			}
 
+			return IsIndexStaleByTask(view, cutOff);
+		}
+
+		public bool IsIndexStaleByTask(int view, DateTime? cutOff)
+		{
 			Api.JetSetCurrentIndex(session, Tasks, "by_index");
 			Api.MakeKey(session, Tasks, view, MakeKeyGrbit.NewKey);
 			if (Api.TrySeek(session, Tasks, SeekGrbit.SeekEQ) == false)
@@ -141,6 +146,7 @@ namespace Raven.Storage.Esent.StorageActions
 			return Etag.Parse(lastEtag);
 		}
 
+        [Obsolete("Use RavenFS instead.")]
 		public Etag GetMostRecentAttachmentEtag()
 		{
 			Api.JetSetCurrentIndex(session, Files, "by_etag");

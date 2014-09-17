@@ -1,17 +1,13 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Net;
+using System.Collections.Specialized;
+
+using Raven.Abstractions.Connection;
 using Raven.Client.Connection.Async;
 using Raven.Client.Document;
-#if NETFX_CORE
-using Raven.Client.WinRT.Connection;
-#endif
+using Raven.Client.Extensions;
 
 namespace Raven.Client.Connection
 {
-    using System.Collections.Specialized;
-	using Raven.Abstractions.Connection;
-
 	public static class RavenUrlExtensions
 	{
         public static string ForDatabase(this string url, string database)
@@ -49,7 +45,7 @@ namespace Raven.Client.Connection
 
 		public static string AdminStats(this string url)
 		{
-			return url + "/admin/stats";
+			return MultiDatabase.GetRootDatabaseUrl(url) +"/admin/stats";
 		}
 
 		public static string ReplicationInfo(this string url)
@@ -62,14 +58,9 @@ namespace Raven.Client.Connection
 			return destinationUrl + "/replication/lastEtag?from=" + Uri.EscapeDataString(sourceUrl);
 		}
 
-		//public static string Static(this string url, string key)
-		//{
-		//    return url + "/static/" + HttpUtility.UrlEncode(key);
-		//}
-
 		public static string Databases(this string url, int pageSize, int start)
 		{
-			var databases = url + "/databases?pageSize=" + pageSize;
+			var databases = MultiDatabase.GetRootDatabaseUrl(url) +"/databases?pageSize=" + pageSize;
 			return start > 0 ? databases + "&start=" + start : databases;
 		}
 
@@ -88,19 +79,9 @@ namespace Raven.Client.Connection
 			return url + "/docs/?start=" + start + "&pageSize=" + pageSize;
 		}
 
-		//public static string DocsStartingWith(this string url, string prefix, int start, int pageSize)
-		//{
-		//    return Docs(url, start, pageSize) + "&startsWith=" + HttpUtility.UrlEncode(prefix);
-		//}
-
 		public static string Queries(this string url)
 		{
 			return url + "/queries/";
-		}
-
-		public static string NoCache(this string url)
-		{
-			return url;
 		}
 
 		public static Uri ToUri(this string url)
@@ -108,7 +89,7 @@ namespace Raven.Client.Connection
 			return new Uri(url);
 		}
 
-		public static HttpJsonRequest ToJsonRequest(this string url, AsyncServerClient requestor, OperationCredentials credentials, Document.DocumentConvention convention)
+		public static HttpJsonRequest ToJsonRequest(this string url, AsyncServerClient requestor, OperationCredentials credentials, DocumentConvention convention)
 		{
 			return requestor.jsonRequestFactory.CreateHttpJsonRequest(new CreateHttpJsonRequestParams(requestor, url, "GET", credentials, convention));
 		}
@@ -118,9 +99,9 @@ namespace Raven.Client.Connection
 												 NameValueCollection operationsHeaders, string method)
 		{
 			var httpJsonRequest = requestor.jsonRequestFactory.CreateHttpJsonRequest(
-					new CreateHttpJsonRequestParams(requestor, url, method, credentials, convention)
-							.AddOperationHeaders(operationsHeaders));
-
+				new CreateHttpJsonRequestParams(requestor, url, method, credentials, convention)
+					.AddOperationHeaders(operationsHeaders));
+			
 			return httpJsonRequest;
 		}
 	}

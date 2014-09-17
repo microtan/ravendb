@@ -2,26 +2,53 @@
 import windowsAuthData = require("models/windowsAuthData");
 import viewModelBase = require("viewmodels/viewModelBase");
 import getWindowsAuthCommand = require("commands/getWindowsAuthCommand");
-import saveWindowsAuthCommand = require("commands/saveWindowsAuthCommand");
+import shell = require("viewmodels/shell");
+import database = require("models/database");
 
-class windowsAuth {
+class windowsAuth extends viewModelBase {
 
-    setup = ko.observable<windowsAuthSetup>();
+    setup = ko.observable<windowsAuthSetup>().extend({ required: true });
+    isSaveEnabled: KnockoutComputed<boolean>;
+    isUsersSectionActive = ko.observable<boolean>(true);
 
-    activate() {
+    canActivate(args) {
+        var deffered = $.Deferred();
         this.setup(new windowsAuthSetup({ RequiredUsers: [], RequiredGroups: [] }));
+        this.fetchWindowsAuth().always(() => deffered.resolve({ can: true }));
 
-        new getWindowsAuthCommand()
+        return deffered;
+    }
+
+    activate(args) {
+        super.activate(args);
+
+        this.dirtyFlag = new ko.DirtyFlag([this.setup]);
+        this.isSaveEnabled = ko.computed(() => this.dirtyFlag().isDirty());
+    }
+
+    compositionComplete() {
+        super.compositionComplete();
+        $("form").on("keypress", 'input[name="databaseName"]', (e) => e.which != 13);
+    }
+
+    private fetchWindowsAuth(): JQueryPromise<any> {
+        return new getWindowsAuthCommand()
             .execute()
-            .done(result => this.setup(result));
+            .done((result: windowsAuthSetup) => this.setup(result));
     }
 
     saveChanges() {
-        new saveWindowsAuthCommand(this.setup().toDto()).execute();
+        require(["commands/saveWindowsAuthCommand"], saveWindowsAuthCommand => {
+            new saveWindowsAuthCommand(this.setup().toDto())
+                .execute()
+                .done(() => this.dirtyFlag().reset());
+        });
     }
 
     addUserSettings() {
-        this.setup().requiredUsers.push(windowsAuthData.empty());
+        var newAuthData = windowsAuthData.empty();
+        windowsAuthSetup.subscribeToObservableName(newAuthData, this.setup().requiredUsers);
+        this.setup().requiredUsers.push(newAuthData);
     }
 
     removeUserSettings(data: windowsAuthData) {
@@ -29,13 +56,14 @@ class windowsAuth {
     }
 
     addGroupSettings() {
-        this.setup().requiredGroups.push(windowsAuthData.empty());
+        var newAuthData = windowsAuthData.empty();
+        windowsAuthSetup.subscribeToObservableName(newAuthData, this.setup().requiredGroups);
+        this.setup().requiredGroups.push(newAuthData);
     }
 
     removeGroupSettings(data: windowsAuthData) {
         this.setup().requiredGroups.remove(data);
     }
-
 }
 
 export = windowsAuth;

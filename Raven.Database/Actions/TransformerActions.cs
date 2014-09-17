@@ -7,6 +7,7 @@ using System;
 using System.Linq;
 using System.Runtime.CompilerServices;
 
+using Raven.Abstractions.Data;
 using Raven.Abstractions.Indexing;
 using Raven.Abstractions.Logging;
 using Raven.Database.Data;
@@ -52,6 +53,11 @@ namespace Raven.Database.Actions
         public void DeleteTransform(string name)
         {
             IndexDefinitionStorage.RemoveTransformer(name);
+            TransactionalStorage.ExecuteImmediatelyOrRegisterForSynchronization(() => Database.Notifications.RaiseNotifications(new TransformerChangeNotification
+            {
+                Name = name,
+                Type = TransformerChangeTypes.TransformerRemoved
+            }));
         }
 
         [MethodImpl(MethodImplOptions.Synchronized)]
@@ -66,13 +72,24 @@ namespace Raven.Database.Actions
             if (existingDefinition != null && existingDefinition.Equals(definition))
                 return name; // no op for the same transformer
 
+			var generator = IndexDefinitionStorage.CompileTransform(definition);
+
+			if (existingDefinition != null)
+				IndexDefinitionStorage.RemoveTransformer(existingDefinition.TransfomerId);
+
             TransactionalStorage.Batch(accessor =>
             {
-                definition.TransfomerId = (int)Database.Documents.GetNextIdentityValueWithoutOverwritingOnExistingDocuments("TransformerId", accessor, null);
+                definition.TransfomerId = (int)Database.Documents.GetNextIdentityValueWithoutOverwritingOnExistingDocuments("TransformerId", accessor);
             });
 
-            IndexDefinitionStorage.CreateAndPersistTransform(definition);
+			IndexDefinitionStorage.CreateAndPersistTransform(definition, generator);
             IndexDefinitionStorage.AddTransform(definition.TransfomerId, definition);
+
+            TransactionalStorage.ExecuteImmediatelyOrRegisterForSynchronization(() => Database.Notifications.RaiseNotifications(new TransformerChangeNotification()
+            {
+                Name = name,
+                Type = TransformerChangeTypes.TransformerAdded,
+            }));
 
             return name;
         }

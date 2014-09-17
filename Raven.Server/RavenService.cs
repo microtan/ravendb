@@ -56,7 +56,25 @@ namespace Raven.Server
 			var shutdownTask = startTask.ContinueWith(task =>
 			{
 				if (server != null)
-					server.Dispose();
+				{
+					try
+					{
+						server.Dispose();
+					}
+					catch (Exception e)
+					{
+						var message =
+							string.Format(
+								"Unhandled exception was thrown during stopping RavenDB service. Ignoring it to properly stop the service. Exception: {0}",
+								e.ToString());
+
+						LogManager.GetCurrentClassLogger().Error(message);
+
+						EventLog.WriteEntry(
+							message,
+							EventLogEntryType.Error);
+					}
+				}
 				return task;
 			});
 
@@ -78,7 +96,23 @@ namespace Raven.Server
 			var shutdownTask = startTask.ContinueWith(task =>
 			{
 				if (server != null)
-					server.Dispose();
+				{
+					try
+					{
+						server.Dispose();
+					}
+					catch (Exception e)
+					{
+						var message =
+							string.Format(
+								"Unhandled exception was thrown during shutting down RavenDB service. Ignoring it to properly shutdown the service. Exception: {0}",
+								e.ToString());
+
+						LogManager.GetCurrentClassLogger().Error(message);
+
+						EventLog.WriteEntry(message, EventLogEntryType.Error);
+					}
+				}
 				return task;
 			});
 			Task.WaitAll(shutdownTask);
@@ -96,7 +130,7 @@ namespace Raven.Server
 		private void AcceptPreShutdown()
 		{
 			if (Environment.OSVersion.Version.Major == 5)
-				return; // XP & 2003 does nto support this.
+				return; // XP & 2003 does not support this.
 
 			// http://www.sivachandran.in/2012/03/handling-pre-shutdown-notification-in-c.html
 			FieldInfo acceptedCommandsFieldInfo = typeof (ServiceBase).GetField("acceptedCommands", BindingFlags.Instance | BindingFlags.NonPublic);

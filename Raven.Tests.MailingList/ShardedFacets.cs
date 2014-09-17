@@ -5,11 +5,13 @@
 // -----------------------------------------------------------------------
 using System.Collections.Generic;
 using Raven.Abstractions.Data;
+using Raven.Abstractions.Replication;
 using Raven.Client;
 using Raven.Client.Document;
 using Raven.Client.Indexes;
 using Raven.Client.Shard;
 using Raven.Tests.Common;
+using Raven.Tests.Helpers;
 
 using Xunit;
 using System.Linq;

@@ -13,6 +13,7 @@ using Raven.Client.Connection.Async;
 using Raven.Client.Listeners;
 using Raven.Client.Spatial;
 using Raven.Imports.Newtonsoft.Json.Utilities;
+using Raven.Json.Linq;
 
 namespace Raven.Client.Document
 {
@@ -671,7 +672,7 @@ namespace Raven.Client.Document
 		/// <typeparam name="TProjection">The type of the projection.</typeparam>
 		public virtual IAsyncDocumentQuery<TProjection> SelectFields<TProjection>()
 		{
-			return SelectFields<TProjection>(typeof (TProjection).GetProperties(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public).Select(x => x.Name).ToArray());
+			return SelectFields<TProjection>(ReflectionUtil.GetPropertiesAndFieldsFor<TProjection>(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public).Select(x => x.Name).ToArray());
 		}
 
 		/// <summary>
@@ -707,6 +708,7 @@ namespace Raven.Client.Document
 											sortByHints = sortByHints,
 											orderByFields = orderByFields,
 											isDistinct = isDistinct,
+                                            allowMultipleIndexEntriesForSameDocumentToResultTransformer = allowMultipleIndexEntriesForSameDocumentToResultTransformer,
 											negate = negate,
 											transformResultsFunc = transformResultsFunc,
 											includes = new HashSet<string>(includes),
@@ -724,9 +726,10 @@ namespace Raven.Client.Document
 											highlighterPreTags = highlighterPreTags,
 											highlighterPostTags = highlighterPostTags,
 											resultsTransformer = resultsTransformer,
-											queryInputs = queryInputs,
+											transformerParameters = transformerParameters,
 											disableEntitiesTracking = disableEntitiesTracking,
 											disableCaching = disableCaching,
+											showQueryTimings = showQueryTimings,
 											lastEquality = lastEquality,
 											shouldExplainScores = shouldExplainScores
 										};
@@ -743,6 +746,16 @@ namespace Raven.Client.Document
 		{
 			var criteria = clause(new SpatialCriteriaFactory());
 			return GenerateSpatialQueryData(fieldName, criteria);
+		}
+
+		public void SetQueryInputs(Dictionary<string, RavenJToken> queryInputs)
+		{
+			SetTransformerParameters(queryInputs);
+		}
+
+		public void SetTransformerParameters(Dictionary<string, RavenJToken> parameters)
+		{
+			transformerParameters = parameters;
 		}
 
 		/// <summary>
@@ -830,9 +843,9 @@ namespace Raven.Client.Document
 		/// Perform a search for documents which fields that match the searchTerms.
 		/// If there is more than a single term, each of them will be checked independently.
 		/// </summary>
-		IAsyncDocumentQuery<T> IDocumentQueryBase<T, IAsyncDocumentQuery<T>>.Search(string fieldName, string searchTerms)
+		IAsyncDocumentQuery<T> IDocumentQueryBase<T, IAsyncDocumentQuery<T>>.Search(string fieldName, string searchTerms, EscapeQueryOptions escapeQueryOptions)
 		{
-			Search(fieldName, searchTerms);
+			Search(fieldName, searchTerms, escapeQueryOptions);
 			return this;
 		}
 
@@ -840,9 +853,9 @@ namespace Raven.Client.Document
 		/// Perform a search for documents which fields that match the searchTerms.
 		/// If there is more than a single term, each of them will be checked independently.
 		/// </summary>
-		public IAsyncDocumentQuery<T> Search<TValue>(Expression<Func<T, TValue>> propertySelector, string searchTerms)
+		public IAsyncDocumentQuery<T> Search<TValue>(Expression<Func<T, TValue>> propertySelector, string searchTerms, EscapeQueryOptions escapeQueryOptions = EscapeQueryOptions.RawQuery)
 		{
-			Search(GetMemberQueryPath(propertySelector.Body), searchTerms);
+			Search(GetMemberQueryPath(propertySelector.Body), searchTerms, escapeQueryOptions);
 			return this;
 		}
 
@@ -935,6 +948,12 @@ namespace Raven.Client.Document
 			return this;
 		}
 
+		IAsyncDocumentQuery<T> IDocumentQueryBase<T, IAsyncDocumentQuery<T>>.ShowTimings()
+		{
+			ShowTimings();
+			return this;
+		}
+
 		IAsyncDocumentQuery<T>  IDocumentQueryBase<T, IAsyncDocumentQuery<T>>.Distinct()
 		{
 			Distinct();
@@ -955,6 +974,12 @@ namespace Raven.Client.Document
 		{
 			shouldExplainScores = true;
 			return this;
-		}
+
 	}
+
+		IAsyncDocumentQuery<T> IDocumentQueryBase<T, IAsyncDocumentQuery<T>>.SetAllowMultipleIndexEntriesForSameDocumentToResultTransformer(bool val)
+	    {
+            base.SetAllowMultipleIndexEntriesForSameDocumentToResultTransformer(val);
+	        return this;
+}	}
 }

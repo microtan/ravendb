@@ -16,352 +16,378 @@ using Lucene.Net.Search;
 using Lucene.Net.Store;
 using Raven.Abstractions;
 using Raven.Abstractions.Data;
+using Raven.Abstractions.Exceptions;
 using Raven.Abstractions.Indexing;
 using Raven.Abstractions.Linq;
 using Raven.Abstractions.Logging;
 using Raven.Database.Extensions;
 using Raven.Database.Linq;
 using Raven.Database.Storage;
+using Spatial4n.Core.Exceptions;
 
 namespace Raven.Database.Indexing
 {
-    public class SimpleIndex : Index
-    {
-        public SimpleIndex(Directory directory, int id, IndexDefinition indexDefinition, AbstractViewGenerator viewGenerator, WorkContext context)
-            : base(directory, id, indexDefinition, viewGenerator, context)
-        {
-        }
+	public class SimpleIndex : Index
+	{
+		public SimpleIndex(Directory directory, int id, IndexDefinition indexDefinition, AbstractViewGenerator viewGenerator, WorkContext context)
+			: base(directory, id, indexDefinition, viewGenerator, context)
+		{
+		}
 
-        public override bool IsMapReduce
-        {
-            get { return false; }
-        }
+		public override bool IsMapReduce
+		{
+			get { return false; }
+		}
 
-        public DateTime LastCommitPointStoreTime { get; private set; }
+		public DateTime LastCommitPointStoreTime { get; private set; }
 
-        public override void IndexDocuments(AbstractViewGenerator viewGenerator, IndexingBatch batch, IStorageActionsAccessor actions, DateTime minimumTimestamp)
-        {
-            var count = 0;
-            var sourceCount = 0;
-            var sw = Stopwatch.StartNew();
-            var start = SystemTime.UtcNow;
-            Write((indexWriter, analyzer, stats) =>
-            {
-                var processedKeys = new HashSet<string>();
-                var batchers = context.IndexUpdateTriggers.Select(x => x.CreateBatcher(indexId))
-                    .Where(x => x != null)
-                    .ToList();
-                try
-                {
-                    RecordCurrentBatch("Current", batch.Docs.Count);
-                    var docIdTerm = new Term(Constants.DocumentIdFieldName);
-                    var documentsWrapped = batch.Docs.Select((doc, i) =>
-                    {
-                        Interlocked.Increment(ref sourceCount);
-                        if (doc.__document_id == null)
-                            throw new ArgumentException(
-                                string.Format("Cannot index something which doesn't have a document id, but got: '{0}'", doc));
+		public override void IndexDocuments(AbstractViewGenerator viewGenerator, IndexingBatch batch, IStorageActionsAccessor actions, DateTime minimumTimestamp)
+		{
+			var count = 0;
+			var sourceCount = 0;
+			var sw = Stopwatch.StartNew();
+			var start = SystemTime.UtcNow;
+			Write((indexWriter, analyzer, stats) =>
+			{
+				var processedKeys = new HashSet<string>();
+				var batchers = context.IndexUpdateTriggers.Select(x => x.CreateBatcher(indexId))
+					.Where(x => x != null)
+					.ToList();
+				try
+				{
+					RecordCurrentBatch("Current", batch.Docs.Count);
+					var docIdTerm = new Term(Constants.DocumentIdFieldName);
+					var documentsWrapped = batch.Docs.Select((doc, i) =>
+					{
+						Interlocked.Increment(ref sourceCount);
+						if (doc.__document_id == null)
+							throw new ArgumentException(
+								string.Format("Cannot index something which doesn't have a document id, but got: '{0}'", doc));
 
-                        string documentId = doc.__document_id.ToString();
-                        if (processedKeys.Add(documentId) == false)
-                            return doc;
+						string documentId = doc.__document_id.ToString();
+						if (processedKeys.Add(documentId) == false)
+							return doc;
 
-                        InvokeOnIndexEntryDeletedOnAllBatchers(batchers, docIdTerm.CreateTerm(documentId.ToLowerInvariant())); 
-                       
-                        if (batch.SkipDeleteFromIndex[i] == false ||
-                            context.ShouldRemoveFromIndex(documentId)) // maybe it is recently deleted?
-                            indexWriter.DeleteDocuments(docIdTerm.CreateTerm(documentId.ToLowerInvariant()));
+						InvokeOnIndexEntryDeletedOnAllBatchers(batchers, docIdTerm.CreateTerm(documentId.ToLowerInvariant()));
 
-                        return doc;
-                    })
-                        .Where(x => x is FilteredDocument == false)
-                        .ToList();
+						if (batch.SkipDeleteFromIndex[i] == false ||
+							context.ShouldRemoveFromIndex(documentId)) // maybe it is recently deleted?
+							indexWriter.DeleteDocuments(docIdTerm.CreateTerm(documentId.ToLowerInvariant()));
 
-                    var allReferencedDocs = new ConcurrentQueue<IDictionary<string, HashSet<string>>>();
-					var missingReferencedDocs = new ConcurrentQueue<IDictionary<string, HashSet<string>>>();
+						return doc;
+					})
+						.Where(x => x is FilteredDocument == false)
+						.ToList();
 
-                    BackgroundTaskExecuter.Instance.ExecuteAllBuffered(context, documentsWrapped, (partition) =>
-                    {
-						var anonymousObjectToLuceneDocumentConverter = new AnonymousObjectToLuceneDocumentConverter(context.Database, indexDefinition, viewGenerator);
-                        var luceneDoc = new Document();
-                        var documentIdField = new Field(Constants.DocumentIdFieldName, "dummy", Field.Store.YES,
-                                                        Field.Index.NOT_ANALYZED_NO_NORMS);
+					var allReferencedDocs = new ConcurrentQueue<IDictionary<string, HashSet<string>>>();
+					var allReferenceEtags = new ConcurrentQueue<IDictionary<string, Etag>>();
 
-                        using (CurrentIndexingScope.Current = new CurrentIndexingScope(LoadDocument, (references,
-                                                                                                      missing) =>
-                        {
-                            allReferencedDocs.Enqueue(references);
-                            missingReferencedDocs.Enqueue(missing);
-                        } ))
-                        {
-                            string currentDocId = null;
-                            int outputPerDocId = 0;
-                            foreach (var doc in RobustEnumerationIndex(partition, viewGenerator.MapDefinitions, stats))
-                            {
-                                float boost;
-                                var indexingResult = GetIndexingResult(doc, anonymousObjectToLuceneDocumentConverter, out boost);
-                                if (indexingResult.NewDocId == null || indexingResult.ShouldSkip != false)
-                                {
-                                    continue;
-                                }
-                                if (currentDocId != indexingResult.NewDocId)
-                                {
-                                    currentDocId = indexingResult.NewDocId;
-                                    outputPerDocId = 0;
-                                }
-                                outputPerDocId++;
-                                EnsureValidNumberOfOutputsForDocument(currentDocId, outputPerDocId);
-                                    Interlocked.Increment(ref count);
-                                    luceneDoc.GetFields().Clear();
-                                    luceneDoc.Boost = boost;
-                                    documentIdField.SetValue(indexingResult.NewDocId.ToLowerInvariant());
-                                    luceneDoc.Add(documentIdField);
-                                    foreach (var field in indexingResult.Fields)
-                                    {
-                                        luceneDoc.Add(field);
-                                    }
-                                    batchers.ApplyAndIgnoreAllErrors(
-                                        exception =>
-                                        {
-                                            logIndexing.WarnException(
-                                            string.Format(
-                                                "Error when executed OnIndexEntryCreated trigger for index '{0}', key: '{1}'",
-                                                indexId, indexingResult.NewDocId),
-                                                exception);
-                                        context.AddError(indexId,
-                                                             indexingResult.NewDocId,
-                                                             exception.Message,
-                                                             "OnIndexEntryCreated Trigger"
-                                                );
-                                        },
-                                        trigger => trigger.OnIndexEntryCreated(indexingResult.NewDocId, luceneDoc));
-                                    LogIndexedDocument(indexingResult.NewDocId, luceneDoc);
-                                    AddDocumentToIndex(indexWriter, luceneDoc, analyzer);
+					BackgroundTaskExecuter.Instance.ExecuteAllBuffered(context, documentsWrapped, (partition) =>
+					{
+						var anonymousObjectToLuceneDocumentConverter = new AnonymousObjectToLuceneDocumentConverter(context.Database, indexDefinition, viewGenerator, logIndexing);
+						var luceneDoc = new Document();
+						var documentIdField = new Field(Constants.DocumentIdFieldName, "dummy", Field.Store.YES,
+														Field.Index.NOT_ANALYZED_NO_NORMS);
 
-                                Interlocked.Increment(ref stats.IndexingSuccesses);
-                            }
-                        }
-                    });
-                    UpdateDocumentReferences(actions, allReferencedDocs, missingReferencedDocs);
-                }
-                catch (Exception e)
-                {
-                    batchers.ApplyAndIgnoreAllErrors(
-                        ex =>
-                        {
-                            logIndexing.WarnException("Failed to notify index update trigger batcher about an error", ex);
-                            context.AddError(indexId, null, ex.Message, "AnErrorOccured Trigger");
-                        },
-                        x => x.AnErrorOccured(e));
-                    throw;
-                }
-                finally
-                {
-                    batchers.ApplyAndIgnoreAllErrors(
-                        e =>
-                        {
-                            logIndexing.WarnException("Failed to dispose on index update trigger", e);
-                            context.AddError(indexId, null, e.Message, "Dispose Trigger");
-                        },
-                        x => x.Dispose());
-                    BatchCompleted("Current");
-                }
-                return new IndexedItemsInfo
-                {
-                    ChangedDocs = sourceCount,
-                    HighestETag = batch.HighestEtagInBatch
-                };
-            });
+						using (CurrentIndexingScope.Current = new CurrentIndexingScope(context.Database, PublicName))
+						{
+							string currentDocId = null;
+							int outputPerDocId = 0;
+							Action<Exception, object> onErrorFunc;
+							bool skipDocument = false;
+							foreach (var doc in RobustEnumerationIndex(partition, viewGenerator.MapDefinitions, stats, out onErrorFunc))
+							{
+								float boost;
+								IndexingResult indexingResult;
+								try
+								{
+									indexingResult = GetIndexingResult(doc, anonymousObjectToLuceneDocumentConverter, out boost);
+								}
+								catch (Exception e)
+								{
+									onErrorFunc(e, doc);
+									continue;
+								}
 
-            AddindexingPerformanceStat(new IndexingPerformanceStats
-            {
-                OutputCount = count,
-                ItemsCount = sourceCount,
-                InputCount = batch.Docs.Count,
-                Duration = sw.Elapsed,
-                Operation = "Index",
-                Started = start
-            });
-            logIndexing.Debug("Indexed {0} documents for {1}", count, indexId);
-        }
+								// ReSharper disable once RedundantBoolCompare --> code clarity
+								if (indexingResult.NewDocId == null || indexingResult.ShouldSkip != false)
+								{
+									continue;
+								}
+								if (currentDocId != indexingResult.NewDocId)
+								{
+									currentDocId = indexingResult.NewDocId;
+									outputPerDocId = 0;
+									skipDocument = false;
+								}
+								if (skipDocument)
+									continue;
+								outputPerDocId++;
+								if (EnsureValidNumberOfOutputsForDocument(currentDocId, outputPerDocId) == false)
+								{
+									skipDocument = true;
+									continue;
+								}
+								Interlocked.Increment(ref count);
+								luceneDoc.GetFields().Clear();
+								luceneDoc.Boost = boost;
+								documentIdField.SetValue(indexingResult.NewDocId.ToLowerInvariant());
+								luceneDoc.Add(documentIdField);
+								foreach (var field in indexingResult.Fields)
+								{
+									luceneDoc.Add(field);
+								}
+								batchers.ApplyAndIgnoreAllErrors(
+									exception =>
+									{
+										logIndexing.WarnException(
+										string.Format(
+											"Error when executed OnIndexEntryCreated trigger for index '{0}', key: '{1}'",
+											indexId, indexingResult.NewDocId),
+											exception);
+										context.AddError(indexId,
+															 indexingResult.NewDocId,
+															 exception.Message,
+															 "OnIndexEntryCreated Trigger"
+												);
+									},
+									trigger => trigger.OnIndexEntryCreated(indexingResult.NewDocId, luceneDoc));
+								LogIndexedDocument(indexingResult.NewDocId, luceneDoc);
+								AddDocumentToIndex(indexWriter, luceneDoc, analyzer);
 
-        protected override bool IsUpToDateEnoughToWriteToDisk(Etag highestETag)
-        {
-            bool upToDate = false;
-            context.Database.TransactionalStorage.Batch(accessor =>
-            {
-                upToDate = accessor.Staleness.GetMostRecentDocumentEtag() == highestETag;
-            });
-            return upToDate;
-        }
+								Interlocked.Increment(ref stats.IndexingSuccesses);
+							}
+							allReferenceEtags.Enqueue(CurrentIndexingScope.Current.ReferencesEtags);
+							allReferencedDocs.Enqueue(CurrentIndexingScope.Current.ReferencedDocuments);
+						}
+					});
+					UpdateDocumentReferences(actions, allReferencedDocs, allReferenceEtags);
+				}
+				catch (Exception e)
+				{
+					batchers.ApplyAndIgnoreAllErrors(
+						ex =>
+						{
+							logIndexing.WarnException("Failed to notify index update trigger batcher about an error", ex);
+							context.AddError(indexId, null, ex.Message, "AnErrorOccured Trigger");
+						},
+						x => x.AnErrorOccured(e));
+					throw;
+				}
+				finally
+				{
+					batchers.ApplyAndIgnoreAllErrors(
+						e =>
+						{
+							logIndexing.WarnException("Failed to dispose on index update trigger", e);
+							context.AddError(indexId, null, e.Message, "Dispose Trigger");
+						},
+						x => x.Dispose());
+					BatchCompleted("Current");
+				}
+				return new IndexedItemsInfo(batch.HighestEtagBeforeFiltering)
+				{
+					ChangedDocs = sourceCount
+				};
+			});
 
-        protected override void HandleCommitPoints(IndexedItemsInfo itemsInfo)
-        {
-            if (ShouldStoreCommitPoint() && itemsInfo.HighestETag != null)
-            {
-                context.IndexStorage.StoreCommitPoint(indexId.ToString(), new IndexCommitPoint
-                {
-                    HighestCommitedETag = itemsInfo.HighestETag,
-                    TimeStamp = LastIndexTime,
-                    SegmentsInfo = GetCurrentSegmentsInfo()
-                });
+			AddindexingPerformanceStat(new IndexingPerformanceStats
+			{
+				OutputCount = count,
+				ItemsCount = sourceCount,
+				InputCount = batch.Docs.Count,
+				Duration = sw.Elapsed,
+				Operation = "Index",
+				Started = start
+			});
+			logIndexing.Debug("Indexed {0} documents for {1}", count, indexId);
+		}
 
-                LastCommitPointStoreTime = SystemTime.UtcNow;
-            }
-            else if (itemsInfo.DeletedKeys != null && directory is RAMDirectory == false)
-            {
-                context.IndexStorage.AddDeletedKeysToCommitPoints(indexDefinition, itemsInfo.DeletedKeys);
-            }
-        }
+		protected override bool IsUpToDateEnoughToWriteToDisk(Etag highestETag)
+		{
+			bool upToDate = false;
+			context.Database.TransactionalStorage.Batch(accessor =>
+			{
+				upToDate = accessor.Staleness.GetMostRecentDocumentEtag() == highestETag;
+			});
+			return upToDate;
+		}
 
-        private IndexSegmentsInfo GetCurrentSegmentsInfo()
-        {
-            var segmentInfos = new SegmentInfos();
-            var result = new IndexSegmentsInfo();
+		protected override void HandleCommitPoints(IndexedItemsInfo itemsInfo, IndexSegmentsInfo segmentsInfo)
+		{
+			if (ShouldStoreCommitPoint(itemsInfo) && itemsInfo.HighestETag != null)
+			{
+				context.IndexStorage.StoreCommitPoint(indexId.ToString(), new IndexCommitPoint
+				{
+					HighestCommitedETag = itemsInfo.HighestETag,
+					TimeStamp = LastIndexTime,
+					SegmentsInfo = segmentsInfo ?? IndexStorage.GetCurrentSegmentsInfo(indexDefinition.Name, directory)
+				});
 
-            try
-            {
-                segmentInfos.Read(directory);
+				LastCommitPointStoreTime = SystemTime.UtcNow;
+			}
+			else if (itemsInfo.DeletedKeys != null && directory is RAMDirectory == false)
+			{
+				context.IndexStorage.AddDeletedKeysToCommitPoints(indexDefinition, itemsInfo.DeletedKeys);
+			}
+		}
 
-                result.Generation = segmentInfos.Generation;
-                result.SegmentsFileName = segmentInfos.GetCurrentSegmentFileName();
-                result.ReferencedFiles = segmentInfos.Files(directory, false);
-            }
-            catch (CorruptIndexException ex)
-            {
-                logIndexing.WarnException(string.Format("Could not read segment information for an index '{0}'", indexId), ex);
+		private bool ShouldStoreCommitPoint(IndexedItemsInfo itemsInfo)
+		{
+			if (itemsInfo.DisableCommitPoint)
+				return false;
 
-                result.IsIndexCorrupted = true;
-            }
+			if (directory is RAMDirectory) // no point in trying to store commits for ram index
+				return false;
+			// no often than specified indexing interval
+			return (LastIndexTime - PreviousIndexTime > context.Configuration.MinIndexingTimeIntervalToStoreCommitPoint ||
+				// at least once for specified time interval
+					LastIndexTime - LastCommitPointStoreTime > context.Configuration.MaxIndexCommitPointStoreTimeInterval);
+		}
 
-            return result;
-        }
+		private IndexingResult GetIndexingResult(object doc, AnonymousObjectToLuceneDocumentConverter anonymousObjectToLuceneDocumentConverter, out float boost)
+		{
+			boost = 1;
 
-        private bool ShouldStoreCommitPoint()
-        {
-            if (directory is RAMDirectory) // no point in trying to store commits for ram index
-                return false;
-            // no often than specified indexing interval
-            return (LastIndexTime - PreviousIndexTime > context.Configuration.MinIndexingTimeIntervalToStoreCommitPoint ||
-                // at least once for specified time interval
-                    LastIndexTime - LastCommitPointStoreTime > context.Configuration.MaxIndexCommitPointStoreTimeInterval);
-        }
+			var boostedValue = doc as BoostedValue;
+			if (boostedValue != null)
+			{
+				doc = boostedValue.Value;
+				boost = boostedValue.Boost;
+			}
 
-        private IndexingResult GetIndexingResult(object doc, AnonymousObjectToLuceneDocumentConverter anonymousObjectToLuceneDocumentConverter, out float boost)
-        {
-            boost = 1;
+			IndexingResult indexingResult;
 
-            var boostedValue = doc as BoostedValue;
-            if (boostedValue != null)
-            {
-                doc = boostedValue.Value;
-                boost = boostedValue.Boost;
-            }
+			var docAsDynamicJsonObject = doc as DynamicJsonObject;
 
-            IndexingResult indexingResult;
-            if (doc is DynamicJsonObject)
-                indexingResult = ExtractIndexDataFromDocument(anonymousObjectToLuceneDocumentConverter, (DynamicJsonObject)doc);
-            else
-                indexingResult = ExtractIndexDataFromDocument(anonymousObjectToLuceneDocumentConverter, doc);
+			// ReSharper disable once ConvertIfStatementToConditionalTernaryExpression
+			if (docAsDynamicJsonObject != null)
+				indexingResult = ExtractIndexDataFromDocument(anonymousObjectToLuceneDocumentConverter, docAsDynamicJsonObject);
+			else
+				indexingResult = ExtractIndexDataFromDocument(anonymousObjectToLuceneDocumentConverter, doc);
 
-            if (Math.Abs(boost - 1) > float.Epsilon)
-            {
-                foreach (var abstractField in indexingResult.Fields)
-                {
-                    abstractField.OmitNorms = false;
-                }
-            }
+			if (Math.Abs(boost - 1) > float.Epsilon)
+			{
+				foreach (var abstractField in indexingResult.Fields)
+				{
+					abstractField.OmitNorms = false;
+				}
+			}
 
-            return indexingResult;
-        }
+			return indexingResult;
+		}
 
-        private class IndexingResult
-        {
-            public string NewDocId;
-            public List<AbstractField> Fields;
-            public bool ShouldSkip;
-        }
+		private class IndexingResult
+		{
+			public string NewDocId;
+			public List<AbstractField> Fields;
+			public bool ShouldSkip;
+		}
 
-        private IndexingResult ExtractIndexDataFromDocument(AnonymousObjectToLuceneDocumentConverter anonymousObjectToLuceneDocumentConverter, DynamicJsonObject dynamicJsonObject)
-        {
-            var newDocId = dynamicJsonObject.GetRootParentOrSelf().GetDocumentId();
-            return new IndexingResult
-            {
-                Fields = anonymousObjectToLuceneDocumentConverter.Index(((IDynamicJsonObject)dynamicJsonObject).Inner, Field.Store.NO).ToList(),
-                NewDocId = newDocId is DynamicNullObject ? null : (string)newDocId,
-                ShouldSkip = false
-            };
-        }
+		private IndexingResult ExtractIndexDataFromDocument(AnonymousObjectToLuceneDocumentConverter anonymousObjectToLuceneDocumentConverter, DynamicJsonObject dynamicJsonObject)
+		{
+			var newDocIdAsObject = dynamicJsonObject.GetRootParentOrSelf().GetDocumentId();
+			var newDocId = newDocIdAsObject is DynamicNullObject ? null : (string)newDocIdAsObject;
+			List<AbstractField> abstractFields;
 
-        private readonly ConcurrentDictionary<Type, PropertyDescriptorCollection> propertyDescriptorCache = new ConcurrentDictionary<Type, PropertyDescriptorCollection>();
+			try
+			{
+				abstractFields = anonymousObjectToLuceneDocumentConverter.Index(((IDynamicJsonObject)dynamicJsonObject).Inner, Field.Store.NO).ToList();
+			}
+			catch (InvalidShapeException e)
+			{
+				throw new InvalidSpatialShapeException(e, newDocId);
+			}
 
-        private IndexingResult ExtractIndexDataFromDocument(AnonymousObjectToLuceneDocumentConverter anonymousObjectToLuceneDocumentConverter, object doc)
-        {
-            Type type = doc.GetType();
-            PropertyDescriptorCollection properties =
-                propertyDescriptorCache.GetOrAdd(type, TypeDescriptor.GetProperties);
+			return new IndexingResult
+			{
+				Fields = abstractFields,
+				NewDocId = newDocId,
+				ShouldSkip = false
+			};
+		}
 
-            var abstractFields = anonymousObjectToLuceneDocumentConverter.Index(doc, properties, Field.Store.NO).ToList();
-            return new IndexingResult()
-            {
-                Fields = abstractFields,
-                NewDocId = properties.Find(Constants.DocumentIdFieldName, false).GetValue(doc) as string,
-                ShouldSkip = properties.Count > 1  // we always have at least __document_id
-                            && abstractFields.Count == 0
-            };
-        }
+		private readonly ConcurrentDictionary<Type, PropertyDescriptorCollection> propertyDescriptorCache = new ConcurrentDictionary<Type, PropertyDescriptorCollection>();
 
-        public override void Remove(string[] keys, WorkContext context)
-        {
-            Write((writer, analyzer, stats) =>
-            {
-                stats.Operation = IndexingWorkStats.Status.Ignore;
-                logIndexing.Debug(() => string.Format("Deleting ({0}) from {1}", string.Join(", ", keys), indexId));
-                var batchers = context.IndexUpdateTriggers.Select(x => x.CreateBatcher(indexId))
-                    .Where(x => x != null)
-                    .ToList();
+		private IndexingResult ExtractIndexDataFromDocument(AnonymousObjectToLuceneDocumentConverter anonymousObjectToLuceneDocumentConverter, object doc)
+		{
+			PropertyDescriptorCollection properties;
+			var newDocId = GetDocumentIdByReflection(doc, out properties);
 
-                keys.Apply(
-                    key =>
-                    InvokeOnIndexEntryDeletedOnAllBatchers(batchers, new Term(Constants.DocumentIdFieldName, key)));
+			List<AbstractField> abstractFields;
+			try
+			{
+				abstractFields = anonymousObjectToLuceneDocumentConverter.Index(doc, properties, Field.Store.NO).ToList();
+			}
+			catch (InvalidShapeException e)
+			{
+				throw new InvalidSpatialShapeException(e, newDocId);
+			}
 
-                writer.DeleteDocuments(keys.Select(k => new Term(Constants.DocumentIdFieldName, k.ToLowerInvariant())).ToArray());
-                batchers.ApplyAndIgnoreAllErrors(
-                    e =>
-                    {
-                        logIndexing.WarnException("Failed to dispose on index update trigger", e);
-                        context.AddError(indexId, null, e.Message, "Dispose Trigger");
-                    },
-                    batcher => batcher.Dispose());
+			return new IndexingResult
+			{
+				Fields = abstractFields,
+				NewDocId = newDocId,
+				ShouldSkip = properties.Count > 1  // we always have at least __document_id
+							&& abstractFields.Count == 0
+			};
+		}
 
-                IndexStats currentIndexStats = null;
-                context.TransactionalStorage.Batch(accessor => currentIndexStats = accessor.Indexing.GetIndexStats(indexId));
+		private string GetDocumentIdByReflection(object doc, out PropertyDescriptorCollection properties)
+		{
+			Type type = doc.GetType();
+			properties = propertyDescriptorCache.GetOrAdd(type, TypeDescriptor.GetProperties);
+			return properties.Find(Constants.DocumentIdFieldName, false).GetValue(doc) as string;
+		}
 
-                return new IndexedItemsInfo
-                {
-                    ChangedDocs = keys.Length,
-                    HighestETag = currentIndexStats.LastIndexedEtag,
-                    DeletedKeys = keys
-                };
-            });
-        }
+		public override void Remove(string[] keys, WorkContext context)
+		{
+			Write((writer, analyzer, stats) =>
+			{
+				stats.Operation = IndexingWorkStats.Status.Ignore;
+				logIndexing.Debug(() => string.Format("Deleting ({0}) from {1}", string.Join(", ", keys), indexId));
+				var batchers = context.IndexUpdateTriggers.Select(x => x.CreateBatcher(indexId))
+					.Where(x => x != null)
+					.ToList();
 
-        /// <summary>
-        /// For index recovery purposes
-        /// </summary>
-        internal void RemoveDirectlyFromIndex(string[] keys)
-        {
-            Write((writer, analyzer, stats) =>
-            {
-                stats.Operation = IndexingWorkStats.Status.Ignore;
+				keys.Apply(
+					key =>
+					InvokeOnIndexEntryDeletedOnAllBatchers(batchers, new Term(Constants.DocumentIdFieldName, key)));
 
-                writer.DeleteDocuments(keys.Select(k => new Term(Constants.DocumentIdFieldName, k.ToLowerInvariant())).ToArray());
+				writer.DeleteDocuments(keys.Select(k => new Term(Constants.DocumentIdFieldName, k.ToLowerInvariant())).ToArray());
+				batchers.ApplyAndIgnoreAllErrors(
+					e =>
+					{
+						logIndexing.WarnException("Failed to dispose on index update trigger", e);
+						context.AddError(indexId, null, e.Message, "Dispose Trigger");
+					},
+					batcher => batcher.Dispose());
 
-                return new IndexedItemsInfo // just commit, don't create commit point and add any infor about deleted keys
-                {
-                    ChangedDocs = keys.Length
-                };
-            });
-        }
-    }
+				return new IndexedItemsInfo(GetLastEtagFromStats())
+				{
+					ChangedDocs = keys.Length,
+					DeletedKeys = keys
+				};
+			});
+		}
+
+		/// <summary>
+		/// For index recovery purposes
+		/// </summary>
+		internal void RemoveDirectlyFromIndex(string[] keys, Etag lastEtag)
+		{
+			Write((writer, analyzer, stats) =>
+			{
+				stats.Operation = IndexingWorkStats.Status.Ignore;
+
+				writer.DeleteDocuments(keys.Select(k => new Term(Constants.DocumentIdFieldName, k.ToLowerInvariant())).ToArray());
+
+				return new IndexedItemsInfo(lastEtag) // just commit, don't create commit point and add any infor about deleted keys
+				{
+					ChangedDocs = keys.Length,
+					DisableCommitPoint = true
+				};
+			});
+		}
+	}
 }

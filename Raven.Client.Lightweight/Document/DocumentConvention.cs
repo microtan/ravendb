@@ -6,6 +6,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Dynamic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Net;
@@ -15,7 +16,9 @@ using System.Runtime.Serialization.Formatters;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.CSharp.RuntimeBinder;
 using Raven.Abstractions.Indexing;
+using Raven.Abstractions.Replication;
 using Raven.Client.Connection.Async;
 using Raven.Client.Indexes;
 using Raven.Client.Linq;
@@ -28,9 +31,6 @@ using Raven.Client.Connection;
 using Raven.Client.Converters;
 using Raven.Client.Util;
 using Raven.Json.Linq;
-#if NETFX_CORE
-using Raven.Client.WinRT.MissingFromWinRT;
-#endif
 
 namespace Raven.Client.Document
 {
@@ -50,10 +50,8 @@ namespace Raven.Client.Document
 
 		private Dictionary<Type, Func<IEnumerable<object>, IEnumerable>> compiledReduceCache = new Dictionary<Type, Func<IEnumerable<object>, IEnumerable>>();
 
-#if !NETFX_CORE
 		private readonly IList<Tuple<Type, Func<string, IDatabaseCommands, object, string>>> listOfRegisteredIdConventions =
 			new List<Tuple<Type, Func<string, IDatabaseCommands, object, string>>>();
-#endif
 
 		private readonly IList<Tuple<Type, Func<string, IAsyncDatabaseCommands, object, Task<string>>>> listOfRegisteredIdConventionsAsync =
 			new List<Tuple<Type, Func<string, IAsyncDatabaseCommands, object, Task<string>>>>();
@@ -69,7 +67,7 @@ namespace Raven.Client.Document
 				new Int32Converter(),
 				new Int64Converter(),
 			};
-			MaxFailoverCheckPeriod = TimeSpan.FromMinutes(5);
+			PrettifyGeneratedLinqExpressions = true;
 			DisableProfiling = true;
 			EnlistInDistributedTransactions = true;
 			UseParallelMultiGet = true;
@@ -89,13 +87,11 @@ namespace Raven.Client.Document
 			IdentityPartsSeparator = "/";
 			JsonContractResolver = new DefaultRavenContractResolver(shareCache: true)
 			{
-#if !NETFX_CORE
 				DefaultMembersSearchFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance
-#endif
 			};
 			MaxNumberOfRequestsPerSession = 30;
 			ApplyReduceFunction = DefaultApplyReduceFunction;
-			ReplicationInformerFactory = url => new ReplicationInformer(this);
+			ReplicationInformerFactory = (url, jsonRequestFactory) => new ReplicationInformer(this, jsonRequestFactory);
 			CustomizeJsonSerializer = serializer => { };
 			FindIdValuePartForValueTypeConversion = (entity, id) => id.Split(new[] { IdentityPartsSeparator }, StringSplitOptions.RemoveEmptyEntries).Last();
 			ShouldAggressiveCacheTrackChanges = true;
@@ -130,11 +126,7 @@ namespace Raven.Client.Document
 
 		public static string DefaultTransformTypeTagNameToDocumentKeyPrefix(string typeTagName)
 		{
-#if NETFX_CORE
-			var count = typeTagName.ToCharArray().Count(char.IsUpper);
-#else
 			var count = typeTagName.Count(char.IsUpper);
-#endif
 
 			if (count <= 1) // simple name, just lower case it
 				return typeTagName.ToLowerInvariant();
@@ -208,11 +200,10 @@ namespace Raven.Client.Document
 		/// <returns></returns>
 		public static string GenerateDocumentKeyUsingIdentity(DocumentConvention conventions, object entity)
 		{
-			return conventions.FindTypeTagName(entity.GetType()) + "/";
+			return conventions.GetDynamicTagName(entity) + "/";
 		}
 
 		private static IDictionary<Type, string> cachedDefaultTypeTagNames = new Dictionary<Type, string>();
-		private int requestCount;
 
 		/// <summary>
 		/// Get the default tag name for the specified type.
@@ -260,7 +251,32 @@ namespace Raven.Client.Document
 			return FindTypeTagName(type) ?? DefaultTypeTagName(type);
 		}
 
-#if !NETFX_CORE
+	   /// <summary>
+	   /// If object is dynamic, try to load a tag name.
+	   /// </summary>
+	   /// <param name="entity">Current entity.</param>
+	   /// <returns>Dynamic tag name if available.</returns>
+	   public string GetDynamicTagName(object entity)
+	   {
+	      if (entity == null)
+	      {
+	         return null;
+	      }
+
+	      if (FindDynamicTagName != null && entity is IDynamicMetaObjectProvider)
+	      {
+	         try
+	         {
+	            return FindDynamicTagName(entity);
+	         }
+	         catch (RuntimeBinderException)
+	         {
+	         }
+	      }
+
+	      return this.GetTypeTagName(entity.GetType());
+	   }
+
 		/// <summary>
 		/// Generates the document key.
 		/// </summary>
@@ -282,7 +298,6 @@ namespace Raven.Client.Document
 
 			return DocumentKeyGenerator(dbName, databaseCommands, entity);
 		}
-#endif
 
 		public Task<string> GenerateDocumentKeyAsync(string dbName, IAsyncDatabaseCommands databaseCommands, object entity)
 		{
@@ -293,12 +308,10 @@ namespace Raven.Client.Document
 				return typeToRegisteredIdConvention.Item2(dbName, databaseCommands, entity);
 			}
 
-#if !NETFX_CORE
 			if (listOfRegisteredIdConventions.Any(x => x.Item1.IsAssignableFrom(type)))
 			{
 				throw new InvalidOperationException("Id convention for asynchronous operation was not found for entity " + type.FullName + ", but convention for synchronous operation exists.");
 			}
-#endif
 
 			return AsyncDocumentKeyGenerator(dbName, databaseCommands, entity);
 		}
@@ -330,6 +343,12 @@ namespace Raven.Client.Document
 		/// </summary>
 		/// <value>The name of the find type tag.</value>
 		public Func<Type, string> FindTypeTagName { get; set; }
+
+      /// <summary>
+      /// Gets or sets the function to find the tag name if the object is dynamic.
+      /// </summary>
+      /// <value>The tag name.</value>
+      public Func<dynamic, string> FindDynamicTagName { get; set; }
 
 		/// <summary>
 		/// Gets or sets the function to find the indexed property name
@@ -382,8 +401,6 @@ namespace Raven.Client.Document
 		/// </summary>
 		public bool ShouldSaveChangesForceAggressiveCacheCheck { get; set; }
 
-
-#if !NETFX_CORE
 		/// <summary>
 		/// Register an id convention for a single type (and all of its derived types.
 		/// Note that you can still fall back to the DocumentKeyGenerator if you want.
@@ -412,7 +429,6 @@ namespace Raven.Client.Document
 
 			return this;
 		}
-#endif
 
 		/// <summary>
 		/// Register an async id convention for a single type (and all of its derived types.
@@ -457,7 +473,7 @@ namespace Raven.Client.Document
 				TypeNameHandling = TypeNameHandling.Auto,
 				TypeNameAssemblyFormat = FormatterAssemblyStyle.Simple,
 				ConstructorHandling = ConstructorHandling.AllowNonPublicDefaultConstructor,
-                FloatParseHandling = FloatParseHandling.Decimal,
+                FloatParseHandling = FloatParseHandling.PreferDecimalFallbackToDouble,
 				Converters =
 					{
 						new JsonLuceneDateTimeConverter(),
@@ -509,10 +525,6 @@ namespace Raven.Client.Document
 		/// </summary>
 		public Func<object, string, string> FindIdValuePartForValueTypeConversion { get; set; }
 
-		/// <summary>
-		/// Saves Enums as integers and instruct the Linq provider to query enums as integer values.
-		/// </summary>
-		public bool SaveEnumsAsIntegers { get; set; }
 
 		/// <summary>
 		/// Translate the type tag name to the document key prefix
@@ -543,12 +555,12 @@ namespace Raven.Client.Document
 		/// This is called to provide replication behavior for the client. You can customize 
 		/// this to inject your own replication / failover logic.
 		/// </summary>
-		public Func<string, IDocumentStoreReplicationInformer> ReplicationInformerFactory { get; set; }
+		public Func<string, HttpJsonRequestFactory, IDocumentStoreReplicationInformer> ReplicationInformerFactory { get; set; }
 
-		public int IncrementRequestCount()
-		{
-			return Interlocked.Increment(ref requestCount);
-		}
+		/// <summary>
+		///  Attempts to prettify the generated linq expressions for indexes and transformers
+		/// </summary>
+		public bool PrettifyGeneratedLinqExpressions { get; set; }
 
 		public delegate bool TryConvertValueForQueryDelegate<in T>(string fieldName, T value, QueryValueConvertionType convertionType, out string strValue);
 
@@ -639,45 +651,6 @@ namespace Raven.Client.Document
 			return customRangeTypes.Contains(type);
 		}
 
-		public delegate LinqPathProvider.Result CustomQueryTranslator(LinqPathProvider provider, Expression expression);
-
-		private readonly Dictionary<MemberInfo, CustomQueryTranslator> customQueryTranslators = new Dictionary<MemberInfo, CustomQueryTranslator>();
-
-		public void RegisterCustomQueryTranslator<T>(Expression<Func<T, object>> member, CustomQueryTranslator translator)
-		{
-			var body = member.Body as UnaryExpression;
-			if (body == null)
-				throw new NotSupportedException("A custom query translator can only be used to evaluate a simple member access or method call.");
-
-			var info = GetMemberInfoFromExpression(body.Operand);
-
-			if (!customQueryTranslators.ContainsKey(info))
-				customQueryTranslators.Add(info, translator);
-		}
-
-		internal LinqPathProvider.Result TranslateCustomQueryExpression(LinqPathProvider provider, Expression expression)
-		{
-			var member = GetMemberInfoFromExpression(expression);
-
-			CustomQueryTranslator translator;
-			if (!customQueryTranslators.TryGetValue(member, out translator))
-				return null;
-
-			return translator.Invoke(provider, expression);
-		}
-
-		private static MemberInfo GetMemberInfoFromExpression(Expression expression)
-		{
-			var callExpression = expression as MethodCallExpression;
-			if (callExpression != null)
-				return callExpression.Method;
-
-			var memberExpression = expression as MemberExpression;
-			if (memberExpression != null)
-				return memberExpression.Member;
-
-			throw new NotSupportedException("A custom query translator can only be used to evaluate a simple member access or method call.");
-		}
 	}
 
 	public enum QueryValueConvertionType

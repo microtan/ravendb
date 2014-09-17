@@ -2,54 +2,57 @@ import durandalRouter = require("plugins/router");
 import database = require("models/database");
 import appUrl = require("common/appUrl");
 import viewModelBase = require("viewmodels/viewModelBase");
-import getDatabaseSettingsCommand = require("commands/getDatabaseSettingsCommand");
-import alertType = require("common/alertType");
-import alertArgs = require("common/alertArgs");
 
 class settings extends viewModelBase {
 
     router: DurandalRootRouter = null;
-    isOnSystemDatabase: KnockoutComputed<boolean>;
-    isOnUserDatabase: KnockoutComputed<boolean>;
     appUrls: computedAppUrls;
 
-    bundleMap = { quotas: "Quotas", replication: "Replication", sqlreplication: "SQL Replication", versioning: "Versioning", periodicbackups: "Periodic Backup", scriptedindexresults: "Scripted Index", scriptedindex: "Scripted Index"};
-    userDatabasePages = ko.observableArray(["Database Settings"]);
-    systemDatabasePages = ["API Keys", "Windows Authentication"];
+    private bundleMap = { quotas: "Quotas", replication: "Replication", sqlreplication: "SQL Replication", versioning: "Versioning", periodicexport: "Periodic Export", scriptedindexresults: "Scripted Index" };
+    private sqlSubBundles = ["sqlreplicationconnectionstringsmanagement", "editsqlreplication"];
+    userDatabasePages = ko.observableArray(["Database Settings", "Custom Functions"]);
+    activeSubViewTitle: KnockoutComputed<string>;
 
     constructor() {
         super();
 
         this.appUrls = appUrl.forCurrentDatabase();
 
-        this.isOnSystemDatabase = ko.computed(() => this.activeDatabase() && this.activeDatabase().isSystem);
-        this.isOnUserDatabase = ko.computed(() => this.activeDatabase() && !this.isOnSystemDatabase());
-
-        var apiKeyRoute = { route: 'databases/settings/apiKeys', moduleId: 'viewmodels/apiKeys', title: 'API Keys', nav: true, hash: appUrl.forApiKeys() };
-        var windowsAuthRoute = { route: 'databases/settings/windowsAuth', moduleId: 'viewmodels/windowsAuth', title: 'Windows Authentication', nav: true, hash: appUrl.forWindowsAuth() };
         var databaseSettingsRoute = { route: ['databases/settings', 'databases/settings/databaseSettings'], moduleId: 'viewmodels/databaseSettings', title: 'Database Settings', nav: true, hash: appUrl.forCurrentDatabase().databaseSettings };
-        //var quotasRoute = { route: 'settings/quotas', moduleId: 'viewmodels/quotas', title: 'Quotas', nav: true, hash: appUrl.forCurrentDatabase().quotas };
+        var quotasRoute = { route: 'databases/settings/quotas', moduleId: 'viewmodels/quotas', title: 'Quotas', nav: true, hash: appUrl.forCurrentDatabase().quotas };
         var replicationsRoute = { route: 'databases/settings/replication', moduleId: 'viewmodels/replications', title: 'Replication', nav: true, hash: appUrl.forCurrentDatabase().replications };
         var sqlReplicationsRoute = { route: 'databases/settings/sqlReplication', moduleId: 'viewmodels/sqlReplications', title: 'SQL Replication', nav: true, hash: appUrl.forCurrentDatabase().sqlReplications };
-        //var versioningRoute = { route: 'settings/versioning', moduleId: 'viewmodels/versioning', title: 'Versioning', nav: true, hash: appUrl.forCurrentDatabase().versioning };
-        var periodicBackupRoute = { route: 'databases/settings/periodicBackups', moduleId: 'viewmodels/periodicBackup', title: 'Periodic Backup', nav: true, hash: appUrl.forCurrentDatabase().periodicBackup };
-        var scriptedIndexesRoute = { route: 'databases/settings/scriptedIndex', moduleId: 'viewmodels/scriptedIndexes', title: 'Scripted Index', nav: true, hash: appUrl.forCurrentDatabase().scriptedIndexes };
+        var editsqlReplicationsRoute = { route: 'databases/settings/editSqlReplication(/:sqlReplicationName)', moduleId: 'viewmodels/editSqlReplication', title: 'Edit SQL Replication', nav: true, hash: appUrl.forCurrentDatabase().editSqlReplication };
+        var sqlReplicationsConnectionsRoute = { route: 'databases/settings/sqlReplicationConnectionStringsManagement', moduleId: 'viewmodels/sqlReplicationConnectionStringsManagement', title: 'SQL Replication Connection Strings', nav: true, hash: appUrl.forCurrentDatabase().sqlReplicationsConnections};
+        var versioningRoute = { route: 'databases/settings/versioning', moduleId: 'viewmodels/versioning', title: 'Versioning', nav: true, hash: appUrl.forCurrentDatabase().versioning };
+        var periodicExportRoute = { route: 'databases/settings/periodicExport', moduleId: 'viewmodels/periodicExport', title: 'Periodic Export', nav: true, hash: appUrl.forCurrentDatabase().periodicExport };
+        //var scriptedIndexesRoute = { route: 'databases/settings/scriptedIndex', moduleId: 'viewmodels/scriptedIndexes', title: 'Scripted Index', nav: true, hash: appUrl.forCurrentDatabase().scriptedIndexes };
+        var customFunctionsEditorRoute = { route: 'databases/settings/customFunctionsEditor', moduleId: 'viewmodels/customFunctionsEditor', title: 'Custom Functions', nav: true, hash: appUrl.forCurrentDatabase().customFunctionsEditor };
 
         this.router = durandalRouter.createChildRouter()
             .map([
-                apiKeyRoute,
-                windowsAuthRoute,
                 databaseSettingsRoute,
-                //quotasRoute,
+                quotasRoute,
                 replicationsRoute,
                 sqlReplicationsRoute,
-                //versioningRoute,
-                periodicBackupRoute,
-                scriptedIndexesRoute
+                sqlReplicationsConnectionsRoute,
+                editsqlReplicationsRoute,
+                versioningRoute,
+                periodicExportRoute,
+                //scriptedIndexesRoute,
+                customFunctionsEditorRoute
             ])
             .buildNavigationModel();
 
         this.router.guardRoute = (instance: Object, instruction: DurandalRouteInstruction) => this.getValidRoute(instance, instruction);
+
+        appUrl.mapUnknownRoutes(this.router);
+
+        this.activeSubViewTitle = ko.computed(() => {
+            // Is there a better way to get the active route?
+            var activeRoute = this.router.navigationModel().first(r=> r.isActive());
+            return activeRoute != null ? activeRoute.title : "";
+        });
     }
 
     /**
@@ -57,63 +60,54 @@ class settings extends viewModelBase {
     * This is used for preventing a navigating to system-only pages when the current databagse is non-system, and vice-versa.
     */
     getValidRoute(instance: Object, instruction: DurandalRouteInstruction): any {
+        var db: database = this.activeDatabase();
         var pathArr = instruction.fragment.split('/');
         var bundelName = pathArr[pathArr.length - 1].toLowerCase();
         var isLegalBundelName = (this.bundleMap[bundelName] != undefined);
-        var isBundleExists = this.userDatabasePages.indexOf(this.bundleMap[bundelName]) >= 0;
-        var isSystemDbOnlyPath = instruction.fragment.indexOf("windowsAuth") >= 0 || instruction.fragment.indexOf("apiKeys") >= 0 || instruction.fragment === "settings";
-        var isUserDbOnlyPath = !isSystemDbOnlyPath;
-
-        if ((isSystemDbOnlyPath && !this.activeDatabase().isSystem)){
-            return appUrl.forCurrentDatabase().databaseSettings();
-        } else if (isUserDbOnlyPath && this.activeDatabase().isSystem) {
-            return appUrl.forApiKeys();
-        } else if (isUserDbOnlyPath && isLegalBundelName && !isBundleExists) {
+        var isBundleExists = this.userDatabasePages.indexOf(this.bundleMap[bundelName]) > -1;
+        var isSqlSubBundle = this.sqlSubBundles.indexOf(bundelName) > -1;
+        var isSqlBundleExists = this.userDatabasePages.indexOf("SQL Replication") > -1;
+        
+        if (db.isSystem) {
+            return appUrl.forDocuments(null, db);
+        }
+        else if ((isLegalBundelName && isBundleExists == false) || (isSqlSubBundle && isSqlBundleExists == false)) {
             return appUrl.forCurrentDatabase().databaseSettings();
         }
 
         return true;
     }
 
+    isEditingSqlReplication(navigationalModel: any, curNavHash: any) {
+        var activeRoute = navigationalModel.first(r => r.isActive());
+        if (!!activeRoute && !!curNavHash && !!activeRoute.hash) {
+            return curNavHash.indexOf('databases/settings/sqlReplication') >= 0 &&
+                (activeRoute.route.indexOf('databases/settings/editSqlReplication') >= 0 ||
+                activeRoute.route.indexOf('databases/settings/sqlReplicationConnectionStringsManagement') >= 0);
+        }
+        return false;
+    }
+
     activate(args) {
         super.activate(args);
-        this.userDatabasePages(["Database Settings"]);
-        if (args) {
-            var canActivateResult = $.Deferred();
-            var db = this.activeDatabase();
-            var self = this;
-            new getDatabaseSettingsCommand(db)
-                .execute()
-                .done(document => {
-                    var documentSettings = document.Settings["Raven/ActiveBundles"];
-                    if (documentSettings != undefined) {
-                        var arr = documentSettings.split(';');
 
-                        for (var i = 0; i < arr.length; i++) {
-                            var bundleName = self.bundleMap[arr[i].toLowerCase()];
-                            if (bundleName != undefined) {
-                                self.userDatabasePages.push(bundleName);
-                            }
-                        }
-                    }
+        this.userDatabasePages(["Database Settings", "Custom Functions"]);
+        var db: database = this.activeDatabase();
+        var bundles: string[] = db.activeBundles();
 
-                canActivateResult.resolve({ can: true });
-                });
-            return canActivateResult;
-        } else {
-            return $.Deferred().resolve({ can: true });
-        }
+        bundles.forEach((bundle: string) => {
+            var bundleName = this.bundleMap[bundle.toLowerCase()];
+            if (bundleName != undefined) {
+                this.userDatabasePages.push(bundleName);
+            }
+        });
     }
 
     routeIsVisible(route: DurandalRouteConfiguration) {
         var bundleTitle = route.title;
 
-        if (this.isOnUserDatabase() && (this.userDatabasePages.indexOf(bundleTitle) !== -1)) {
-            // Database Settings, Quotas, Replication, SQL Replication, Versioning, Periodic Backup and Scripted Index are visible only when we're on a user database.
-            return true;
-        }
-        if (this.isOnSystemDatabase() && (this.systemDatabasePages.indexOf(bundleTitle) !== -1)) {
-            // API keys and Windows Auth are visible only when we're on the system database.
+        if (this.userDatabasePages.indexOf(bundleTitle) !== -1) {
+            // Database Settings, Quotas, Replication, SQL Replication, Versioning, Periodic Export and Scripted Index are visible only when we're on a user database.
             return true;
         }
 

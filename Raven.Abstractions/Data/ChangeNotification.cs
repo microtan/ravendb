@@ -63,6 +63,14 @@ namespace Raven.Abstractions.Data
         IndexMarkedAsErrored = 512
 	}
 
+    public enum TransformerChangeTypes
+    {
+        None = 0,
+
+        TransformerAdded = 1,
+        TransformerRemoved = 2
+    }
+
 	public class IndexChangeNotification : EventArgs
 	{
 		public IndexChangeTypes Type { get; set; }
@@ -74,6 +82,17 @@ namespace Raven.Abstractions.Data
 			return string.Format("{0} on {1}", Type, Name);
 		}
 	}
+
+    public class TransformerChangeNotification : EventArgs
+    {
+        public TransformerChangeTypes Type { get; set; }
+        public string Name { get; set; }
+
+        public override string ToString()
+        {
+            return string.Format("{0} on {1}", Type, Name);
+        }
+    }
 
 	public class ReplicationConflictNotification : EventArgs
 	{
@@ -95,6 +114,8 @@ namespace Raven.Abstractions.Data
 		None = 0,
 
 		DocumentReplicationConflict = 1,
+
+        [Obsolete("Use RavenFS instead.")]
 		AttachmentReplicationConflict = 2,
 	}
 
@@ -106,4 +127,17 @@ namespace Raven.Abstractions.Data
 		Put = 1,
 		Delete = 2,
 	}
+    
+    public class TrafficWatchNotification : EventArgs
+    {
+        public DateTime TimeStamp { get; set; }
+        public int RequestId { get; set; }
+        public string HttpMethod { get; set; }
+        public long ElapsedMilliseconds { get; set; }
+        public int ResponseStatusCode { get; set; }
+        public string RequestUri { get; set; }
+        public string AbsoluteUri { get; set; }
+        public string TenantName { get; set; }
+        public string CustomInfo { get; set; }
+    }
 }

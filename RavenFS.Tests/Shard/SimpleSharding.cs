@@ -4,21 +4,22 @@ using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using Raven.Client.RavenFS;
-using Raven.Client.RavenFS.Shard;
 using Xunit;
+using Raven.Json.Linq;
+using Raven.Client.FileSystem.Shard;
+using Raven.Client.FileSystem;
 
 namespace RavenFS.Tests.Shard
 {
     public class SimpleSharding : RavenFsTestBase
 	{
-	    readonly ShardedRavenFileSystemClient shardedClient;
+	    readonly AsyncShardedFilesServerClient shardedClient;
 
 		public SimpleSharding()
 		{
-			var client1 = NewClient(0, fileSystemName: "shard1");
-			var client2 = NewClient(1, fileSystemName: "shard2");
-			shardedClient = new ShardedRavenFileSystemClient(new ShardStrategy(new Dictionary<string, RavenFileSystemClient>
+			var client1 = NewAsyncClient(0, fileSystemName: "shard1");
+			var client2 = NewAsyncClient(1, fileSystemName: "shard2");
+            shardedClient = new AsyncShardedFilesServerClient(new ShardStrategy(new Dictionary<string, IAsyncFilesCommands>
 				{
 					{"1", client1},
 					{"2", client2},
@@ -43,11 +44,8 @@ namespace RavenFS.Tests.Shard
             ms.Position = 0;
             var newFileName = await shardedClient.UploadAsync("abc.txt", ms);
 
-            var ms2 = new MemoryStream();
-            await shardedClient.DownloadAsync(newFileName, ms2);
-
-            ms2.Position = 0;
-
+            var ms2 = await shardedClient.DownloadAsync(newFileName);
+          
             var actual = new StreamReader(ms2).ReadToEnd();
             Assert.Equal(expected, actual);
 		}
@@ -68,7 +66,7 @@ namespace RavenFS.Tests.Shard
             await shardedClient.UploadAsync("d.txt", ms);
             await shardedClient.UploadAsync("e.txt", ms);
 
-	        var pagingInfo = new PagingInfo(shardedClient.NumberOfShards);
+            var pagingInfo = new ShardPagingInfo(shardedClient.NumberOfShards);
 	        var result = await shardedClient.BrowseAsync(2, pagingInfo);
             Assert.Equal(2, result.Length);
 
@@ -101,7 +99,7 @@ namespace RavenFS.Tests.Shard
             await shardedClient.UploadAsync("d.txt", ms);
             await shardedClient.UploadAsync("e.txt", ms);
 
-            var pagingInfo = new PagingInfo(shardedClient.NumberOfShards){CurrentPage = 2};
+            var pagingInfo = new ShardPagingInfo(shardedClient.NumberOfShards) { CurrentPage = 2 };
             var result = await shardedClient.BrowseAsync(2, pagingInfo);
             Assert.Equal(1, result.Length);
 
@@ -127,7 +125,7 @@ namespace RavenFS.Tests.Shard
             await shardedClient.UploadAsync("d.txt", ms);
             await shardedClient.UploadAsync("e.txt", ms);
 
-            var pagingInfo = new PagingInfo(shardedClient.NumberOfShards) { CurrentPage = 20 };
+            var pagingInfo = new ShardPagingInfo(shardedClient.NumberOfShards) { CurrentPage = 20 };
             try
             {
                 await shardedClient.BrowseAsync(2, pagingInfo);
@@ -157,7 +155,7 @@ namespace RavenFS.Tests.Shard
 
 			var result = await shardedClient.SearchAsync("__size_numeric:[2 TO 4]");
 			var files = result.Files;
-			var fileNames = files.Select(f => f.Name).ToArray();
+			var fileNames = files.Select(f => f.FullPath).ToArray();
 
 			Assert.Equal(3, result.FileCount);
 			Assert.Contains(name2, fileNames);
@@ -176,7 +174,7 @@ namespace RavenFS.Tests.Shard
 
 			var result = await shardedClient.SearchAsync("", new []{"__size"});
 			var files = result.Files;
-			var fileNames = files.Select(f => f.Name).ToArray();
+			var fileNames = files.Select(f => f.FullPath).ToArray();
 
 			Assert.Equal(new[] {name2, name3, name4, name5, name1 }, fileNames);
 		}
@@ -192,7 +190,7 @@ namespace RavenFS.Tests.Shard
 
 			var result = await shardedClient.SearchAsync("", new[] { "-__size" });
 			var files = result.Files;
-			var fileNames = files.Select(f => f.Name).ToArray();
+			var fileNames = files.Select(f => f.FullPath).ToArray();
 
 			Assert.Equal(new[] { name2, name3, name4, name5, name1 }.Reverse(), fileNames);
 		}
@@ -200,11 +198,11 @@ namespace RavenFS.Tests.Shard
 		[Fact]
 		public async Task CanSearchForFilesByMetadataWithShardingWithFields()
 		{
-			await shardedClient.UploadAsync("111", new NameValueCollection {{"Active", "true"}}, StreamOfLength(100));
-			await shardedClient.UploadAsync("2", new NameValueCollection { { "Active", "false" } }, StreamOfLength(2));
-			await shardedClient.UploadAsync("33", new NameValueCollection { { "Active", "false" } }, StreamOfLength(3));
-			await shardedClient.UploadAsync("4", new NameValueCollection { { "Active", "false" } }, StreamOfLength(4));
-			await shardedClient.UploadAsync("55555", new NameValueCollection { { "Active", "true" } }, StreamOfLength(5));
+            await shardedClient.UploadAsync("111", new RavenJObject { { "Active", "true" } }, StreamOfLength(100));
+            await shardedClient.UploadAsync("2", new RavenJObject { { "Active", "false" } }, StreamOfLength(2));
+            await shardedClient.UploadAsync("33", new RavenJObject { { "Active", "false" } }, StreamOfLength(3));
+            await shardedClient.UploadAsync("4", new RavenJObject { { "Active", "false" } }, StreamOfLength(4));
+            await shardedClient.UploadAsync("55555", new RavenJObject { { "Active", "true" } }, StreamOfLength(5));
 
 			var result = await shardedClient.SearchAsync("", new[] { "Active" });
 			var files = result.Files;
@@ -219,11 +217,11 @@ namespace RavenFS.Tests.Shard
 		[Fact]
 		public async Task CanSearchForFilesByMetadataWithShardingWithFieldsDecending()
 		{
-			await shardedClient.UploadAsync("111", new NameValueCollection { { "Active", "true" } }, StreamOfLength(100));
-			await shardedClient.UploadAsync("2", new NameValueCollection { { "Active", "false" } }, StreamOfLength(2));
-			await shardedClient.UploadAsync("33", new NameValueCollection { { "Active", "false" } }, StreamOfLength(3));
-			await shardedClient.UploadAsync("4", new NameValueCollection { { "Active", "false" } }, StreamOfLength(4));
-			await shardedClient.UploadAsync("55555", new NameValueCollection { { "Active", "true" } }, StreamOfLength(5));
+            await shardedClient.UploadAsync("111", new RavenJObject { { "Active", "true" } }, StreamOfLength(100));
+            await shardedClient.UploadAsync("2", new RavenJObject { { "Active", "false" } }, StreamOfLength(2));
+            await shardedClient.UploadAsync("33", new RavenJObject { { "Active", "false" } }, StreamOfLength(3));
+            await shardedClient.UploadAsync("4", new RavenJObject { { "Active", "false" } }, StreamOfLength(4));
+            await shardedClient.UploadAsync("55555", new RavenJObject { { "Active", "true" } }, StreamOfLength(5));
 
 			var result = await shardedClient.SearchAsync("", new[] { "-Active" });
 			var files = result.Files;
@@ -238,11 +236,11 @@ namespace RavenFS.Tests.Shard
         [Fact]
         public async Task CanTakeStats()
         {
-            await shardedClient.UploadAsync("111", new NameValueCollection { { "Active", "true" } }, StreamOfLength(100));
-            await shardedClient.UploadAsync("2", new NameValueCollection { { "Active", "false" } }, StreamOfLength(2));
-            await shardedClient.UploadAsync("33", new NameValueCollection { { "Active", "false" } }, StreamOfLength(3));
-            await shardedClient.UploadAsync("4", new NameValueCollection { { "Active", "false" } }, StreamOfLength(4));
-            await shardedClient.UploadAsync("55555", new NameValueCollection { { "Active", "true" } }, StreamOfLength(5));
+            await shardedClient.UploadAsync("111", new RavenJObject { { "Active", "true" } }, StreamOfLength(100));
+            await shardedClient.UploadAsync("2", new RavenJObject { { "Active", "false" } }, StreamOfLength(2));
+            await shardedClient.UploadAsync("33", new RavenJObject { { "Active", "false" } }, StreamOfLength(3));
+            await shardedClient.UploadAsync("4", new RavenJObject { { "Active", "false" } }, StreamOfLength(4));
+            await shardedClient.UploadAsync("55555", new RavenJObject { { "Active", "true" } }, StreamOfLength(5));
 
             var stats = await shardedClient.StatsAsync();
 

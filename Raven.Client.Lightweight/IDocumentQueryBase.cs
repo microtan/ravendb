@@ -595,13 +595,13 @@ If you really want to do in memory filtering on the data returned from the query
 		/// Perform a search for documents which fields that match the searchTerms.
 		/// If there is more than a single term, each of them will be checked independently.
 		/// </summary>
-		TSelf Search(string fieldName, string searchTerms);
+		TSelf Search(string fieldName, string searchTerms, EscapeQueryOptions escapeQueryOptions = EscapeQueryOptions.RawQuery);
 
 		/// <summary>
 		/// Perform a search for documents which fields that match the searchTerms.
 		/// If there is more than a single term, each of them will be checked independently.
 		/// </summary>
-		TSelf Search<TValue>(Expression<Func<T, TValue>> propertySelector, string searchTerms);
+		TSelf Search<TValue>(Expression<Func<T, TValue>> propertySelector, string searchTerms, EscapeQueryOptions escapeQueryOptions = EscapeQueryOptions.RawQuery);
 
 		/// <summary>
 		/// Partition the query so we can intersect different parts of the query
@@ -664,6 +664,18 @@ If you really want to do in memory filtering on the data returned from the query
 		/// Disables caching for query results.
 		/// </summary>
 		TSelf NoCaching();
+
+        /// <summary>
+        /// If set to true, this property will send multiple index entries from the same document (assuming the index project them)
+        /// to the result transformer function. Otherwise, those entries will be consolidate an the transformer will be 
+        /// called just once for each document in the result set
+        /// </summary>
+	    TSelf SetAllowMultipleIndexEntriesForSameDocumentToResultTransformer(bool val);
+
+		/// <summary>
+        /// Enables calculation of timings for various parts of a query (Lucene search, loading documents, transforming results). Default: false
+		/// </summary>
+		TSelf ShowTimings();
 
 		/// <summary>
 		/// Apply distinct operation to this query

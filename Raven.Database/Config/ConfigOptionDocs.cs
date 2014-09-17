@@ -10,6 +10,7 @@ namespace Raven.Database.Config
 			// Common
 			{"Raven/MaxPageSize", "int", null, "The maximum page size that can be specified on this server, default: 1,024."},
 			{"Raven/RunInMemory", "bool", "true,false", "Whatever the database should run purely in memory. When running in memory, nothing is written to disk and if the server is restarted all data will be lost. This is mostly useful for testing. Default: false."},
+			{"Raven/Headers/Ignore", "string", null, "Semicolon separated list of headers that server should ignore. e.g. Header-To-Ignore-1;Header-To-Ignore-2"},
 			
 			// Studio
 			{"Raven/RedirectStudioUrl", "string", null, "The url to redirect the user to when then try to access the local studio"},
@@ -54,7 +55,18 @@ namespace Raven.Database.Config
 			{"Raven/NumberOfItemsToExecuteReduceInSingleStep", "int", "10 - 100,000", "The number of items that will cause RavenDB to move to multi step reduce, default: 1,024"},
 			{"Raven/TaskScheduler", "string", "assembly qualified type name", "The TaskScheduler type to use for executing indexing."},
 			{"Raven/NewIndexInMemoryMaxMB", "int", "1 - 1024 MB", "The max size in MB of a new index held in memory. When a new index size reaches that value or is no longer stale, it will be using on disk indexing, rather then RAM indexing. Default: 64 MB."},
+			{"Raven/Indexing/FlushIndexToDiskSizeInMb", "int", null, "Number of megabytes after which indexes are flushed to a disk. Default: 5"},
+
+			// Encryption
+			{"Raven/Encryption/FIPS", "bool", null, "Use FIPS compliant encryption algorithms. Default: false."},
+
+			// Replication
+			{"Raven/Replication/FetchingFromDiskTimeout", "int", null, "Number of seconds after which replication will stop reading documents/attachments from disk. Default: 30."},
 			
+			// Prefetcher
+			{"Raven/Prefetcher/FetchingDocumentsFromDiskTimeout", "int", null, "Number of seconds after which prefetcher will stop reading documents from disk. Default: 5."},
+			{"Raven/Prefetcher/MaximumSizeAllowedToFetchFromStorage", "int", null, "Maximum number of megabytes after which prefetcher will stop reading documents from disk. Default: 256."},
+
             // Idle 
             {"Raven/TimeToWaitBeforeRunningIdleIndexes", "TimeSpan", "00:10:00", "How long the database should be idle for before updating low priority indexes, default: 10 minutes"},
             {"Raven/TimeToWaitBeforeMarkingAutoIndexAsIdle", "TimeSpan", "1:00:00", "How long the database should wait before marking an index with the idle flag, default: 1 hour"},
@@ -67,10 +79,12 @@ namespace Raven.Database.Config
 			{"Raven/CreateAutoIndexesForAdHocQueriesIfNeeded", "bool", "true", "Whatever we allow creation of auto indexes on dynamic queries"},
 			
             // Memory
-			{"Raven/IntegerSetting", "int", null, "The max size in MB for the internal document cache inside RavenDB server, default is half of the machine available RAM minus the size of the esent cache."},
+			{"Raven/MemoryCacheLimitMegabytes", "int", null, "The max size in MB for the internal document cache inside RavenDB server, default is half of the machine available RAM minus the size of the esent cache."},
 			{"Raven/MemoryCacheLimitPercentage","int", "0-99", "The percentage of memory that the internal document cache inside RavenDB server will use, default: auto."},
 			{"Raven/MemoryCacheLimitCheckInterval", "TimeSpan", "HH:MM:SS", "The internal for checking that the internal document cache inside RavenDB server will be cleaned."},
-			{"Raven/MemoryCacheExpiration", "int", null, "The expiration value for documents in the internal document cache. Value is in seconds. Default: 5 minutes"},
+			{"Raven/MemoryCacheExpiration", "int", null, "The expiration value for documents in the internal document cache. Value is in seconds. Default: 60 minutes"},
+			{"Raven/MemoryLimitForProcessing", "int", null, "Maximum number of megabytes that can be used by database to control the maximum size of the processing batches. Default: 1024 or 75% percent of available memory if 1GB is not available."},
+
 			// Esent
 			{"Raven/Esent/CacheSizeMax", "int", null, "The size in MB of the Esent page cache, which is the default storage engine. Default: 25% of RAM on 64 bits, 256 MB on 32 bits."},
 			{"Raven/Esent/MaxVerPages", "int", null, "The maximum size of version store (in memory modified data) available. The value is in megabytes. Default: 512."},
@@ -82,9 +96,11 @@ namespace Raven.Database.Config
 			{"Raven/Esent/CircularLog", "bool", "true / false", "Whatever circular logs will be used, defaults to true. If you want to use incremental backups, you need to turn this off, but logs will only be truncated on backup."},
 
 			//Voron	
-			{"Raven/Voron/AllowIncrementalBackups", "bool", "true / false", "Defaults to false. If you want to use incremental backups, you need to turn this to true, but then journal files will not be deleted on backup."},
+			{"Raven/Voron/AllowIncrementalBackups", "bool", "true / false", "If you want to use incremental backups, you need to turn this to true, but then journal files will not be deleted after applying them to the data file. They will be deleted only after a successful backup. Default: false."},
             {"Raven/Voron/TempPath", "string", null, "You can use this setting to specify a different path to temporary files. By default it is empty, which means that temporary files will be created at same location as data file."},
             {"Raven/Voron/MaxBufferPoolSize", "long", null, "You can use this setting to specify a maximum buffer pool size that can be used for transactional storage (in gigabytes). By default it is 4. Minimum value is 2."},
+			{"Raven/Voron/InitialSize", "long", null, "You can use this setting to specify an initial file size for data file (in bytes)."},
+			{"Raven/Voron/MaxScratchBufferSize", "int", null, "The maximum scratch buffer (modified data by active transactions) size that can be used by Voron. The value is in megabytes. Default: 512."},
 
 			// Advanced
 			{"Raven/TransactionMode", "string", "lazy,safe", "What transaction mode to use. Safe transaction mode ensures data consistency, but is slower. Lazy is faster, but may result in a data loss if the server crashes. Default: Safe."},

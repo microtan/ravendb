@@ -27,12 +27,6 @@ namespace Raven.Client.Document.Batches
 		/// <summary>
 		/// Loads the specified ids.
 		/// </summary>
-		/// <param name="ids">The ids.</param>
-		Lazy<TResult[]> Load<TResult>(params string[] ids);
-
-		/// <summary>
-		/// Loads the specified ids.
-		/// </summary>
 		Lazy<TResult[]> Load<TResult>(IEnumerable<string> ids);
 
 		/// <summary>
@@ -120,14 +114,46 @@ namespace Raven.Client.Document.Batches
 		/// </remarks>
 		Lazy<TResult[]> Load<TResult>(IEnumerable<ValueType> ids, Action<TResult[]> onEval);
 
-		Lazy<TResult> Load<TTransformer, TResult>(string id) where TTransformer : AbstractTransformerCreationTask, new();
+		/// <summary>
+		/// Performs a load that will use the specified results transformer against the specified id
+		/// </summary>
+		/// <typeparam name="TTransformer">The transformer to use in this load operation</typeparam>
+		/// <typeparam name="TResult">The results shape to return after the load operation</typeparam>
+		/// <param name="id"></param>
+		/// <returns></returns>
+		Lazy<TResult> Load<TTransformer, TResult>(string id, Action<TResult> onEval = null) where TTransformer : AbstractTransformerCreationTask, new();
 
-		Lazy<TResult[]> Load<TTransformer, TResult>(params string[] ids) where TTransformer : AbstractTransformerCreationTask, new();
+		/// <summary>
+		/// Performs a load that will use the specified results transformer against the specified id
+		/// </summary>
+		/// <typeparam name="TResult">The results shape to return after the load operation</typeparam>
+		/// <param name="id"></param>
+		/// <param name="transformerType">The transformer to use in this load operation</param>
+		/// <returns></returns>
+		Lazy<TResult> Load<TResult>(string id, Type transformerType, Action<TResult> onEval = null);
+
+		/// <summary>
+		/// Performs a load that will use the specified results transformer against the specified id
+		/// </summary>
+		/// <typeparam name="TTransformer">The transformer to use in this load operation</typeparam>
+		/// <typeparam name="TResult">The results shape to return after the load operation</typeparam>
+		/// <param name="ids"></param>
+		/// <returns></returns>
+		Lazy<TResult[]> Load<TTransformer, TResult>(IEnumerable<string> ids, Action<TResult> onEval = null) where TTransformer : AbstractTransformerCreationTask, new();
+
+		/// <summary>
+		/// Performs a load that will use the specified results transformer against the specified id
+		/// </summary>
+		/// <typeparam name="TResult">The results shape to return after the load operation</typeparam>
+		/// <param name="ids"></param>
+		/// <param name="transformerType">The transformer to use in this load operation</param>
+		/// <returns></returns>
+		Lazy<TResult[]> Load<TResult>(IEnumerable<string> ids, Type transformerType, Action<TResult> onEval = null);
 
 		/// <summary>
 		/// Load documents with the specified key prefix
 		/// </summary>
-		Lazy<TResult[]> LoadStartingWith<TResult>(string keyPrefix, string matches = null, int start = 0, int pageSize = 25, string exclude = null, RavenPagingInformation pagingInformation = null);
+		Lazy<TResult[]> LoadStartingWith<TResult>(string keyPrefix, string matches = null, int start = 0, int pageSize = 25, string exclude = null, RavenPagingInformation pagingInformation = null, string skipAfter = null);
 
 		Lazy<TResult[]> MoreLikeThis<TResult>(MoreLikeThisQuery query);
 	}
@@ -148,12 +174,6 @@ namespace Raven.Client.Document.Batches
         /// </summary>
         /// <param name="path">The path.</param>
         IAsyncLazyLoaderWithInclude<TResult> Include<TResult>(Expression<Func<TResult, object>> path);
-
-        /// <summary>
-        /// Loads the specified ids.
-        /// </summary>
-        /// <param name="ids">The ids.</param>
-        Lazy<Task<TResult[]>> LoadAsync<TResult>(params string[] ids);
 
         /// <summary>
         /// Loads the specified ids.
@@ -245,14 +265,28 @@ namespace Raven.Client.Document.Batches
         /// </remarks>
         Lazy<Task<TResult[]>> LoadAsync<TResult>(IEnumerable<ValueType> ids, Action<TResult[]> onEval);
 
-        Lazy<Task<TResult>> LoadAsync<TTransformer, TResult>(string id) where TTransformer : AbstractTransformerCreationTask, new();
+		/// <summary>
+		/// Performs a load that will use the specified results transformer against the specified id
+		/// </summary>
+		/// <typeparam name="TTransformer">The transformer to use in this load operation</typeparam>
+		/// <typeparam name="TResult">The results shape to return after the load operation</typeparam>
+		/// <param name="id"></param>
+		/// <returns></returns>
+		Lazy<Task<TResult>> LoadAsync<TTransformer, TResult>(string id, Action<TResult> onEval = null) where TTransformer : AbstractTransformerCreationTask, new();
 
-        Lazy<Task<TResult[]>> LoadAsync<TTransformer, TResult>(params string[] ids) where TTransformer : AbstractTransformerCreationTask, new();
+		/// <summary>
+		/// Performs a load that will use the specified results transformer against the specified id
+		/// </summary>
+		/// <typeparam name="TResult">The results shape to return after the load operation</typeparam>
+		/// <param name="id"></param>
+		/// <param name="transformerType">The transformer to use in this load operation</param>
+		/// <returns></returns>
+		Lazy<Task<TResult>> LoadAsync<TResult>(string id, Type transformerType, Action<TResult> onEval = null);
 
         /// <summary>
         /// Load documents with the specified key prefix
         /// </summary>
-        Lazy<Task<TResult[]>> LoadStartingWithAsync<TResult>(string keyPrefix, string matches = null, int start = 0, int pageSize = 25, string exclude = null, RavenPagingInformation pagingInformation = null);
+        Lazy<Task<TResult[]>> LoadStartingWithAsync<TResult>(string keyPrefix, string matches = null, int start = 0, int pageSize = 25, string exclude = null, RavenPagingInformation pagingInformation = null, string skipAfter = null);
 
         Lazy<Task<TResult[]>> MoreLikeThisAsync<TResult>(MoreLikeThisQuery query);
     }

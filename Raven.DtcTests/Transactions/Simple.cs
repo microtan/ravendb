@@ -21,8 +21,8 @@ namespace Raven.Tests.Transactions
 
 		public Simple()
 		{
-			store = NewDocumentStore();
-			db = store.DocumentDatabase;
+			store = NewDocumentStore(requestedStorage: "esent");
+			db = store.SystemDatabase;
 		}
 
 		public override void Dispose()

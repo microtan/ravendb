@@ -1,49 +1,38 @@
 ﻿using System;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Text;
 using Voron.Impl;
 using Voron.Trees;
-using Voron.Util.Conversion;
 
 namespace Voron
 {
-	public unsafe class Slice
+	using System.Runtime.CompilerServices;
+	using Util;
+
+	public sealed unsafe class Slice : MemorySlice
 	{
 		public static Slice AfterAllKeys = new Slice(SliceOptions.AfterAllKeys);
 		public static Slice BeforeAllKeys = new Slice(SliceOptions.BeforeAllKeys);
 		public static Slice Empty = new Slice(new byte[0]);
 
-		private ushort _size;
-		public SliceOptions Options;
-		private readonly byte[] _array;
-		private byte* _pointer;
-
-		public ushort Size
-		{
-			get { return _size; }
-		}
-
-		public void Set(byte* p, ushort size)
-		{
-			_pointer = p;
-			_size = size;
-		}
+		internal byte[] Array;
+		internal byte* Pointer;
 
 		public Slice(SliceOptions options)
 		{
 			Options = options;
-			_pointer = null;
-			_array = null;
-			_size = 0;
+			Pointer = null;
+			Array = null;
+			Size = 0;
+			KeyLength = 0;
 		}
 
 		public Slice(byte* key, ushort size)
 		{
-			_size = size;
+			Size = size;
+			KeyLength = size;
 			Options = SliceOptions.Key;
-			_array = null;
-			_pointer = key;
+			Array = null;
+			Pointer = key;
 		}
 
 		public Slice(byte[] key) : this(key, (ushort)key.Length)
@@ -51,24 +40,32 @@ namespace Voron
 			
 		}
 
+		public Slice(Slice other, ushort size)
+		{
+			if (other.Array != null)
+				Array = other.Array;
+			else
+				Pointer = other.Pointer;
+
+			Options = other.Options;
+			Size = size;
+			KeyLength = size;
+		}
+
 		public Slice(byte[] key, ushort size)
 		{
 			if (key == null) throw new ArgumentNullException("key");
-			_size = size;
+			Size = size;
+			KeyLength = size;
 			Options = SliceOptions.Key;
-			_pointer = null;
-			_array = key;
+			Pointer = null;
+			Array = key;
 		}
 
 		public Slice(NodeHeader* node)
 		{
 			Options = SliceOptions.Key;
 			Set(node);
-		}
-
-		protected bool Equals(Slice other)
-		{
-			return Compare(other, NativeMethods.memcmp) == 0;
 		}
 
 		public override bool Equals(object obj)
@@ -81,7 +78,7 @@ namespace Voron
 
 		public override int GetHashCode()
 		{
-			if (_array != null)
+			if (Array != null)
 				return ComputeHashArray();
 			return ComputeHashPointer();
 		}
@@ -93,8 +90,8 @@ namespace Voron
 				const int p = 16777619;
 				int hash = (int)2166136261;
 
-				for (int i = 0; i < _size; i++)
-					hash = (hash ^ _pointer[i]) * p;
+				for (int i = 0; i < Size; i++)
+					hash = (hash ^ Pointer[i]) * p;
 
 				hash += hash << 13;
 				hash ^= hash >> 7;
@@ -112,8 +109,8 @@ namespace Voron
 				const int p = 16777619;
 				int hash = (int)2166136261;
 
-				for (int i = 0; i < _size; i++)
-					hash = (hash ^ _array[i]) * p;
+				for (int i = 0; i < Size; i++)
+					hash = (hash ^ Array[i]) * p;
 
 				hash += hash << 13;
 				hash ^= hash >> 7;
@@ -130,54 +127,90 @@ namespace Voron
 			if (Options != SliceOptions.Key)
 				return Options.ToString();
 
-			if (_array != null)
-				return Encoding.UTF8.GetString(_array,0, _size);
+			if (Array != null)
+				return Encoding.UTF8.GetString(Array,0, Size);
 
-			return new string((sbyte*)_pointer, 0, _size, Encoding.UTF8);
+			return new string((sbyte*)Pointer, 0, Size, Encoding.UTF8);
 		}
 
-		public int Compare(Slice other, SliceComparer cmp)
+		protected override int CompareData(MemorySlice other, ushort size)
 		{
-			Debug.Assert(Options == SliceOptions.Key);
-			Debug.Assert(other.Options == SliceOptions.Key);
+			var otherSlice =  other as Slice;
 
-			var r = CompareData(other, cmp, Math.Min(Size, other.Size));
-			if (r != 0)
-				return r;
-			return Size - other.Size;
-		}
-
-		public bool StartsWith(Slice other, SliceComparer cmp)
-		{
-			if (Size < other.Size)
-				return false;
-			return CompareData(other, cmp, other.Size) == 0;
-		}
-
-		private int CompareData(Slice other, SliceComparer cmp, ushort size)
-		{
-			if (_array != null)
+			if (otherSlice != null)
 			{
-				fixed (byte* a = _array)
+				if (Array != null)
 				{
-					if (other._array != null)
+					fixed (byte* a = Array)
 					{
-						fixed (byte* b = other._array)
+						if (otherSlice.Array != null)
 						{
-							return cmp(a, b, size);
+							fixed (byte* b = otherSlice.Array)
+							{
+								return MemoryUtils.Compare(a, b, size);
+							}
 						}
+						return MemoryUtils.Compare(a, otherSlice.Pointer, size);
 					}
-					return cmp(a, other._pointer, size);
 				}
-			}
-			if (other._array != null)
-			{
-				fixed (byte* b = other._array)
+
+				if (otherSlice.Array != null)
 				{
-					return cmp(_pointer, b, size);
+					fixed (byte* b = otherSlice.Array)
+					{
+						return MemoryUtils.Compare(Pointer, b, size);
+					}
 				}
+
+				return MemoryUtils.Compare(Pointer, otherSlice.Pointer, size);
 			}
-			return cmp(_pointer, other._pointer, size);
+
+			var prefixedSlice = other as PrefixedSlice;
+
+			if (prefixedSlice != null)
+				return SliceComparisonMethods.Compare(this, prefixedSlice, MemoryUtils.MemoryComparerInstance, size);
+
+			throw new NotSupportedException("Cannot compare because of unknown slice type: " + other.GetType());
+		}
+
+		protected override int CompareData(MemorySlice other, SliceComparer cmp, ushort size)
+		{
+			var otherSlice = other as Slice;
+
+			if (otherSlice != null)
+			{
+				if (Array != null)
+				{
+					fixed (byte* a = Array)
+					{
+						if (otherSlice.Array != null)
+						{
+							fixed (byte* b = otherSlice.Array)
+							{
+								return cmp(a, b, size);
+							}
+						}
+						return cmp(a, otherSlice.Pointer, size);
+					}
+				}
+
+				if (otherSlice.Array != null)
+				{
+					fixed (byte* b = otherSlice.Array)
+					{
+						return cmp(Pointer, b, size);
+					}
+				}
+
+				return cmp(Pointer, otherSlice.Pointer, size);
+			}
+
+			var prefixedSlice = other as PrefixedSlice;
+
+			if (prefixedSlice != null)
+				return SliceComparisonMethods.Compare(this, prefixedSlice, cmp, size);
+
+			throw new NotSupportedException("Cannot compare because of unknown slice type: " + other.GetType());
 		}
 
 		public static implicit operator Slice(string s)
@@ -185,67 +218,147 @@ namespace Voron
 			return new Slice(Encoding.UTF8.GetBytes(s));
 		}
 
-		public void CopyTo(byte* dest)
+		public override void CopyTo(byte* dest)
 		{
-			if (_array == null)
+			if (Array == null)
 			{
-				NativeMethods.memcpy(dest, _pointer, _size);
+				StdLib.memcpy(dest, Pointer, Size);
 				return;
 			}
-			fixed (byte* a = _array)
+			fixed (byte* a = Array)
 			{
-				NativeMethods.memcpy(dest, a, _size);
+				StdLib.memcpy(dest, a, Size);
 			}
+		}
+
+		public override Slice ToSlice()
+		{
+			return new Slice(this, Size);
 		}
 
 		public void CopyTo(byte[] dest)
 		{
-			if (_array == null)
+			if (Array == null)
 			{
 				fixed (byte* p = dest)
-					NativeMethods.memcpy(p, _pointer, _size);
+					StdLib.memcpy(p, Pointer, Size);
 				return;
 			}
-			Buffer.BlockCopy(_array, 0, dest, 0, _size);
+			Buffer.BlockCopy(Array, 0, dest, 0, Size);
 		}
 
-		public void Set(NodeHeader* node)
+		public void CopyTo(int from, byte[] dest, int offset, int count)
 		{
-			Set((byte*)node + Constants.NodeHeaderSize, node->KeySize);
+			if (from + count > Size)
+				throw new ArgumentOutOfRangeException("from", "Cannot copy data after the end of the slice");
+			if(offset + count > dest.Length)
+				throw new ArgumentOutOfRangeException("from", "Cannot copy data after the end of the buffer" +
+				                                              "");
+			if (Array == null)
+			{
+				fixed (byte* p = dest)
+					StdLib.memcpy(p + offset, Pointer + from, count);
+				return;
+			}
+			Buffer.BlockCopy(Array, from, dest, offset, count);
 		}
 
+		public void CopyTo(int from, byte* dest, int offset, int count)
+		{
+			if (from + count > Size)
+				throw new ArgumentOutOfRangeException("from", "Cannot copy data after the end of the slice");
+
+			if (Array == null)
+			{
+				StdLib.memcpy(dest + offset, Pointer + from, count);
+				return;
+			}
+
+			fixed (byte* p = Array)
+				StdLib.memcpy(dest + offset, p + from, count);
+		}
 
 		public Slice Clone()
 		{
 			var buffer = new byte[Size];
-			if (_array == null)
+			if (Array == null)
 			{
 				fixed (byte* dest = buffer)
 				{
-					NativeMethods.memcpy(dest, _pointer, _size);
+					StdLib.memcpy(dest, Pointer, Size);
 				}
 			}
 			else
 			{
-				Buffer.BlockCopy(_array, 0, buffer, 0, Size);
+				Buffer.BlockCopy(Array, 0, buffer, 0, Size);
 			}
+
 			return new Slice(buffer);
 		}
 
-		public long ToInt64()
+	    public ValueReader CreateReader()
+	    {
+            if(Array != null)
+                return new ValueReader(Array, Size);
+
+	        return new ValueReader(Pointer, Size);
+	    }
+
+		public override Slice Skip(ushort bytesToSkip)
 		{
-			if (Size != sizeof(long))
-				throw new NotSupportedException("Invalid size for int 64 key");
-			if (_array != null)
-				return EndianBitConverter.Big.ToInt64(_array, 0);
+			if (bytesToSkip == 0)
+				return new Slice(this, Size);
 
-			var buffer = new byte[Size];
-			fixed (byte* dest = buffer)
+			if (Pointer != null)
+				return new Slice(Pointer + bytesToSkip, (ushort)(Size - bytesToSkip));
+
+			var toAllocate = Size - bytesToSkip;
+			var array = new byte[toAllocate];
+
+			Buffer.BlockCopy(Array, bytesToSkip, array, 0, toAllocate);
+
+			return new Slice(array);
+		}
+
+		public override void PrepareForSearching()
+		{
+			PrefixComparisonCache = new PrefixComparisonCache();
+		}
+
+		public PrefixComparisonCache PrefixComparisonCache;
+
+		public new ushort FindPrefixSize(MemorySlice other)
+		{
+			if (PrefixComparisonCache == null)
+				return base.FindPrefixSize(other);
+
+			PrefixComparisonCache.Disabled = true;
+			try
 			{
-				NativeMethods.memcpy(dest, _pointer, _size);
+				return base.FindPrefixSize(other);
 			}
+			finally
+			{
+				PrefixComparisonCache.Disabled = false;
+			}
+		}
 
-			return EndianBitConverter.Big.ToInt64(buffer, 0);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public void Set(byte* p, ushort size)
+		{
+			Pointer = p;
+			Size = size;
+			KeyLength = size;
+			Array = null;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public override void Set(NodeHeader* node)
+		{
+			Pointer = (byte*) node + Constants.NodeHeaderSize;
+			Size = node->KeySize;
+			KeyLength = node->KeySize;
+			Array = null;
 		}
 	}
 }

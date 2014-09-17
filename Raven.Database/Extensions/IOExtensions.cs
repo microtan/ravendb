@@ -102,15 +102,7 @@ namespace Raven.Database.Extensions
 					}
 					catch (UnauthorizedAccessException)
 					{
-						var processesUsingFiles = WhoIsLocking.GetProcessesUsingFile(path);
-						var stringBuilder = new StringBuilder();
-						stringBuilder.Append("The following processing are locking ").Append(path).AppendLine();
-						foreach (var processesUsingFile in processesUsingFiles)
-						{
-							stringBuilder.Append("\t").Append(processesUsingFile.ProcessName).Append(' ').Append(processesUsingFile.Id).
-								AppendLine();
-						}
-						throw new IOException(stringBuilder.ToString());
+						throw new IOException(WhoIsLocking.ThisFile(path));
 					}
 					catch(IOException)
 					{
@@ -138,9 +130,14 @@ namespace Raven.Database.Extensions
 				return String.Empty;
 			path = Environment.ExpandEnvironmentVariables(path);
 			if (path.StartsWith(@"~\") || path.StartsWith(@"~/"))
-				path = Path.Combine(basePath  ?? AppDomain.CurrentDomain.BaseDirectory, path.Substring(2));
+			{
+				if (!string.IsNullOrEmpty(basePath))
+					basePath = Path.GetDirectoryName(basePath.EndsWith("\\") ? basePath.Substring(0, basePath.Length - 2) : basePath);
 
-			return Path.IsPathRooted(path) ? path : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, path);
+				path = Path.Combine(basePath ?? AppDomain.CurrentDomain.BaseDirectory, path.Substring(2));
+		}
+
+			return Path.IsPathRooted(path) ? path : Path.Combine(basePath ?? AppDomain.CurrentDomain.BaseDirectory, path);
 		}
 
 		public static void CopyDirectory(string from, string to)
@@ -173,5 +170,16 @@ namespace Raven.Database.Extensions
 				CopyDirectory(diSourceDir, nextTargetDir);
 			}
 		}
+
+		public static string GetMD5Hex(byte[] input)
+		{
+			var sb = new StringBuilder();
+			for (var i = 0; i < input.Length; i++)
+			{
+				sb.Append(input[i].ToString("x2"));
+	}
+
+			return sb.ToString();
+}
 	}
 }

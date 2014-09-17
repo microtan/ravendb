@@ -74,6 +74,7 @@ namespace Raven.Client.UniqueConstraints
 			return LoadByUniqueConstraintInternal<T>(session, keyName, values);
 		}
 
+        public const string DummyId = "E1972AA7-148D-4035-9779-0EDFB3A7DBFF";
 		private static T[] LoadByUniqueConstraintInternal<T>(this IDocumentSession session, string propertyName, params object[] values)
 		{
 			if (values == null) throw new ArgumentNullException("value", "The unique value cannot be null");
@@ -92,8 +93,8 @@ namespace Raven.Client.UniqueConstraints
 			                     select
 			                         new
 			                         {
-			                             Id = "UniqueConstraints/" + typeName.ToLowerInvariant() + "/" + propertyName.ToLowerInvariant() + "/" + Raven.Bundles.UniqueConstraints.Util.EscapeUniqueValue(value, constraintInfo.Configuration.CaseInsensitive),
-			                             Key = Raven.Bundles.UniqueConstraints.Util.EscapeUniqueValue(value, constraintInfo.Configuration.CaseInsensitive)
+			                             Id = "UniqueConstraints/" + typeName.ToLowerInvariant() + "/" + propertyName.ToLowerInvariant() + "/" + Util.EscapeUniqueValue(value, constraintInfo.Configuration.CaseInsensitive),
+			                             Key = Util.EscapeUniqueValue(value, constraintInfo.Configuration.CaseInsensitive)
 			                         }).ToList();
 
 
@@ -105,19 +106,18 @@ namespace Raven.Client.UniqueConstraints
                 var existingDocsIds = new List<string>();
                 for (var i = 0; i < constraintDocs.Length; i++)
                 {
-                    var nullId = Guid.NewGuid().ToString(); // simple way to maintain parallel results array - this ID should never exist in the DB
-
+                    // simple way to maintain parallel results array - DummyId should never exist in the DB
                     var constraintDoc = constraintDocs[i];
                     if (constraintDoc == null)
                     {
-                        existingDocsIds.Add(nullId);
+                        existingDocsIds.Add(DummyId);
                         continue;
                     }
 
                     var constraintId = constraintsIds[i];
                     var relatedId = constraintDoc.GetRelatedIdFor(constraintId.Key);
                      
-                    existingDocsIds.Add(!string.IsNullOrEmpty(relatedId) ? relatedId : nullId);
+                    existingDocsIds.Add(!string.IsNullOrEmpty(relatedId) ? relatedId : DummyId);
                 }
 
 			    return session.Load<T>(existingDocsIds);
@@ -176,8 +176,8 @@ namespace Raven.Client.UniqueConstraints
                                   from item in propertyValue is IEnumerable && propertyValue.GetType() != typeof(string) ? ((IEnumerable)propertyValue).Cast<object>().Where(i => i != null) : new[] { propertyValue }
                                   select new
                                          {
-                                             Id = "UniqueConstraints/" + typeName.ToLowerInvariant() + "/" + property.Configuration.Name.ToLowerInvariant() + "/" + Raven.Bundles.UniqueConstraints.Util.EscapeUniqueValue(item.ToString(), property.Configuration.CaseInsensitive),
-                                             Key = Raven.Bundles.UniqueConstraints.Util.EscapeUniqueValue(item.ToString(), property.Configuration.CaseInsensitive)
+                                             Id = "UniqueConstraints/" + typeName.ToLowerInvariant() + "/" + property.Configuration.Name.ToLowerInvariant() + "/" + Util.EscapeUniqueValue(item.ToString(), property.Configuration.CaseInsensitive),
+                                             Key = Util.EscapeUniqueValue(item.ToString(), property.Configuration.CaseInsensitive)
                                          }).ToList();
 
 			var constraintDocs = session
@@ -220,7 +220,7 @@ namespace Raven.Client.UniqueConstraints
 			var propertyName = body.Member.Name;
 		    var att = (UniqueConstraintAttribute) Attribute.GetCustomAttribute(body.Member, typeof (UniqueConstraintAttribute));
 
-            var escapedValue = Raven.Bundles.UniqueConstraints.Util.EscapeUniqueValue(value,att.CaseInsensitive);
+            var escapedValue = Util.EscapeUniqueValue(value,att.CaseInsensitive);
 		    var uniqueId = "UniqueConstraints/" + typeName.ToLowerInvariant() + "/" + propertyName.ToLowerInvariant() + "/" + escapedValue;
 
             var constraintDoc = await session
@@ -246,8 +246,8 @@ namespace Raven.Client.UniqueConstraints
                                   from item in propertyValue is IEnumerable && propertyValue.GetType() != typeof(string) ? ((IEnumerable)propertyValue).Cast<object>().Where(i => i != null) : new[] { propertyValue }
                                   select new
                                   {
-                                      Id = "UniqueConstraints/" + typeName.ToLowerInvariant() + "/" + property.Configuration.Name.ToLowerInvariant() + "/" + Raven.Bundles.UniqueConstraints.Util.EscapeUniqueValue(item.ToString(), property.Configuration.CaseInsensitive),
-                                      Key = Raven.Bundles.UniqueConstraints.Util.EscapeUniqueValue(item.ToString(), property.Configuration.CaseInsensitive)
+                                      Id = "UniqueConstraints/" + typeName.ToLowerInvariant() + "/" + property.Configuration.Name.ToLowerInvariant() + "/" + Util.EscapeUniqueValue(item.ToString(), property.Configuration.CaseInsensitive),
+                                      Key = Util.EscapeUniqueValue(item.ToString(), property.Configuration.CaseInsensitive)
                                   }).ToList();
 
             var constraintDocs = await session

@@ -7,12 +7,10 @@
 
 	public class SnapshotReader : IDisposable
 	{
-		private readonly StorageEnvironment _env;
 
 		public SnapshotReader(Transaction tx)
 		{
 			Transaction = tx;
-			_env = Transaction.Environment;
 		}
 
 		public Transaction Transaction { get; private set; }
@@ -36,7 +34,7 @@
 						case WriteBatch.BatchOperationType.Add:
 					    {
 					        var reader = new ValueReader(stream);
-					        return new ReadResult(reader, version.HasValue ? (ushort)(version.Value + 1) : tree.ReadVersion(Transaction, key));
+					        return new ReadResult(reader, version.HasValue ? (ushort)(version.Value + 1) : tree.ReadVersion(key));
 					    }
 						case WriteBatch.BatchOperationType.Delete:
 							return null;
@@ -47,13 +45,13 @@
 		    if (tree == null) 
                 tree = GetTree(treeName);
 
-			return tree.Read(Transaction, key);
+			return tree.Read(key);
 		}
 
 		public int GetDataSize(string treeName, Slice key)
 		{
 			var tree = GetTree(treeName);
-			return tree.GetDataSize(Transaction, key);
+			return tree.GetDataSize(key);
 		}
 
 		public bool Contains(string treeName, Slice key, out ushort? version, WriteBatch writeBatch = null)
@@ -77,7 +75,7 @@
 			}
 
 			var tree = GetTree(treeName);
-			var readVersion = tree.ReadVersion(Transaction, key);
+			var readVersion = tree.ReadVersion(key);
 
 			var exists = readVersion > 0;
 
@@ -105,13 +103,13 @@
 			}
 
 			var tree = GetTree(treeName);
-			return tree.ReadVersion(Transaction, key);
+			return tree.ReadVersion(key);
 		}
 
 		public IIterator Iterate(string treeName, WriteBatch writeBatch = null)
 		{
 			var tree = GetTree(treeName);
-			return tree.Iterate(Transaction, writeBatch);
+			return tree.Iterate(writeBatch);
 		}
 
 		public void Dispose()
@@ -122,7 +120,7 @@
 		public IIterator MultiRead(string treeName, Slice key)
 		{
 			var tree = GetTree(treeName);
-			return tree.MultiRead(Transaction, key);
+			return tree.MultiRead(key);
 		}
 
 		private Tree GetTree(string treeName)

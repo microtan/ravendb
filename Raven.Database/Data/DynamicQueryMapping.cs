@@ -47,6 +47,8 @@ namespace Raven.Database.Data
 				fromClause = "from doc in docs";
 			}
 
+			bool containsNestedItems = false;
+
 			foreach (var map in Items)
 			{
 				var currentDoc = "doc";
@@ -60,6 +62,7 @@ namespace Raven.Database.Data
 					switch (currentChar)
 					{
 						case ',':
+							containsNestedItems = true;
 
 							// doc.NewDoc.Items
 							String newDocumentSource = string.Format("{0}.{1}", currentDoc, currentExpression);
@@ -106,9 +109,18 @@ namespace Raven.Database.Data
 					));
 			}
 
+			string mapDefinition;
+
+			if (realMappings.Count == 1 && containsNestedItems == false)
+				mapDefinition = string.Format("{0}\r\nselect new {{ {1} }}", fromClause, realMappings.First());
+			else
+				mapDefinition = string.Format("{0}\r\nselect new\r\n{{\r\n\t{1}\r\n}}", fromClause, string.Join(",\r\n\t", realMappings));
+
+			mapDefinition = IndexPrettyPrinter.Format(mapDefinition);
+
 			var index = new IndexDefinition
 			{
-				Map = string.Format("{0}\r\nselect new {{ {1} }}", fromClause,string.Join(", ", realMappings)),
+				Map = mapDefinition,
 				InternalFieldsMapping = new Dictionary<string, string>()
 			};
 
@@ -311,25 +323,12 @@ namespace Raven.Database.Data
 			if (database.Configuration.RunInUnreliableYetFastModeThatIsNotSuitableForProduction == false &&
 				database.Configuration.RunInMemory == false)
 			{
-				// Hash the name if it's too long (as a path)
-				if ((database.Configuration.DataDirectory.Length + indexName.Length) > 230)
-				{
-					using (var sha256 = SHA256.Create())
-					{
-						var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(indexName));
-						indexName = Convert.ToBase64String(bytes);
-					}
-				}
+				indexName = IndexingUtil.FixupIndexName(indexName, database.Configuration.DataDirectory);
 			}
 
 			var permanentIndexName = indexName.Length == 0
 					? string.Format("Auto/{0}{1}", targetName, groupBy)
 					: string.Format("Auto/{0}/By{1}{2}", targetName, indexName, groupBy);
-
-			var temporaryIndexName = indexName.Length == 0
-					? string.Format("Temp/{0}{1}", targetName, groupBy)
-					: string.Format("Temp/{0}/By{1}{2}", targetName, indexName, groupBy);
-
 
 			map.IndexName = permanentIndexName;
 		}

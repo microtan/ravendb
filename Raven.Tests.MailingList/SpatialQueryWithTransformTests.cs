@@ -5,6 +5,7 @@ using Raven.Abstractions.Indexing;
 using Raven.Client.Indexes;
 using Raven.Json.Linq;
 using Raven.Tests.Common;
+using Raven.Tests.Helpers;
 
 using Xunit;
 
@@ -51,7 +52,7 @@ namespace Raven.Tests.MailingList
                 {
                     var query = session.Query<VacanciesIndex.Result, VacanciesIndex>()
                                        .TransformWith<ViewItemTransformer, ViewItemTransformer.View>()
-                                       .AddQueryInput("USERID", RavenJToken.FromObject("fake"))
+                                       .AddTransformerParameter("USERID", RavenJToken.FromObject("fake"))
                                        .Customize(x => x.WithinRadiusOf(10, 50.45010, 30.52340));
                     var result = query.ToList();
                     Assert.Equal(1, result.Count);
@@ -98,7 +99,7 @@ namespace Raven.Tests.MailingList
                 {
                     var query = session.Query<VacanciesIndex.Result, VacanciesIndex>()
                                        .TransformWith<ViewItemTransformer, ViewItemTransformer.View>()
-                                       .AddQueryInput("USERID", RavenJToken.FromObject("fake"))
+                                       .AddTransformerParameter("USERID", RavenJToken.FromObject("fake"))
                                        .Customize(x => x.WithinRadiusOf(10, 50.45010, 30.52340));
                     var result = query.ToList();
                     Assert.Equal(1, result.Count);
@@ -149,7 +150,7 @@ namespace Raven.Tests.MailingList
             TransformResults = results =>
                                from result in results
                                let employer = LoadDocument<Employer>(result.Owner)
-                               let uid = Query(USERID)
+                               let uid = Parameter(USERID)
                                let user = LoadDocument<Employer>(uid.ToString())
                                select new View
                                {

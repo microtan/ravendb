@@ -1,5 +1,4 @@
 ﻿
-#if !NETFX_CORE
 // -----------------------------------------------------------------------
 //  <copyright file="AdminDatabaseCommands.cs" company="Hibernating Rhinos LTD">
 //      Copyright (c) Hibernating Rhinos LTD. All rights reserved.
@@ -8,6 +7,7 @@
 using Raven.Abstractions.Data;
 using Raven.Client.Connection.Async;
 using Raven.Client.Extensions;
+using Raven.Json.Linq;
 
 namespace Raven.Client.Connection
 {
@@ -29,7 +29,7 @@ namespace Raven.Client.Connection
 
 		public void DeleteDatabase(string databaseName, bool hardDelete = false)
 		{
-			asyncAdminServerClient.DeleteDatabaseAsync(databaseName, hardDelete);
+			asyncAdminServerClient.DeleteDatabaseAsync(databaseName, hardDelete).WaitUnwrap();
 		}
 
 		public IDatabaseCommands Commands { get { return new ServerClient(asyncServerClient); } }
@@ -44,9 +44,9 @@ namespace Raven.Client.Connection
 			asyncAdminServerClient.StopIndexingAsync().WaitUnwrap();
 		}
 
-		public void StartIndexing()
+        public void StartIndexing(int? maxNumberOfParallelIndexTasks)
 		{
-			asyncAdminServerClient.StartIndexingAsync().WaitUnwrap();
+            asyncAdminServerClient.StartIndexingAsync(maxNumberOfParallelIndexTasks).WaitUnwrap();
 		}
 
 		public void StartBackup(string backupLocation, DatabaseDocument databaseDocument, bool incremental, string databaseName)
@@ -56,18 +56,32 @@ namespace Raven.Client.Connection
 
 		public void StartRestore(RestoreRequest restoreRequest)
 		{
-			asyncAdminServerClient.StartRestoreAsync(restoreRequest);
+			asyncAdminServerClient.StartRestoreAsync(restoreRequest).WaitUnwrap();
 		}
 
 		public string GetIndexingStatus()
 		{
-			return asyncAdminServerClient.GetIndexingStatusAsync().Result;
+			return asyncAdminServerClient.GetIndexingStatusAsync().ResultUnwrap();
+		}
+
+		public RavenJObject GetDatabaseConfiguration()
+		{
+			return asyncAdminServerClient.GetDatabaseConfigurationAsync().ResultUnwrap();
+		}
+
+		public BuildNumber GetBuildNumber()
+		{
+			return asyncAdminServerClient.GetBuildNumberAsync().ResultUnwrap();
+		}
+
+		public string[] GetDatabaseNames(int pageSize, int start = 0)
+		{
+			return asyncAdminServerClient.GetDatabaseNamesAsync(pageSize, start).ResultUnwrap();
 		}
 
 		public AdminStatistics GetStatistics()
 		{
-			return asyncAdminServerClient.GetStatisticsAsync().Result;
+			return asyncAdminServerClient.GetStatisticsAsync().ResultUnwrap();
 		}
 	}
 }
-#endif

@@ -15,8 +15,7 @@ using System.Text;
 using System.Threading;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Util.Encryptors;
-using Raven.Client.RavenFS;
-using Raven.Client.RavenFS.Extensions;
+using Raven.Client.FileSystem.Extensions;
 using Raven.Database;
 using Raven.Database.Config;
 using Raven.Database.Extensions;
@@ -24,16 +23,26 @@ using Raven.Database.Server;
 using Raven.Database.Server.RavenFS;
 using Raven.Database.Server.Security;
 using Raven.Server;
-using Xunit;
+using Raven.Client.FileSystem;
+
+using RavenFS.Tests.Tools;
 
 namespace RavenFS.Tests
 {
     public class RavenFsTestBase : WithNLog, IDisposable
     {
         private readonly List<RavenDbServer> servers = new List<RavenDbServer>();
-        private readonly List<RavenFileSystemClient> ravenFileSystemClients = new List<RavenFileSystemClient>();
+        private readonly List<IFilesStore> filesStores = new List<IFilesStore>();
+        private readonly List<IAsyncFilesCommands> asyncCommandClients = new List<IAsyncFilesCommands>();
         private readonly HashSet<string> pathsToDelete = new HashSet<string>();
-        public static readonly int[] Ports = { 19079, 19078, 19077 };
+        public static readonly int[] Ports = { 19067, 19068, 19069 };
+
+        public TimeSpan SynchronizationInterval { get; protected set; }
+
+        protected RavenFsTestBase()
+        {
+            this.SynchronizationInterval = TimeSpan.FromMinutes(10);
+        }
 
         protected RavenDbServer CreateRavenDbServer(int port,
                                                     string dataDirectory = null,
@@ -42,6 +51,7 @@ namespace RavenFS.Tests
                                                     bool enableAuthentication = false,
                                                     string fileSystemName = null)
         {
+            NonAdminHttp.EnsureCanListenToWhenInNonAdminContext(port);
             var storageType = GetDefaultStorageType(requestedStorage);
             var directory = dataDirectory ?? NewDataPath(fileSystemName + "_" + port);
 
@@ -54,8 +64,13 @@ namespace RavenFS.Tests
 				RunInUnreliableYetFastModeThatIsNotSuitableForProduction = runInMemory,
 #endif
 				DefaultStorageTypeName = storageType,
-				AnonymousUserAccessMode = enableAuthentication ? AnonymousUserAccessMode.None : AnonymousUserAccessMode.Admin,
+				AnonymousUserAccessMode = enableAuthentication ? AnonymousUserAccessMode.None : AnonymousUserAccessMode.Admin,                
 			};
+
+	        ravenConfiguration.Encryption.UseFips = SettingsHelper.UseFipsEncryptionAlgorithms;
+            ravenConfiguration.FileSystem.MaximumSynchronizationInterval = this.SynchronizationInterval;
+	        ravenConfiguration.FileSystem.DataDirectory = Path.Combine(directory, "FileSystem");
+	        ravenConfiguration.FileSystem.DefaultStorageTypeName = storageType;
 
             if (enableAuthentication)
             {
@@ -80,20 +95,51 @@ namespace RavenFS.Tests
             return ravenDbServer;
         }
 
-        protected virtual RavenFileSystemClient NewClient(int index = 0, bool fiddler = false, bool enableAuthentication = false, string apiKey = null, 
-                                                          ICredentials credentials = null, string requestedStorage = null, [CallerMemberName] string fileSystemName = null)
+        protected virtual IFilesStore NewStore( int index = 0, bool fiddler = false, bool enableAuthentication = false, string apiKey = null, 
+                                                ICredentials credentials = null, string requestedStorage = null, [CallerMemberName] string fileSystemName = null)
         {
             fileSystemName = NormalizeFileSystemName(fileSystemName);
 
             var server = CreateRavenDbServer(Ports[index], fileSystemName: fileSystemName, enableAuthentication: enableAuthentication, requestedStorage: requestedStorage);
 
-            var client = new RavenFileSystemClient(GetServerUrl(fiddler, server.SystemDatabase.ServerUrl), fileSystemName, apiKey: apiKey, credentials: credentials);
+            var store = new FilesStore()
+            {
+                Url = GetServerUrl(fiddler, server.SystemDatabase.ServerUrl),
+                DefaultFileSystem = fileSystemName,
+                Credentials = credentials,
+                ApiKey = apiKey,                 
+            };
 
-            client.EnsureFileSystemExistsAsync().Wait();
+            store.Initialize(true);
 
-            ravenFileSystemClients.Add(client);
+            this.filesStores.Add(store);
 
-            return client;
+            return store;                        
+        }
+
+        protected virtual IAsyncFilesCommands NewAsyncClient(int index = 0, bool fiddler = false, bool enableAuthentication = false, string apiKey = null, 
+                                                             ICredentials credentials = null, string requestedStorage = null, [CallerMemberName] string fileSystemName = null)
+        {
+            fileSystemName = NormalizeFileSystemName(fileSystemName);
+
+            var server = CreateRavenDbServer(Ports[index], fileSystemName: fileSystemName, enableAuthentication: enableAuthentication, requestedStorage: requestedStorage);
+
+            var store = new FilesStore()
+            {
+                Url = GetServerUrl(fiddler, server.SystemDatabase.ServerUrl),
+                DefaultFileSystem = fileSystemName,
+                Credentials = credentials,
+                ApiKey = apiKey,
+            };
+
+            store.Initialize(true);
+
+            this.filesStores.Add(store);
+
+            var client = store.AsyncFilesCommands;
+            asyncCommandClients.Add(client);
+
+            return client;       
         }
 
         protected RavenFileSystem GetRavenFileSystem(int index = 0, [CallerMemberName] string fileSystemName = null)
@@ -126,7 +172,11 @@ namespace RavenFS.Tests
 
         protected string NewDataPath(string prefix = null)
         {
-            var newDataDir = Path.GetFullPath(string.Format(@".\{0}-{1}-{2}\", DateTime.Now.ToString("yyyy-MM-dd,HH-mm-ss"), prefix ?? "RavenFS_Test", Guid.NewGuid().ToString("N")));
+            // Federico: With a filesystem name too large, we can easily pass the filesystem path limit. 
+            // The truncation of the Guid to 8 still provides enough entropy to avoid collisions.
+            string suffix = Guid.NewGuid().ToString("N").Substring(0, 8);
+
+            var newDataDir = Path.GetFullPath(string.Format(@".\{0}-{1}-{2}\", DateTime.Now.ToString("yyyy-MM-dd,HH-mm-ss"), prefix ?? "RavenFS_Test", suffix));
             Directory.CreateDirectory(newDataDir);
             pathsToDelete.Add(newDataDir);
             return newDataDir;
@@ -134,14 +184,15 @@ namespace RavenFS.Tests
 
         protected string NormalizeFileSystemName(string fileSystemName)
         {
-            if (string.IsNullOrEmpty(fileSystemName)) 
+            if (string.IsNullOrEmpty(fileSystemName))
                 return null;
 
             if (fileSystemName.Length < 50)
                 return fileSystemName;
 
-            var prefix = fileSystemName.Substring(0, 30);
-            var suffix = fileSystemName.Substring(fileSystemName.Length - 10, 10);
+            // Federico: With a too large value (say 30) it is very easy to pass the filesystem limit when the test name is large. 
+            var prefix = fileSystemName.Substring(0, 10);
+            var suffix = fileSystemName.Substring(fileSystemName.Length - 5, 5);
             var hash = new Guid(Encryptor.Current.Hash.Compute16(Encoding.UTF8.GetBytes(fileSystemName))).ToString("N").Substring(0, 8);
 
             return string.Format("{0}_{1}_{2}", prefix, hash, suffix);
@@ -162,7 +213,6 @@ namespace RavenFS.Tests
 
         public static string StreamToString(Stream stream)
         {
-            stream.Position = 0;
             using (var reader = new StreamReader(stream, Encoding.UTF8))
             {
                 return reader.ReadToEnd();
@@ -195,7 +245,7 @@ namespace RavenFS.Tests
         {
             var errors = new List<Exception>();
 
-            foreach (var client in ravenFileSystemClients)
+            foreach (var client in asyncCommandClients)
             {
                 try
                 {
@@ -207,7 +257,8 @@ namespace RavenFS.Tests
                 }
             }
 
-            ravenFileSystemClients.Clear();
+            asyncCommandClients.Clear();
+            filesStores.Clear();
 
             foreach (var server in servers)
             {
@@ -275,6 +326,18 @@ namespace RavenFS.Tests
                     Thread.Sleep(2500);
                 }
             }
+        }
+
+        protected Stream CreateUniformFileStream(int size, char value = 'a')
+        {
+            var ms = new MemoryStream();
+            var streamWriter = new StreamWriter(ms);
+            var expected = new string(value, size);
+            streamWriter.Write(expected);
+            streamWriter.Flush();
+            ms.Position = 0;
+
+            return ms;
         }
     }
 }

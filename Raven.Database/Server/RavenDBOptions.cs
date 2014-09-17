@@ -1,6 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+
+using Raven.Abstractions.Logging;
 using Raven.Database.Config;
+using Raven.Database.Server.Connections;
 using Raven.Database.Server.Security;
 using Raven.Database.Server.Tenancy;
 using Raven.Database.Server.WebApi;
@@ -14,8 +17,9 @@ namespace Raven.Database.Server
 		private readonly DocumentDatabase systemDatabase;
 		private readonly RequestManager requestManager;
 	    private readonly FileSystemsLandlord fileSystemLandlord;
+		private readonly CountersLandlord countersLandlord;
 
-	    public RavenDBOptions(InMemoryRavenConfiguration configuration, DocumentDatabase db = null)
+		public RavenDBOptions(InMemoryRavenConfiguration configuration, DocumentDatabase db = null)
 		{
 			if (configuration == null)
 				throw new ArgumentNullException("configuration");
@@ -23,6 +27,7 @@ namespace Raven.Database.Server
 			try
 			{
 				HttpEndpointRegistration.RegisterHttpEndpointTarget();
+			    HttpEndpointRegistration.RegisterAdminLogsTarget();
 				if (db == null)
 				{
 					systemDatabase = new DocumentDatabase(configuration);
@@ -32,9 +37,9 @@ namespace Raven.Database.Server
 				{
 					systemDatabase = db;
 				}
-				var transportState = systemDatabase.TransportState;
-			    fileSystemLandlord = new FileSystemsLandlord(systemDatabase, transportState);
+			    fileSystemLandlord = new FileSystemsLandlord(systemDatabase);
 				databasesLandlord = new DatabasesLandlord(systemDatabase);
+				countersLandlord = new CountersLandlord(systemDatabase);
 				requestManager = new RequestManager(databasesLandlord);
 				mixedModeRequestAuthorizer = new MixedModeRequestAuthorizer();
 				mixedModeRequestAuthorizer.Initialize(systemDatabase, new RavenServer(databasesLandlord.SystemDatabase, configuration));
@@ -66,6 +71,11 @@ namespace Raven.Database.Server
 	        get { return fileSystemLandlord; }
 	    }
 
+		public CountersLandlord CountersLandlord
+		{
+			get { return countersLandlord; }
+		}
+
 	    public RequestManager RequestManager
 		{
 			get { return requestManager; }
@@ -79,7 +89,9 @@ namespace Raven.Database.Server
                                 databasesLandlord, 
                                 fileSystemLandlord,
                                 systemDatabase, 
-                                requestManager
+                                LogManager.GetTarget<AdminLogsTarget>(),
+                                requestManager,
+                                countersLandlord
 		                    };
 
             var errors = new List<Exception>();

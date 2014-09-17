@@ -27,6 +27,7 @@ class index {
     isIdle = ko.observable(false);
     isAbandoned = ko.observable(false);
     isDisabled = ko.observable(false);
+    isInvalid = ko.observable(false);
     editUrl: KnockoutComputed<string>;
     queryUrl: KnockoutComputed<string>;
 
@@ -53,13 +54,14 @@ class index {
         this.lastReducedEtag = dto.LastReducedEtag;
         this.lastReducedTimestamp = dto.LastReducedTimestamp;
         this.lockMode(dto.LockMode);
-        this.name = dto.PublicName;
+        this.name = dto.Name;
         this.performance = dto.Performance;
         this.priority = dto.Priority;
         this.reduceIndexingAttempts = dto.ReduceIndexingAttempts;
         this.reduceIndexingErrors = dto.ReduceIndexingErrors;
         this.reduceIndexingSuccesses = dto.ReduceIndexingSuccesses;
         this.touchCount = dto.TouchCount;
+        this.isInvalid(dto.IsInvalidIndex);
 
         this.isAbandoned(this.priority && this.priority.indexOf(index.priorityAbandoned) !== -1);
         this.isDisabled(this.priority && this.priority.indexOf(index.priorityDisabled) !== -1);

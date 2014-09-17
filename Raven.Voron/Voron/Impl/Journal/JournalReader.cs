@@ -15,7 +15,7 @@ namespace Voron.Impl.Journal
         private readonly long _lastSyncedTransactionId;
         private long _readingPage;
 
-        private readonly Dictionary<long, JournalFile.PagePosition> _transactionPageTranslation = new Dictionary<long, JournalFile.PagePosition>();
+	    private readonly Dictionary<long, JournalFile.PagePosition> _transactionPageTranslation = new Dictionary<long, JournalFile.PagePosition>();
         private int _recoveryPage;
 
         public bool RequireHeaderUpdate { get; private set; }
@@ -56,23 +56,13 @@ namespace Voron.Impl.Journal
                 return true; // skipping
             }
 
-	        if (checkCrc)
-	        {
-		        uint crc = Crc.Value(_pager.AcquirePagePointer(_readingPage), 0, compressedPages * AbstractPager.PageSize);
-
-				if (crc != current->Crc)
-				{
-					RequireHeaderUpdate = true;
-					options.InvokeRecoveryError(this, "Invalid CRC signature for transaction " + current->TransactionId, null);
-
-					return false;
-				}
-	        }
+			if (checkCrc && !ValidatePagesCrc(options, compressedPages, current))
+				return false;
 
             _recoveryPager.EnsureContinuous(null, _recoveryPage, (current->PageCount + current->OverflowPageCount) + 1);
             var dataPage = _recoveryPager.AcquirePagePointer(_recoveryPage);
 
-            NativeMethods.memset(dataPage, 0, (current->PageCount + current->OverflowPageCount) * AbstractPager.PageSize);
+			StdLib.memset(dataPage, 0, (current->PageCount + current->OverflowPageCount) * AbstractPager.PageSize);
             try
             {
                 LZ4.Decode64(_pager.AcquirePagePointer(_readingPage), current->CompressedSize, dataPage, current->UncompressedSize, true);
@@ -197,6 +187,20 @@ namespace Voron.Impl.Journal
 				current->TransactionId - previous->TransactionId != 1)
 				throw new InvalidDataException("Unexpected transaction id. Expected: " + (previous->TransactionId + 1) +
 											   ", got:" + current->TransactionId);
+		}
+
+		private bool ValidatePagesCrc(StorageEnvironmentOptions options, int compressedPages, TransactionHeader* current)
+		{
+			uint crc = Crc.Value(_pager.AcquirePagePointer(_readingPage), 0, compressedPages * AbstractPager.PageSize);
+
+			if (crc != current->Crc)
+			{
+				RequireHeaderUpdate = true;
+				options.InvokeRecoveryError(this, "Invalid CRC signature for transaction " + current->TransactionId, null);
+
+				return false;
+			}
+			return true;
 		}
 
 		public override string ToString()

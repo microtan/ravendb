@@ -7,10 +7,11 @@ enum filesystemSynchronizationType {
 }
 
 interface filesystemSynchronizationDetailsDto {
-    Filename: string;
+    FileName: string;
     FileETag: string;
     DestinationUrl: string;
-    Type: filesystemSynchronizationType;
+    Type: string;
+    Direction: synchronizationDirection;
 }
 
 interface filesystemMetricsHistogramDataDto {
@@ -29,7 +30,7 @@ interface filesystemMetricsMeterDataDto {
     FifteenMinuteRate: number;
 }
 
-interface filesystemMetricsDto{
+interface filesystemMetricsDto {
     FilesWritesPerSecond: number;
     RequestsPerSecond: number;
     Requests: filesystemMetricsMeterDataDto;
@@ -49,7 +50,7 @@ interface filesystemFileHeaderDto {
 
     TotalSize?: number;
     UploadedSize: number;
-		
+
     HumaneTotalSize: string;
     HumaneUploadedSize: string;
 
@@ -66,19 +67,6 @@ interface fileMetadataDto {
     'Origin': string;
 }
 
-interface filesystemSynchronizationReportDto{
-
-    FileName: string;
-    FileETag: string;
-    Type: filesystemSynchronizationType;
-
-    BytesTransfered: number;
-    BytesCopied: number;
-    NeedListLength: number;
-
-    Exception: any;
-}
-
 interface filesystemSearchResultsDto {
     Files: filesystemFileHeaderDto[];
     FileCount: number;
@@ -86,7 +74,7 @@ interface filesystemSearchResultsDto {
     PageSize: number;
 }
 
-interface filesystemConfigSearchResultsDto{
+interface filesystemConfigSearchResultsDto {
     ConfigNames: string[];
     TotalCount: number;
     Start: number;
@@ -109,4 +97,87 @@ interface filesystemConflictItemDto {
 interface filesystemListPageDto<T> {
     TotalCount: number;
     Items: T[];
+}
+
+interface synchronizationReplicationsDto {
+    Destinations: synchronizationDestinationDto[];
+    Source: string;
+}
+
+interface synchronizationDestinationDto {
+    ServerUrl: string;
+    Username: string;
+    Password: string;
+    Domain: string;
+    ApiKey: string;
+    FileSystem: string;
+    Enabled: boolean;
+}
+
+interface folderNodeDto {
+    key: string;
+    title: string;
+    isLazy: boolean;
+    isFolder: boolean
+    addClass?: string;
+}
+
+interface synchronizationUpdateNotification {
+    FileSystemName: string;
+    FileName: string;
+    DestinationFileSystemUrl: string;
+    SourceServerId: string;
+    SourceFileSystemUrl: string;
+    Type: filesystemSynchronizationType;
+    Action: synchronizationAction;
+    Direction: synchronizationDirection;
+}
+
+enum synchronizationAction {
+    Enqueue,
+    Start,
+    Finish
+}
+
+enum synchronizationDirection {
+    Outgoing,
+    Incoming
+}
+
+interface synchronizationConflictNotification {
+    FileSystemName: string;
+    FileName: string;
+    SourceServerUrl: string;
+    Status: conflictStatus;
+    RemoteFileHeader: any;
+}
+
+enum conflictStatus {
+    Detected = 0,
+    Resolved = 1
+}
+
+interface fileChangeNotification {
+    FileSystemName: string;
+    File: string;
+    Action: fileChangeAction;
+}
+
+enum fileChangeAction {
+    Add,
+    Delete,
+    Update,
+    Renaming,
+    Renamed
+}
+
+interface filesystemConfigNotification {
+    FileSystemName: string;
+    Name: string;
+    Action: filesystemConfigurationChangeAction;
+}
+
+enum filesystemConfigurationChangeAction {
+    Set,
+    Delete
 }

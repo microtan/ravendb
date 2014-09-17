@@ -60,9 +60,9 @@ namespace Raven.Backup
             var backupRequest = new
             {
                 BackupLocation = BackupPath.Replace("\\", "\\\\"),
-                DatabaseDocument = new DatabaseDocument { Id = Database }
             };
 
+	       
             var json = RavenJObject.FromObject(backupRequest).ToString();
 
             var url = "/admin/backup";
@@ -99,7 +99,6 @@ namespace Raven.Backup
             uriString += url;
 
             var req = store.JsonRequestFactory.CreateHttpJsonRequest(new CreateHttpJsonRequestParams(null, uriString, method, new OperationCredentials(ApiKey, CredentialCache.DefaultCredentials), store.Conventions));
-            Console.WriteLine("Request url - " + uriString);
             if (Timeout.HasValue)
             {
                 req.Timeout = TimeSpan.FromMilliseconds(Timeout.Value);

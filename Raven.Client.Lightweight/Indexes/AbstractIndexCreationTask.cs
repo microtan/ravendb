@@ -30,7 +30,7 @@ namespace Raven.Client.Indexes
 	/// The naming convention is that underscores in the inherited class names are replaced by slashed
 	/// For example: Posts_ByName will be saved to Posts/ByName
 	/// </remarks>
-#if !MONO && !NETFX_CORE
+#if !MONO
 	[System.ComponentModel.Composition.InheritedExport]
 #endif
 	public abstract class AbstractIndexCreationTask : AbstractCommonApiForIndexesAndTransformers
@@ -180,7 +180,14 @@ namespace Raven.Client.Indexes
 			throw new NotSupportedException("This method is provided solely to allow query translation on the server");
 		}
 
-#if !NETFX_CORE
+		/// <summary>
+		/// Loads the specifed document during the indexing process
+		/// </summary>
+        [Obsolete("Use RavenFS instead.")]
+        public object LoadAttachmentForIndexing(string key)
+		{
+			throw new NotSupportedException("This can only be run on the server side");
+		}
 
 		/// <summary>
 		/// Executes the index creation against the specified document store.
@@ -197,6 +204,21 @@ namespace Raven.Client.Indexes
 		{
 			Conventions = documentConvention;
 			var indexDefinition = CreateIndexDefinition();
+			if (documentConvention.PrettifyGeneratedLinqExpressions)
+			{
+				var serverDef = databaseCommands.GetIndex(IndexName);
+				if (serverDef != null)
+				{
+					if (serverDef.Equals(indexDefinition))
+						return;
+
+					// now we need to check if this is a legacy index...
+					var legacyIndexDefinition = GetLegacyIndexDefinition(documentConvention);
+					if (serverDef.Equals(legacyIndexDefinition))
+						return; // if it matches the legacy definition, do not change that (to avoid re-indexing)
+				}
+			}
+
 			// This code take advantage on the fact that RavenDB will turn an index PUT
 			// to a noop of the index already exists and the stored definition matches
 			// the new definition.
@@ -206,7 +228,20 @@ namespace Raven.Client.Indexes
 				commands.DirectPutIndex(IndexName, url, true, indexDefinition));
 		}
 
-#endif
+		private IndexDefinition GetLegacyIndexDefinition(DocumentConvention documentConvention)
+		{
+			IndexDefinition legacyIndexDefinition;
+			documentConvention.PrettifyGeneratedLinqExpressions = false;
+			try
+			{
+				legacyIndexDefinition = CreateIndexDefinition();
+			}
+			finally
+			{
+				documentConvention.PrettifyGeneratedLinqExpressions = true;
+			}
+			return legacyIndexDefinition;
+		}
 
 		/// <summary>
 		/// Executes the index creation against the specified document store.
@@ -215,7 +250,21 @@ namespace Raven.Client.Indexes
 		{
 			Conventions = documentConvention;
 			var indexDefinition = CreateIndexDefinition();
-			
+			if (documentConvention.PrettifyGeneratedLinqExpressions)
+			{
+				var serverDef = await asyncDatabaseCommands.GetIndexAsync(IndexName);
+				if (serverDef != null)
+				{
+					if (serverDef.Equals(indexDefinition))
+						return;
+
+					// now we need to check if this is a legacy index...
+					var legacyIndexDefinition = GetLegacyIndexDefinition(documentConvention);
+					if (serverDef.Equals(legacyIndexDefinition))
+						return; // if it matches the legacy definition, do not change that (to avoid re-indexing)
+				}
+			}
+
 			// This code take advantage on the fact that RavenDB will turn an index PUT
 			// to a noop of the index already exists and the stored definition matches
 			// the new definition.
@@ -260,7 +309,7 @@ namespace Raven.Client.Indexes
 				Conventions = new DocumentConvention();
 
 
-			return new IndexDefinitionBuilder<TDocument, TReduceResult>
+			return new IndexDefinitionBuilder<TDocument, TReduceResult>()
 			{
 				Indexes = Indexes,
 				IndexesStrings = IndexesStrings,
@@ -270,9 +319,6 @@ namespace Raven.Client.Indexes
 				AnalyzersStrings = AnalyzersStrings,
 				Map = Map,
 				Reduce = Reduce,
-#pragma warning disable 612,618
-				TransformResults = TransformResults,
-#pragma warning restore 612,618
 				Stores = Stores,
 				StoresStrings = StoresStrings,
 				Suggestions = IndexSuggestions,
@@ -357,14 +403,6 @@ namespace Raven.Client.Indexes
 		/// <summary>
 		/// Loads the specifed document during the indexing process
 		/// </summary>
-		public object LoadAttachmentForIndexing(string key)
-		{
-			throw new NotSupportedException("This can only be run on the server side");
-		}
-
-		/// <summary>
-		/// Loads the specifed document during the indexing process
-		/// </summary>
 		public T LoadDocument<T>(string key)
 		{
 			throw new NotSupportedException("This can only be run on the server side");
@@ -411,7 +449,7 @@ namespace Raven.Client.Indexes
 		}
 
 		/// <summary>
-		/// Allow to get to the metadata of the document
+		/// Allow to access an entity as a document
 		/// </summary>
 		protected RavenJObject AsDocument(object doc)
 		{
@@ -425,7 +463,7 @@ namespace Raven.Client.Indexes
 		    var asyncServerClient = asyncDatabaseCommands as AsyncServerClient;
 		    if (asyncServerClient == null)
 		        return;
-		    var doc = await asyncServerClient.GetAsync("Raven/Replication/Destinations");
+		    var doc = await asyncServerClient.GetAsync(Constants.RavenReplicationDestinations);
 		    if (doc == null)
 		        return;
 		    var replicationDocument =
@@ -460,14 +498,13 @@ namespace Raven.Client.Indexes
 			return new OperationMetadata(url, replicationDestination.Username, replicationDestination.Password, replicationDestination.Domain, replicationDestination.ApiKey);
 		}
 
-#if !NETFX_CORE
 		internal void UpdateIndexInReplication(IDatabaseCommands databaseCommands, DocumentConvention documentConvention,
 			Action<ServerClient, OperationMetadata> action)
 		{
 			var serverClient = databaseCommands as ServerClient;
 			if (serverClient == null)
 				return;
-			var doc = serverClient.Get("Raven/Replication/Destinations");
+			var doc = serverClient.Get(Constants.RavenReplicationDestinations);
 			if (doc == null)
 				return;
 			var replicationDocument =
@@ -489,6 +526,5 @@ namespace Raven.Client.Indexes
 				}
 			}
 		}
-#endif
 	}
 }

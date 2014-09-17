@@ -4,11 +4,13 @@ import viewModelBase = require("viewmodels/viewModelBase");
 import getDatabaseStatsCommand = require("commands/getDatabaseStatsCommand");
 import database = require("models/database");
 import moment = require("moment");
+import appUrl = require("common/appUrl");
+import changeSubscription = require('models/changeSubscription');
 import copyDocuments = require("viewmodels/copyDocuments");
 import document = require("models/document");
 
 class logs extends viewModelBase {
-    
+
     allLogs = ko.observableArray<logDto>();
     filterLevel = ko.observable("All");
     selectedLog = ko.observable<logDto>();
@@ -22,6 +24,10 @@ class logs extends viewModelBase {
     now = ko.observable<Moment>();
     updateNowTimeoutHandle = 0;
     filteredLoggers = ko.observableArray<string>();
+    sortColumn = ko.observable<string>("TimeStamp");
+    sortAsc = ko.observable<boolean>(true);
+    filteredAndSortedLogs: KnockoutComputed<Array<logDto>>;
+    columnWidths: Array<KnockoutObservable<number>>;
 
     constructor() {
         super();
@@ -31,18 +37,51 @@ class logs extends viewModelBase {
         this.warningLogCount = ko.computed(() => this.allLogs().count(l => l.Level === "Warn"));
         this.errorLogCount = ko.computed(() => this.allLogs().count(l => l.Level === "Error"));
         this.fatalLogCount = ko.computed(() => this.allLogs().count(l => l.Level === "Fatal"));
-        this.searchTextThrottled = this.searchText.throttle(200);
+        this.searchTextThrottled = this.searchText.throttle(400);
         this.activeDatabase.subscribe(() => this.fetchLogs());
         this.updateCurrentNowTime();
+
+        this.filteredAndSortedLogs = ko.computed<Array<logDto>>(() => {
+            var logs = this.allLogs();
+            var column = this.sortColumn();
+            var asc = this.sortAsc();
+
+            var sortFunc = (left, right) => {
+                if (left[column] === right[column]) { return 0; }
+                var test = asc ? ((l, r) => l < r) : ((l, r) => l > r);
+                return test(left[column], right[column]) ? 1 : -1;
+            }
+
+            return logs.sort(sortFunc);
+        });
     }
 
     activate(args) {
         super.activate(args);
+        this.columnWidths = [
+            ko.observable<number>(100),
+            ko.observable<number>(265),
+            ko.observable<number>(300),
+            ko.observable<number>(200),
+            ko.observable<number>(360)
+        ];
+        this.registerColumnResizing();
         return this.fetchLogs();
+    }
+
+    attached() {
+        var logsRecordsContainerWidth = $("#logRecordsContainer").width();
+        var widthUnit = 0.08;
+        this.columnWidths[0](100 * widthUnit);
+        this.columnWidths[1](100 * widthUnit);
+        this.columnWidths[2](100 * widthUnit * 6);
+        this.columnWidths[3](100 * widthUnit * 2);
+        this.columnWidths[4](100 * widthUnit * 2);
     }
 
     deactivate() {
         clearTimeout(this.updateNowTimeoutHandle);
+        this.unregisterColumnResizing();
     }
 
     fetchLogs(): JQueryPromise<logDto[]> {
@@ -56,16 +95,24 @@ class logs extends viewModelBase {
         return null;
     }
 
-    processLogResults(results: logDto[]) {
+    processLogResults(results: logDto[], append:boolean=false) {
         var now = moment();
         results.forEach(r => {
-            r['TimeStampText'] = this.createHumanReadableTime(r.TimeStamp);
+            r['HumanizedTimestamp'] = this.createHumanReadableTime(r.TimeStamp,true,false);
+            r['TimeStampText'] = this.createHumanReadableTime(r.TimeStamp,true,true);
             r['IsVisible'] = ko.computed(() => this.matchesFilterAndSearch(r) && !this.filteredLoggers.contains(r.LoggerName));
         });
-        this.allLogs(results.reverse());
-    }
 
-    
+        if (append === false) {
+            this.allLogs(results.reverse());
+        } else {
+            if (results.length == 1) {
+                this.allLogs.unshift((results[0]));
+            } else {
+                results.forEach(x=>this.allLogs.unshift(x));
+            }
+        }
+    }
 
     matchesFilterAndSearch(log: logDto) {
         var searchTextThrottled = this.searchTextThrottled().toLowerCase();
@@ -78,12 +125,17 @@ class logs extends viewModelBase {
         return matchesLogLevel && matchesSearchText;
     }
 
-    createHumanReadableTime(time: string): KnockoutComputed<string> {
+    createHumanReadableTime(time: string, chainHumanized: boolean= true, chainDateTime:boolean=true): KnockoutComputed<string> {
         if (time) {
             return ko.computed(() => {
                 var dateMoment = moment(time);
+                var humanized = "", formattedDateTime = "";
                 var agoInMs = dateMoment.diff(this.now());
-                return moment.duration(agoInMs).humanize(true) + dateMoment.format(" (MM/DD/YY, h:mma)");
+                if (chainHumanized == true)
+                    humanized = moment.duration(agoInMs).humanize(true);
+                if (chainDateTime == true)
+                    formattedDateTime = dateMoment.format(" (MM/DD/YY, h:mma)");
+                return humanized + formattedDateTime;
             });
         }
 
@@ -181,6 +233,55 @@ class logs extends viewModelBase {
         }
     }
 
+    sortBy(columnName, logs, event) {
+        if (this.sortColumn() === columnName) {
+            this.sortAsc( !this.sortAsc() );
+        }
+        else {
+            this.sortColumn(columnName);
+            this.sortAsc(true);
+        }
+    }
+    
+    registerColumnResizing() {
+        var resizingColumn = false;
+        var startX = 0;
+        var startingWidth = 0;
+        var columnIndex = 0;
+
+        $(document).on("mousedown.logTableColumnResize", ".column-handle", (e: any) => {
+            columnIndex = parseInt( $(e.currentTarget).attr("column"));
+            startingWidth = this.columnWidths[columnIndex]();
+            startX = e.pageX;
+            resizingColumn = true;
+        });
+
+        $(document).on("mouseup.logTableColumnResize", "", (e: any) => {
+            resizingColumn = false;
+        });
+
+        $(document).on("mousemove.logTableColumnResize", "", (e: any) => {
+            if (resizingColumn) {
+                var logsRecordsContainerWidth = $("#logRecordsContainer").width();
+                var targetColumnSize = startingWidth + 100*(e.pageX - startX)/logsRecordsContainerWidth;
+                this.columnWidths[columnIndex](targetColumnSize);
+
+                // Stop propagation of the event so the text selection doesn't fire up
+                if (e.stopPropagation) e.stopPropagation();
+                if (e.preventDefault) e.preventDefault();
+                e.cancelBubble = true;
+                e.returnValue = false;
+
+                return false;
+            }
+        });
+    }
+
+    unregisterColumnResizing() {
+        $(document).off("mousedown.logTableColumnResize");
+        $(document).off("mouseup.logTableColumnResize");
+        $(document).off("mousemove.logTableColumnResize");
+    }
 }
 
 export = logs;

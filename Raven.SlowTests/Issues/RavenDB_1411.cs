@@ -105,13 +105,13 @@ namespace Raven.SlowTests.Issues
 		            session.SaveChanges();
 		        }
 
-		        WaitForIndexing(store.DocumentDatabase);
+		        WaitForIndexing(store.SystemDatabase);
 
 		        new SingleMapIndex().Execute(store);
 		        new MultiMapIndex().Execute(store);
                 new FooMapReduceIndex().Execute(store);
 
-		        WaitForIndexing(store.DocumentDatabase);
+		        WaitForIndexing(store.SystemDatabase);
 
 		        using (var session = store.OpenSession())
 		        {
@@ -165,7 +165,7 @@ namespace Raven.SlowTests.Issues
 	                session.SaveChanges();
 	            }
 
-                WaitForIndexing(store.DocumentDatabase);
+                WaitForIndexing(store.SystemDatabase);
 
                 new SingleMapIndex().Execute(store);
 
@@ -176,5 +176,43 @@ namespace Raven.SlowTests.Issues
 	            }
 	        }
 	    }
+
+		[Fact]
+		public void ShouldGetAllNecessaryDocumentsToIndex()
+		{
+			using (var store = NewDocumentStore())
+			{
+				using (var session = store.OpenSession())
+				{
+					for (int i = 0; i < 800; i++)
+					{
+						session.Store(new Bar
+						{
+							Item = "Bar/" + i
+						});
+					}
+
+					for (int i = 0; i < 200; i++)
+					{
+						session.Store(new Foo
+						{
+							Item = "Foo/" + i
+						});
+					}
+
+					session.SaveChanges();
+				}
+
+				WaitForIndexing(store.SystemDatabase);
+
+				new SingleMapIndex().Execute(store);
+
+				using (var session = store.OpenSession())
+				{
+					var count = session.Query<Foo, SingleMapIndex>().Customize(x => x.WaitForNonStaleResults()).Count();
+					Assert.Equal(200, count);
+				}
+			}
+		}
 	}
 }

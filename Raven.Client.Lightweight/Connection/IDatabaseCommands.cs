@@ -53,7 +53,8 @@ namespace Raven.Client.Connection
 		JsonDocument[] StartsWith(string keyPrefix, string matches, int start, int pageSize,
 		                          RavenPagingInformation pagingInformation = null, bool metadataOnly = false,
 		                          string exclude = null, string transformer = null,
-		                          Dictionary<string, RavenJToken> queryInputs = null);
+		                          Dictionary<string, RavenJToken> transformerParameters = null,
+								  string skipAfter = null);
 
 		/// <summary>
 		/// Retrieves the document for the specified key
@@ -68,10 +69,10 @@ namespace Raven.Client.Connection
 	    /// <param name="ids">The ids.</param>
 	    /// <param name="includes">The includes.</param>
 	    /// <param name="transformer"></param>
-	    /// <param name="queryInputs"></param>
+	    /// <param name="transformerParameters"></param>
 	    /// <param name="metadataOnly">Load just the document metadata</param>
 	    /// <returns></returns>
-	    MultiLoadResult Get(string[] ids, string[] includes, string transformer = null, Dictionary<string, RavenJToken> queryInputs = null, bool metadataOnly = false);
+	    MultiLoadResult Get(string[] ids, string[] includes, string transformer = null, Dictionary<string, RavenJToken> transformerParameters = null, bool metadataOnly = false);
 
 		/// <summary>
 		/// Get documents from server
@@ -108,6 +109,7 @@ namespace Raven.Client.Connection
 		/// <param name="etag">The etag.</param>
 		/// <param name="data">The data.</param>
 		/// <param name="metadata">The metadata.</param>
+        [Obsolete("Use RavenFS instead.")]
         void PutAttachment(string key, Etag etag, Stream data, RavenJObject metadata);
 
 		/// <summary>
@@ -116,6 +118,7 @@ namespace Raven.Client.Connection
 		/// <param name="key">The key.</param>
 		/// <param name="etag">The etag.</param>
 		/// <param name="metadata">The metadata.</param>
+        [Obsolete("Use RavenFS instead.")]
         void UpdateAttachmentMetadata(string key, Etag etag, RavenJObject metadata);
 
 		/// <summary>
@@ -123,33 +126,30 @@ namespace Raven.Client.Connection
 		/// </summary>
 		/// <param name="key">The key.</param>
 		/// <returns></returns>
-		Attachment GetAttachment(string key);
+        [Obsolete("Use RavenFS instead.")]
+        Attachment GetAttachment(string key);
 
 		/// <summary>
 		/// Gets the attachments starting with the specified prefix
 		/// </summary>
-		IEnumerable<Attachment> GetAttachmentHeadersStartingWith(string idPrefix, int start, int pageSize);
+        [Obsolete("Use RavenFS instead.")]
+        IEnumerable<Attachment> GetAttachmentHeadersStartingWith(string idPrefix, int start, int pageSize);
 
 		/// <summary>
 		/// Retrieves the attachment metadata with the specified key, not the actual attachmet
 		/// </summary>
 		/// <param name="key">The key.</param>
 		/// <returns></returns>
-		Attachment HeadAttachment(string key);
-
+        [Obsolete("Use RavenFS instead.")]
+        Attachment HeadAttachment(string key);
 
 		/// <summary>
 		/// Deletes the attachment with the specified key
 		/// </summary>
 		/// <param name="key">The key.</param>
 		/// <param name="etag">The etag.</param>
+        [Obsolete("Use RavenFS instead.")]
         void DeleteAttachment(string key, Etag etag);
-
-		/// <summary>
-		/// Returns the names of all tenant databases on the RavenDB server
-		/// </summary>
-		/// <returns>List of tenant database names</returns>
-		string[] GetDatabaseNames(int pageSize, int start = 0);
 
 		/// <summary>
 		/// Returns the names of all indexes that exist on the server
@@ -184,6 +184,15 @@ namespace Raven.Client.Connection
 		/// <param name="name">The name.</param>
 		/// <param name="indexDef">The index def.</param>
 		string PutIndex(string name, IndexDefinition indexDef);
+
+        /// <summary>
+        /// Checks if passed index definition matches version stored on server.
+        /// If index does not exist this method returns true.
+        /// </summary>
+        /// <param name="name">The name.</param>
+        /// <param name="indexDef">The index definition.</param>
+        /// <returns></returns>
+        bool IndexHasChanged(string name, IndexDefinition indexDef);
 
 		/// <summary>
 		/// Creates a transformer with the specified name, based on an transformer definition
@@ -226,7 +235,7 @@ namespace Raven.Client.Connection
 		/// <param name="index">The index.</param>
 		/// <param name="query">The query.</param>
 		/// <param name="includes">The includes.</param>
-		QueryResult Query(string index, IndexQuery query, string[] includes, bool metadataOnly = false, bool indexEntriesOnly = false);
+		QueryResult Query(string index, IndexQuery query, string[] includes = null, bool metadataOnly = false, bool indexEntriesOnly = false);
 		
 		/// <summary>
 		/// Queries the specified index in the Raven flavored Lucene query syntax. Will return *all* results, regardless
@@ -238,7 +247,7 @@ namespace Raven.Client.Connection
 		/// Streams the documents by etag OR starts with the prefix and match the matches
 		/// Will return *all* results, regardless of the number of itmes that might be returned.
 		/// </summary>
-		IEnumerator<RavenJObject> StreamDocs(Etag fromEtag = null, string startsWith = null, string matches = null, int start = 0, int pageSize = int.MaxValue, string exclude = null, RavenPagingInformation pagingInformation = null);
+		IEnumerator<RavenJObject> StreamDocs(Etag fromEtag = null, string startsWith = null, string matches = null, int start = 0, int pageSize = int.MaxValue, string exclude = null, RavenPagingInformation pagingInformation = null, string skipAfter = null);
 
 		/// <summary>
 		/// Deletes the specified index
@@ -448,6 +457,11 @@ namespace Raven.Client.Connection
 		long NextIdentityFor(string name);
 
 		/// <summary>
+		/// Seeds the next identity value on the server
+		/// </summary>
+		long SeedIdentityFor(string name, long value);
+
+		/// <summary>
 		/// Get the full URL for the given document key
 		/// </summary>
 		string UrlFor(string documentKey);
@@ -476,23 +490,30 @@ namespace Raven.Client.Connection
 		/// <param name="name">The name.</param>
 		void DeleteTransformer(string name);
 
-		/// <summary>
-		/// Prepares the transaction on the server.
-		/// </summary>
-		/// <param name="txId">The tx id.</param>
-		void PrepareTransaction(string txId);
+	    /// <summary>
+	    /// Prepares the transaction on the server.
+	    /// </summary>
+	    void PrepareTransaction(string txId, Guid? resourceManagerId = null, byte[] recoveryInformation = null);
 
-		/// <summary>
-		/// Gets the build number
-		/// </summary>
-		BuildNumber GetBuildNumber();
+        [Obsolete("Use RavenFS instead.")]
+        AttachmentInformation[] GetAttachments(int start, Etag startEtag, int pageSize);
 
-	    AttachmentInformation[] GetAttachments(Etag startEtag, int batchSize);
         IndexMergeResults GetIndexMergeSuggestions();
 	}
 
 	public interface IGlobalAdminDatabaseCommands
 	{
+		/// <summary>
+		/// Gets the build number
+		/// </summary>
+		BuildNumber GetBuildNumber();
+
+		/// <summary>
+		/// Returns the names of all tenant databases on the RavenDB server
+		/// </summary>
+		/// <returns>List of tenant database names</returns>
+		string[] GetDatabaseNames(int pageSize, int start = 0);
+
 		/// <summary>
 		/// Get admin statistics
 		/// </summary>
@@ -536,11 +557,13 @@ namespace Raven.Client.Connection
 		/// <summary>
 		/// Enables indexing
 		/// </summary>
-		void StartIndexing();
+        void StartIndexing(int? maxNumberOfParallelIndexTasks = null);
 
 		/// <summary>
 		/// Get the indexing status
 		/// </summary>
 		string GetIndexingStatus();
+
+		RavenJObject GetDatabaseConfiguration();
 	}
 }

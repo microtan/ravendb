@@ -10,6 +10,10 @@ using Lucene.Net.Index;
 using Lucene.Net.Search;
 using Lucene.Net.Store;
 using Raven.Database.Indexing;
+using Raven.Json.Linq;
+using Raven.Database.Server.RavenFS.Extensions;
+using Lucene.Net.QueryParsers;
+using Raven.Database.Server.RavenFS.Util;
 
 namespace Raven.Database.Server.RavenFS.Search
 {
@@ -57,7 +61,7 @@ namespace Raven.Database.Server.RavenFS.Search
 				else
 				{
 					var queryParser = new RavenQueryParser(analyzer, NumericIndexFields);
-					q = queryParser.Parse(query);
+                    q = queryParser.Parse(query);
 				}
 
 				var topDocs = ExecuteQuery(searcher, sortFields, q, pageSize + start);
@@ -95,69 +99,94 @@ namespace Raven.Database.Server.RavenFS.Search
 			return topDocs;
 		}
 
-		public virtual void Index(string key, NameValueCollection metadata)
-		{
-			lock (writerLock)
-			{
-				var lowerKey = key.ToLowerInvariant();
-				var doc = CreateDocument(lowerKey, metadata);
+        public virtual void Index(string key, RavenJObject metadata)
+        {
+            lock (writerLock)
+            {
+                var lowerKey = key.ToLowerInvariant();
 
-				foreach (var metadataKey in metadata.AllKeys)
-				{
-					var values = metadata.GetValues(metadataKey);
-					if (values == null)
-						continue;
+                var doc = CreateDocument(lowerKey, metadata);
 
-					foreach (var value in values)
-					{
-						doc.Add(new Field(metadataKey, value, Field.Store.NO, Field.Index.ANALYZED_NO_NORMS));
-					}
-				}
+                // REVIEW: Check if there is more straight-forward/efficient pattern out there to work with RavenJObjects.
+                var lookup = metadata.ToLookup(x => x.Key);
+                foreach ( var metadataKey in lookup )
+                {
+                    foreach ( var metadataHolder in metadataKey )
+                    {
+                        var array = metadataHolder.Value as RavenJArray;
+                        if (array != null)
+                        {
+                            // Object is an array. Therefore, we index each token. 
+                            foreach (var item in array)
+                                doc.Add(new Field(metadataHolder.Key, item.ToString(), Field.Store.NO, Field.Index.ANALYZED_NO_NORMS));                         
+                        }
+                        else doc.Add(new Field(metadataHolder.Key, metadataHolder.Value.ToString(), Field.Store.NO, Field.Index.ANALYZED_NO_NORMS));
+                    }
+                }
 
-				writer.DeleteDocuments(new Term("__key", lowerKey));
-				writer.AddDocument(doc);
-				// yes, this is slow, but we aren't expecting high writes count
-				writer.Commit();
-				ReplaceSearcher();
-			}
-		}
+                writer.DeleteDocuments(new Term("__key", lowerKey));
+                writer.AddDocument(doc);
+                // yes, this is slow, but we aren't expecting high writes count
+                writer.Commit();
+                ReplaceSearcher();
+            }
+        }
 
-		private static Document CreateDocument(string lowerKey, NameValueCollection metadata)
-		{
-			var doc = new Document();
-			doc.Add(new Field("__key", lowerKey, Field.Store.YES, Field.Index.NOT_ANALYZED_NO_NORMS));
+        private static Document CreateDocument(string lowerKey, RavenJObject metadata)
+        {
+            var doc = new Document();
+            doc.Add(new Field("__key", lowerKey, Field.Store.YES, Field.Index.NOT_ANALYZED_NO_NORMS));
 
-			var fileName = Path.GetFileName(lowerKey);
-			Debug.Assert(fileName != null);
-			doc.Add(new Field("__fileName", fileName, Field.Store.NO, Field.Index.NOT_ANALYZED_NO_NORMS));
-			// the reversed version of the file name is used to allow searches that start with wildcards
-			char[] revFileName = fileName.ToCharArray();
-			Array.Reverse(revFileName);
-			doc.Add(new Field("__rfileName", new string(revFileName), Field.Store.NO, Field.Index.NOT_ANALYZED_NO_NORMS));
+            var fileName = Path.GetFileName(lowerKey);            
+            Debug.Assert(fileName != null);
+            doc.Add(new Field("__fileName", fileName, Field.Store.NO, Field.Index.NOT_ANALYZED_NO_NORMS));
+            // the reversed version of the file name is used to allow searches that start with wildcards
+            char[] revFileName = fileName.ToCharArray();
+            Array.Reverse(revFileName);
+            doc.Add(new Field("__rfileName", new string(revFileName), Field.Store.NO, Field.Index.NOT_ANALYZED_NO_NORMS));                        
 
-			int level = 0;
-			var directoryName = Path.GetDirectoryName(lowerKey);
-			do
-			{
-				level += 1;
-				directoryName = (string.IsNullOrEmpty(directoryName) ? "" : directoryName.Replace("\\", "/"));
-				if (directoryName.StartsWith("/") == false)
-					directoryName = "/" + directoryName;
-				doc.Add(new Field("__directory", directoryName, Field.Store.NO, Field.Index.NOT_ANALYZED_NO_NORMS));
-				directoryName = Path.GetDirectoryName(directoryName);
-			} while (directoryName != null);
-			doc.Add(new Field("__modified", DateTime.UtcNow.ToString(DateIndexFormat, CultureInfo.InvariantCulture), Field.Store.NO,
-							  Field.Index.NOT_ANALYZED_NO_NORMS));
-			doc.Add(new Field("__level", level.ToString(CultureInfo.InvariantCulture), Field.Store.NO, Field.Index.NOT_ANALYZED_NO_NORMS));
-			long len;
-			if (long.TryParse(metadata["Content-Length"], out len))
-			{
-				doc.Add(new Field("__size", len.ToString("D20"), Field.Store.NO, Field.Index.NOT_ANALYZED_NO_NORMS));
-				doc.Add(new NumericField("__size_numeric", Field.Store.NO, true).SetLongValue(len));
-			}
+            int level = 0;
+            var directoryName = RavenFileNameHelper.RavenDirectory(Path.GetDirectoryName(lowerKey));
 
-			return doc;
-		}
+
+            doc.Add(new Field("__directory", directoryName, Field.Store.NO, Field.Index.NOT_ANALYZED_NO_NORMS));
+            // the reversed version of the directory is used to allow searches that start with wildcards
+            char[] revDirectory = directoryName.ToCharArray();
+            Array.Reverse(revDirectory);
+            doc.Add(new Field("__rdirectory", new string(revDirectory), Field.Store.NO, Field.Index.NOT_ANALYZED_NO_NORMS));
+
+            do
+            {
+                level += 1;
+
+                directoryName = RavenFileNameHelper.RavenDirectory(directoryName);
+
+                doc.Add(new Field("__directoryName", directoryName, Field.Store.NO, Field.Index.NOT_ANALYZED_NO_NORMS));
+                // the reversed version of the directory is used to allow searches that start with wildcards
+                char[] revDirectoryName = directoryName.ToCharArray();
+                Array.Reverse(revDirectoryName);
+                doc.Add(new Field("__rdirectoryName", new string(revDirectoryName), Field.Store.NO, Field.Index.NOT_ANALYZED_NO_NORMS));
+
+                directoryName = Path.GetDirectoryName(directoryName);
+            } 
+            while (directoryName != null);
+
+            doc.Add(new Field("__modified", DateTime.UtcNow.ToString(DateIndexFormat, CultureInfo.InvariantCulture), Field.Store.NO, Field.Index.NOT_ANALYZED_NO_NORMS));
+            doc.Add(new Field("__level", level.ToString(CultureInfo.InvariantCulture), Field.Store.NO, Field.Index.NOT_ANALYZED_NO_NORMS));
+            
+            RavenJToken contentLen;
+            if ( metadata.TryGetValue("Content-Length", out contentLen))
+            {
+                long len;
+                if (long.TryParse(contentLen.Value<string>(), out len))
+                {
+                    doc.Add(new Field("__size", len.ToString("D20"), Field.Store.NO, Field.Index.NOT_ANALYZED_NO_NORMS));
+                    doc.Add(new NumericField("__size_numeric", Field.Store.NO, true).SetLongValue(len));
+                }
+            }
+
+            return doc;
+        }
 
 		internal IDisposable GetSearcher(out IndexSearcher searcher)
 		{
@@ -171,8 +200,8 @@ namespace Raven.Database.Server.RavenFS.Search
 			{
 				currentIndexSearcherHolder.SetIndexSearcher(null);
 			}
-			writer.Close();
-			directory.Close();
+			writer.Dispose();
+			directory.Dispose();
 		}
 
 		public void Delete(string key)
@@ -224,7 +253,7 @@ namespace Raven.Database.Server.RavenFS.Search
 				}
 				finally
 				{
-					termEnum.Close();
+					termEnum.Dispose();
 				}
 			}
 		}

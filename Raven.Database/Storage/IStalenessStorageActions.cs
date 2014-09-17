@@ -14,12 +14,17 @@ namespace Raven.Database.Storage
 	{
 	    bool IsIndexStale(int view, DateTime? cutOff, Etag cutoffEtag);
 
+		bool IsIndexStaleByTask(int view, DateTime? cutOff);
+
 		bool IsReduceStale(int view);
 		bool IsMapStale(int view);
 
 		Tuple<DateTime, Etag> IndexLastUpdatedAt(int view);
 		Etag GetMostRecentDocumentEtag();
+
+        [Obsolete("Use RavenFS instead.")]
 		Etag GetMostRecentAttachmentEtag();
-		int GetIndexTouchCount(int view);
+		
+        int GetIndexTouchCount(int view);
 	}
 }

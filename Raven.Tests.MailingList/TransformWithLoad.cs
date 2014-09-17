@@ -6,6 +6,7 @@ using Raven.Client;
 using Raven.Client.Embedded;
 using Raven.Client.Indexes;
 using Raven.Tests.Common;
+using Raven.Tests.Helpers;
 
 using Xunit;
 
@@ -115,7 +116,7 @@ namespace Raven.Tests.MailingList
 		{
 			using (var session = store.OpenSession())
 			{
-				var result = session.Advanced.Lazily.Load<ContactTransformer, ContactDto>("contacts/1", "contacts/2").Value;
+				var result = session.Advanced.Lazily.Load<ContactTransformer, ContactDto>(new [] { "contacts/1", "contacts/2" }).Value;
 				Assert.Equal(2, result.Length);
 				Assert.NotNull(result[0]);
 				Assert.Null(result[1]);
@@ -132,7 +133,7 @@ namespace Raven.Tests.MailingList
 		{
 			using (var session = store.OpenSession())
 			{
-				var result = session.Load<ContactTransformer, ContactDto>("contacts/1", "contacts/2");
+				var result = session.Load<ContactTransformer, ContactDto>(new [] { "contacts/1", "contacts/2" });
 				Assert.Equal(2, result.Length);
 				Assert.NotNull(result[0]);
 				Assert.Null(result[1]);
@@ -149,7 +150,7 @@ namespace Raven.Tests.MailingList
 		{
 			using (var session = store.OpenSession())
 			{
-				var result = session.Load<Contact>("contacts/1", "contacts/2");
+				var result = session.Load<Contact>(new [] { "contacts/1", "contacts/2" });
 				Assert.Equal(2, result.Length);
 				Assert.NotNull(result[0]);
 				Assert.Null(result[1]);

@@ -1,5 +1,3 @@
-using Raven.Client.Extensions;
-#if !NETFX_CORE
 //-----------------------------------------------------------------------
 // <copyright file="HttpJsonRequest.cs" company="Hibernating Rhinos LTD">
 //     Copyright (c) Hibernating Rhinos LTD. All rights reserved.
@@ -7,27 +5,20 @@ using Raven.Client.Extensions;
 //-----------------------------------------------------------------------
 using System;
 using System.Collections.Generic;
-#if NETFX_CORE
-using Raven.Client.Silverlight.MissingFromSilverlight;
-#else
 using System.Collections.Specialized;
-#endif
 using System.Diagnostics;
 using System.IO;
-using System.IO.Compression;
-#if NETFX_CORE
-using Raven.Client.WinRT.Connection;
-#endif
 using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
+using Raven.Abstractions;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Exceptions;
-using Raven.Abstractions.Util;
+using Raven.Abstractions.Replication;
+using Raven.Client.Extensions;
 using Raven.Imports.Newtonsoft.Json;
 using Raven.Imports.Newtonsoft.Json.Linq;
 using Raven.Abstractions.Extensions;
@@ -35,6 +26,7 @@ using Raven.Abstractions.Connection;
 using Raven.Client.Connection.Profiling;
 using Raven.Client.Document;
 using Raven.Json.Linq;
+using System.Collections;
 
 namespace Raven.Client.Connection
 {
@@ -181,19 +173,19 @@ namespace Raven.Client.Connection
 				});
 				return cachedResult;
 			}
-
+			
 			if (writeCalled)
-				return await ReadJsonInternalAsync();
+                return await ReadJsonInternalAsync().ConfigureAwait(false);
 
-			var result = await SendRequestInternal(() => new HttpRequestMessage(new HttpMethod(Method), Url));
+            var result = await SendRequestInternal(() => new HttpRequestMessage(new HttpMethod(Method), Url)).ConfigureAwait(false);
 			if (result != null)
 				return result;
-			return await ReadJsonInternalAsync();
+            return await ReadJsonInternalAsync().ConfigureAwait(false); 
 		}
 
         private async Task<RavenJToken> SendRequestInternal(Func<HttpRequestMessage> getRequestMessage, bool readErrorString = true)
 		{
-			if (isRequestSentToServer)
+			if (isRequestSentToServer && Debugger.IsAttached == false)
 				throw new InvalidOperationException("Request was already sent to the server, cannot retry request.");
 			isRequestSentToServer = true;
 
@@ -203,7 +195,7 @@ namespace Raven.Client.Connection
 				{
 					var requestMessage = getRequestMessage();
 					CopyHeadersToHttpRequestMessage(requestMessage);
-					Response = await httpClient.SendAsync(requestMessage);
+                    Response = await httpClient.SendAsync(requestMessage).ConfigureAwait(false);
 					SetResponseHeaders(Response);
 					ResponseStatusCode = Response.StatusCode;
 				}
@@ -213,8 +205,8 @@ namespace Raven.Client.Connection
 				}
 
 				// throw the conflict exception
-				return await CheckForErrorsAndReturnCachedResultIfAnyAsync(readErrorString);
-			});
+                return await CheckForErrorsAndReturnCachedResultIfAnyAsync(readErrorString).ConfigureAwait(false);
+            }).ConfigureAwait(false);
 		}
 
 		private async Task<T> RunWithAuthRetry<T>(Func<Task<T>> requestOperation)
@@ -225,7 +217,7 @@ namespace Raven.Client.Connection
 				ErrorResponseException responseException;
 				try
 				{
-					return await requestOperation();
+					return await requestOperation().ConfigureAwait(false);
 				}
 				catch (ErrorResponseException e)
 				{
@@ -242,11 +234,11 @@ namespace Raven.Client.Connection
 
 				if (Response.StatusCode == HttpStatusCode.Forbidden)
 				{
-					await HandleForbiddenResponseAsync(Response);
+					await HandleForbiddenResponseAsync(Response).ConfigureAwait(false);
 					throw responseException;
 				}
 
-				if (await HandleUnauthorizedResponseAsync(Response) == false)
+				if (await HandleUnauthorizedResponseAsync(Response).ConfigureAwait(false) == false)
 					throw responseException;
 			}
 		}
@@ -329,7 +321,7 @@ namespace Raven.Client.Connection
 				}
 
 
-				using (var sr = new StreamReader(await Response.GetResponseStreamWithHttpDecompression()))
+				using (var sr = new StreamReader(await Response.GetResponseStreamWithHttpDecompression().ConfigureAwait(false)))
 				{
 					var readToEnd = sr.ReadToEnd();
 
@@ -393,11 +385,11 @@ namespace Raven.Client.Connection
 
 		public async Task<byte[]> ReadResponseBytesAsync()
 		{
-			await SendRequestInternal(() => new HttpRequestMessage(new HttpMethod(Method), Url), readErrorString: false);
+			await SendRequestInternal(() => new HttpRequestMessage(new HttpMethod(Method), Url), readErrorString: false).ConfigureAwait(false);
 
-			using (var stream = await Response.GetResponseStreamWithHttpDecompression())
+			using (var stream = await Response.GetResponseStreamWithHttpDecompression().ConfigureAwait(false))
 			{
-				return await stream.ReadDataAsync();
+				return await stream.ReadDataAsync().ConfigureAwait(false);
 			}
 		}
 
@@ -420,7 +412,7 @@ namespace Raven.Client.Connection
 			if (unauthorizedResponseAsync == null)
 				return false;
 
-			RecreateHttpClient(await unauthorizedResponseAsync);
+			RecreateHttpClient(await unauthorizedResponseAsync.ConfigureAwait(false));
 			return true;
 		}
 
@@ -433,7 +425,7 @@ namespace Raven.Client.Connection
 			if (forbiddenResponseAsync == null)
 				return;
 
-			await forbiddenResponseAsync;
+			await forbiddenResponseAsync.ConfigureAwait(false);
 		}
 
 		private void RecreateHttpClient(Action<HttpClient> configureHttpClient)
@@ -450,13 +442,17 @@ namespace Raven.Client.Connection
 			}
 		}
 
+		public long Size { get; private set; }
+
 		private async Task<RavenJToken> ReadJsonInternalAsync()
 		{
 			HandleReplicationStatusChanges(ResponseHeaders, primaryUrl, operationUrl);
 
-			using (var responseStream = await Response.GetResponseStreamWithHttpDecompression())
+			using (var responseStream = await Response.GetResponseStreamWithHttpDecompression().ConfigureAwait(false))
 			{
-				var data = await RavenJToken.TryLoadAsync(responseStream);
+				var countingStream = new CountingStream(responseStream);
+				var data = RavenJToken.TryLoad(countingStream);
+				Size = countingStream.NumberOfReadBytes;
 
 				if (Method == "GET" && ShouldCacheRequest)
 				{
@@ -566,7 +562,7 @@ namespace Raven.Client.Connection
 
 				var headerName = prop.Key;
 				var value = prop.Value.Value<object>().ToString();
-				if (headerName == "ETag")
+                if (headerName == Constants.MetadataEtagField)
 				{
 					headerName = "If-None-Match";
 					if (!value.StartsWith("\""))
@@ -636,14 +632,27 @@ namespace Raven.Client.Connection
 				Response = await httpClient.SendAsync(httpRequestMessage, HttpCompletionOption.ResponseHeadersRead);
 				SetResponseHeaders(Response);
 
-			    await CheckForErrorsAndReturnCachedResultIfAnyAsync(readErrorString: true);
+			    await CheckForErrorsAndReturnCachedResultIfAnyAsync(readErrorString: true).ConfigureAwait(false);
 
 				var stream = await Response.Content.ReadAsStreamAsync();
 				var observableLineStream = new ObservableLineStream(stream, () => Response.Dispose());
 				observableLineStream.Start();
 				return (IObservable<string>)observableLineStream;
-			});
+			}).ConfigureAwait(false);
 		}
+
+        public Task WriteWithObjectAsync<T>(IEnumerable<T> data) 
+        {
+            return WriteAsync(JsonExtensions.ToJArray(data));
+        }
+
+        public Task WriteWithObjectAsync<T>(T data)
+        {
+            if (data is IEnumerable)
+                throw new ArgumentException("The object implements IEnumerable. This method cannot handle it. Give the type system some hint with the 'as IEnumerable' statement to help the compiler to select the correct overload.");
+
+            return WriteAsync(JsonExtensions.ToJObject(data));           
+        }
 
         public async Task WriteAsync(RavenJToken tokenToWrite)
         {
@@ -656,7 +665,7 @@ namespace Raven.Client.Connection
 		        {
 			        TransferEncodingChunked = true
 		        }
-	        });
+	        }).ConfigureAwait(false);
         }
 
 		public async Task WriteAsync(Stream streamToWrite)
@@ -667,7 +676,7 @@ namespace Raven.Client.Connection
 			await SendRequestInternal(() => new HttpRequestMessage(new HttpMethod(Method), Url)
 			{
 				Content = new CompressedStreamContent(streamToWrite, factory.DisableRequestCompression, disposeStream: false).SetContentType(headers)
-			});
+			}).ConfigureAwait(false);
 		}
 
 		public async Task WriteAsync(HttpContent content)
@@ -682,7 +691,7 @@ namespace Raven.Client.Connection
 				{
 					TransferEncodingChunked = true,
 				}
-			});
+			}).ConfigureAwait(false);
 		}
 
 		public async Task WriteAsync(string data)
@@ -698,7 +707,7 @@ namespace Raven.Client.Connection
 				};
 				request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
 				return request;
-			});
+			}).ConfigureAwait(false);
 		}
 
 		public async Task<HttpResponseMessage> ExecuteRawResponseAsync(string data)
@@ -709,8 +718,12 @@ namespace Raven.Client.Connection
 			};
 
 			CopyHeadersToHttpRequestMessage(rawRequestMessage);
-			var response = await httpClient.SendAsync(rawRequestMessage, HttpCompletionOption.ResponseHeadersRead);
-			await AssertNotFailingResponse(response);
+			var response = await httpClient.SendAsync(rawRequestMessage, HttpCompletionOption.ResponseHeadersRead)
+                                           .ConfigureAwait(false);
+
+            this.ResponseStatusCode = response.StatusCode;
+
+			// await AssertNotFailingResponse(response);
 			return response;
 		}
 
@@ -719,7 +732,10 @@ namespace Raven.Client.Connection
 			var rawRequestMessage = new HttpRequestMessage(new HttpMethod(Method), Url);
 			CopyHeadersToHttpRequestMessage(rawRequestMessage);
 			var response = await httpClient.SendAsync(rawRequestMessage, HttpCompletionOption.ResponseHeadersRead);
-			await AssertNotFailingResponse(response);
+
+            this.ResponseStatusCode = response.StatusCode;
+
+			// await AssertNotFailingResponse(response).ConfigureAwait(false);
 			return response;
 		}
 
@@ -733,9 +749,11 @@ namespace Raven.Client.Connection
 			};
 
 			CopyHeadersToHttpRequestMessage(rawRequestMessage);
-			var response = await httpClient.SendAsync(rawRequestMessage);
+			var response = await httpClient.SendAsync(rawRequestMessage).ConfigureAwait(false);
+            
+            this.ResponseStatusCode = response.StatusCode;
 
-			await AssertNotFailingResponse(response);
+			//await AssertNotFailingResponse(response).ConfigureAwait(false);
 			return response;
 		}
 
@@ -762,28 +780,6 @@ namespace Raven.Client.Connection
 			}
 		}
 
-		private async Task AssertNotFailingResponse(HttpResponseMessage response)
-		{
-			ResponseStatusCode = response.StatusCode;
-
-			if (response.IsSuccessStatusCode == false)
-			{
-				var sb = new StringBuilder()
-					.Append(response.StatusCode)
-					.AppendLine();
-
-				using (var reader = new StreamReader(await response.GetResponseStreamWithHttpDecompression()))
-				{
-					string line;
-					while ((line = reader.ReadLine()) != null)
-					{
-						sb.AppendLine(line);
-					}
-				}
-				throw new InvalidOperationException(sb.ToString());
-			}
-		}
-
 		public void PrepareForLongRequest()
 		{
 			Timeout = TimeSpan.FromHours(6);
@@ -800,13 +796,53 @@ namespace Raven.Client.Connection
 			httpClient.DefaultRequestHeaders.Range = new RangeHeaderValue(from, to);
 		}
 
+        public void AddHeaders(RavenJObject headers)
+        {
+            foreach (var item in headers)
+            {
+                switch( item.Value.Type )
+                {
+                    case JTokenType.Object:
+                    case JTokenType.Array:
+                        AddHeader(item.Key, item.Value.ToString(Formatting.None));
+                        break;
+					case JTokenType.Date:
+							var rfc1123 = GetDateString(item.Value, "r");
+							var iso8601 = GetDateString(item.Value, "o");
+							AddHeader(item.Key, rfc1123);
+							if (item.Key.StartsWith("Raven-") == false)
+								AddHeader("Raven-" + item.Key, iso8601);
+						break;
+                    default:
+                        AddHeader(item.Key, item.Value.Value<string>());
+                        break;
+                }                
+            }
+        }
+
+		private string GetDateString(RavenJToken token, string format)
+		{
+			var value = token as RavenJValue;
+			if (value == null)
+				return token.ToString();
+
+			var obj = value.Value;
+
+			if (obj is DateTime)
+				return ((DateTime)obj).ToString(format);
+
+			if (obj is DateTimeOffset)
+				return ((DateTimeOffset)obj).ToString(format);
+
+			return obj.ToString();
+		}
+
 		public void AddHeaders(NameValueCollection nameValueHeaders)
 		{
-			foreach (var key in nameValueHeaders.AllKeys)
+            foreach (var key in nameValueHeaders.AllKeys)
 			{
 				AddHeader(key, nameValueHeaders[key]);
 			}
 		}
 	}
 }
-#endif

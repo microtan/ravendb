@@ -19,6 +19,10 @@ class document implements documentBase {
         return this.__metadata.id;
     }
 
+    getUrl() {
+        return this.getId();
+    }
+
     getDocumentPropertyNames(): Array<string> {
         var propertyNames = [];
         for (var property in this) {
@@ -41,7 +45,8 @@ class document implements documentBase {
         }
 
         if (includeMeta && this.__metadata) {
-            dto['@metadata'] = this.__metadata.toDto();
+            var newDocumentMetadata = new documentMetadata(this.__metadata);
+            dto['@metadata'] = newDocumentMetadata.toDto();
         }
 
         return <any>dto;
@@ -70,8 +75,7 @@ class document implements documentBase {
 
     public static empty(): document {
         var emptyDto = {
-            '@metadata': {},
-            'Name': '...'
+            '@metadata': {}
         };
 
         return new document(<any>emptyDto);
@@ -85,7 +89,7 @@ class document implements documentBase {
         // TODO: is there a better/more reliable way to do this?
         var slashIndex = id.lastIndexOf('/');
         if (slashIndex >= 1) {
-            return id.substring(0, slashIndex);
+            return id.substring(0, 1).toUpperCase() + id.substring(1, slashIndex);
         }
 
         return id;

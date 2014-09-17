@@ -6,6 +6,15 @@
 		Delete,
 		MultiAdd,
 		MultiDelete,
-		CreateTree,			
+		CreateTree,
+		Increment,
+
+        TransactionStart,
+        TransactionCommit,
+        TransactionRollback,
+        TransactionDisposed,
+
+        FlushStart,
+        FlushEnd
 	}
 }

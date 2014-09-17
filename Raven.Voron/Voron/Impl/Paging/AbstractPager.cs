@@ -65,7 +65,7 @@ namespace Voron.Impl.Paging
                                                     " because number of allocated pages is " + NumberOfAllocatedPages);
             }
 
-            return new Page(AcquirePagePointer(pageNumber, pagerState), _source);
+            return new Page(AcquirePagePointer(pageNumber, pagerState), _source, PageSize);
         }
 
         protected abstract string GetSourceName();
@@ -80,7 +80,7 @@ namespace Voron.Impl.Paging
                                                     " because number of allocated pages is " + NumberOfAllocatedPages);
             }
 
-            return new Page(AcquirePagePointer(pageNumber), _source);
+            return new Page(AcquirePagePointer(pageNumber), _source, PageSize);
         }
 
         public abstract byte* AcquirePagePointer(long pageNumber, PagerState pagerState = null);
@@ -214,5 +214,6 @@ namespace Voron.Impl.Paging
 				throw new ObjectDisposedException("The pager is already disposed");
 		}
 
+	    public abstract void ReleaseAllocationInfo(byte* baseAddress, long size);
     }
 }

@@ -1,31 +1,63 @@
-import app = require("durandal/app");
+﻿import app = require("durandal/app");
 import router = require("plugins/router");
 import appUrl = require("common/appUrl");
 import database = require("models/database");
-import getDatabaseStatsCommand = require("commands/getDatabaseStatsCommand");
-import getDatabasesCommand = require("commands/getDatabasesCommand");
 import viewModelBase = require("viewmodels/viewModelBase");
-import deleteDatabaseConfirm = require("viewmodels/deleteDatabaseConfirm");
-import createDatabase = require("viewmodels/createDatabase");
-import createDatabaseCommand = require("commands/createDatabaseCommand");
-import createEncryption = require("viewmodels/createEncryption");
-import createEncryptionConfirmation = require("viewmodels/createEncryptionConfirmation");
+import changesApi = require('common/changesApi');
+import shell = require('viewmodels/shell');
 
 class databases extends viewModelBase {
 
     databases = ko.observableArray<database>();
     searchText = ko.observable("");
     selectedDatabase = ko.observable<database>();
+    isAnyDatabaseSelected: KnockoutComputed<boolean>;
+    allCheckedDatabasesDisabled: KnockoutComputed<boolean>;
     systemDb: database;
-    initializedStats: boolean;
-    docsForSystemUrl: string;
+    optionsClicked = ko.observable<boolean>(false);
+    appUrls: computedAppUrls;
 
     constructor() {
         super();
 
+        this.databases = shell.databases;
         this.systemDb = appUrl.getSystemDatabase();
-        this.docsForSystemUrl = appUrl.forDocuments(null, this.systemDb);
+        this.appUrls = appUrl.forCurrentDatabase();
         this.searchText.extend({ throttle: 200 }).subscribe(s => this.filterDatabases(s));
+
+        var currentDatabse = this.activeDatabase();
+        if (!!currentDatabse) {
+            this.selectDatabase(currentDatabse, false);
+        }
+        var updatedUrl = appUrl.forDatabases();
+        this.updateUrl(updatedUrl);
+
+        this.isAnyDatabaseSelected = ko.computed(() => {
+            for (var i = 0; i < this.databases().length; i++) {
+                var db: database = this.databases()[i];
+                if (db.isChecked()) {
+                    return true;
+                }
+            }
+
+            return false;
+        });
+
+        this.allCheckedDatabasesDisabled = ko.computed(() => {
+            var disabledStatus = null;
+            for (var i = 0; i < this.databases().length; i++) {
+                var db: database = this.databases()[i];
+                if (db.isChecked()) {
+                    if (disabledStatus == null) {
+                        disabledStatus = db.disabled();
+                    } else if (disabledStatus != db.disabled()) {
+                        return null;
+                    }
+                }
+            }
+
+            return disabledStatus;
+        });
     }
 
     // Override canActivate: we can always load this page, regardless of any system db prompt.
@@ -35,51 +67,29 @@ class databases extends viewModelBase {
 
     attached() {
         ko.postbox.publish("SetRawJSONUrl", appUrl.forDatabasesRawData());
+        this.databasesLoaded();
     }
 
-    modelPolling() {
-        new getDatabasesCommand()
-            .execute()
-            .done((results: database[]) => this.databasesLoaded(results));
-    }
-
-    navigateToDocuments(db: database) {
-        db.activate();
-        router.navigate(appUrl.forDocuments(null, db));
+    private databasesLoaded() {
+        // If we have no databases (except system db), show the "create a new database" screen.
+        if (this.databases().length === 1) {
+            this.newDatabase();
+        }
     }
 
     getDocumentsUrl(db: database) {
         return appUrl.forDocuments(null, db);
     }
 
-    databasesLoaded(results: Array<database>) {
-        var databasesHaveChanged = this.checkDifferentDatabases(results);
-        if (databasesHaveChanged) {            
-            this.databases(results);
-
-            // If we have just a few databases, grab the db stats for all of them.
-            // (Otherwise, we'll grab them when we click them.)
-            var few = 20;
-            if (results.length < few && !this.initializedStats) {
-                this.initializedStats = true;
-                results.forEach(db => this.fetchStats(db));
+    selectDatabase(db: database, activateDatabase: boolean = true) {
+        if (this.optionsClicked() == false) {
+            if (activateDatabase) {
+                db.activate();
             }
-
-            // If we have no databases, show the "create a new database" screen.
-            if (results.length === 0) {
-                this.newDatabase();
-            }
-        }
-    }
-
-    checkDifferentDatabases(dbs: database[]) {
-        if (dbs.length !== this.databases().length) {
-            return true;
+            this.selectedDatabase(db);
         }
 
-        var freshDbNames = dbs.map(db => db.name);
-        var existingDbNames = this.databases().map(d => d.name);
-        return existingDbNames.some(existing => !freshDbNames.contains(existing));
+        this.optionsClicked(false);
     }
 
     newDatabase() {
@@ -87,13 +97,16 @@ class databases extends viewModelBase {
         // Since the database page is the common landing page, we want it to load quickly.
         // Since the createDatabase page isn't required up front, we pull it in on demand.
         require(["viewmodels/createDatabase"], createDatabase => {
-            var createDatabaseViewModel: createDatabase = new createDatabase(this.databases);
+            var createDatabaseViewModel = new createDatabase(this.databases, shell.licenseStatus);
             createDatabaseViewModel
                 .creationTask
-                .done((databaseName: string, bundles: string[], databasePath: string, databaseLogs: string, databaseIndexes: string) => {
+                .done((databaseName: string, bundles: string[], databasePath: string, databaseLogs: string, databaseIndexes: string, storageEngine: string) => {
                     var settings = {
                         "Raven/ActiveBundles": bundles.join(";")
                     };
+                    if (storageEngine) {
+                        settings["Raven/StorageEngine"] = storageEngine;
+                    }
                     settings["Raven/DataDir"] = (!this.isEmptyStringOrWhitespace(databasePath)) ? databasePath : "~/Databases/" + databaseName;
                     if (!this.isEmptyStringOrWhitespace(databaseLogs)) {
                         settings["Raven/Esent/LogsPath"] = databaseLogs;
@@ -110,40 +123,85 @@ class databases extends viewModelBase {
 
     showDbCreationAdvancedStepsIfNecessary(databaseName: string, bundles: string[], settings: {}) {
         var securedSettings = {};
-        var deferred = $.Deferred();
         var savedKey;
 
+        var encryptionDeferred = $.Deferred();
+
         if (bundles.contains("Encryption")) {
-            var createEncryptionViewModel: createEncryption = new createEncryption();
-            createEncryptionViewModel
-                .creationEncryption
-                .done((key: string, encryptionAlgorithm: string, encryptionBits: string, isEncryptedIndexes: string) => {
-                    savedKey = key;
-                    securedSettings = {
-                        'Raven/Encryption/Key': key,
-                        'Raven/Encryption/Algorithm': this.getEncryptionAlgorithmFullName(encryptionAlgorithm),
-                        'Raven/Encryption/KeyBitsPreference': encryptionBits,
-                        'Raven/Encryption/EncryptIndexes': isEncryptedIndexes
-                    };
-                    deferred.resolve(securedSettings);
-                });
-            app.showDialog(createEncryptionViewModel);
+            require(["viewmodels/createEncryption"], createEncryption => {
+                var createEncryptionViewModel = new createEncryption();
+                createEncryptionViewModel
+                    .creationEncryption
+                    .done((key: string, encryptionAlgorithm: string, encryptionBits: string, isEncryptedIndexes: string) => {
+                        savedKey = key;
+                        securedSettings = {
+                            'Raven/Encryption/Key': key,
+                            'Raven/Encryption/Algorithm': this.getEncryptionAlgorithmFullName(encryptionAlgorithm),
+                            'Raven/Encryption/KeyBitsPreference': encryptionBits,
+                            'Raven/Encryption/EncryptIndexes': isEncryptedIndexes
+                        };
+                        encryptionDeferred.resolve(securedSettings);
+                    });
+                app.showDialog(createEncryptionViewModel);
+            });
         } else {
-            deferred.resolve({});
+            encryptionDeferred.resolve();
         }
 
-        deferred.done(() => {
-            //var self = this; // Note: no reason to use self. If you want to use 'this' in a callback, put the callback in a lambda, e.g. .done(() => this.Foobar())
-            new createDatabaseCommand(databaseName, settings, securedSettings)
-                .execute()
-                .done(() => {
-                    this.databases.unshift(new database(databaseName));
-                    if (!jQuery.isEmptyObject(securedSettings)) {
-                        var createEncryptionConfirmationViewModel: createEncryptionConfirmation = new createEncryptionConfirmation(savedKey);
-                        app.showDialog(createEncryptionConfirmationViewModel);
-                    }
-                });
+        encryptionDeferred.done(() => {
+            require(["commands/createDatabaseCommand"], createDatabaseCommand => {
+                new createDatabaseCommand(databaseName, settings, securedSettings)
+                    .execute()
+                    .done(() => {
+                        var newDatabase = this.addNewDatabase(databaseName, bundles);
+                        this.selectDatabase(newDatabase);
+
+                        var encryptionConfirmationDialogPromise = $.Deferred();
+                        if (!jQuery.isEmptyObject(securedSettings)) {
+                            require(["viewmodels/createEncryptionConfirmation"], createEncryptionConfirmation => {
+                                var createEncryptionConfirmationViewModel = new createEncryptionConfirmation(savedKey);
+                                createEncryptionConfirmationViewModel.dialogPromise.done(() => encryptionConfirmationDialogPromise.resolve());
+                                createEncryptionConfirmationViewModel.dialogPromise.fail(() => encryptionConfirmationDialogPromise.reject());
+                                app.showDialog(createEncryptionConfirmationViewModel);
+                            });
+                        } else {
+                            encryptionConfirmationDialogPromise.resolve();
+                        }
+
+                        this.createDefaultSettings(newDatabase, bundles).always(() => {
+                            if (bundles.contains("Quotas") || bundles.contains("Versioning") || bundles.contains("SqlReplication")) {
+                                encryptionConfirmationDialogPromise.always(() => {
+                                    require(["viewmodels/databaseSettingsDialog"], databaseSettingsDialog => {
+                                        var settingsDialog = new databaseSettingsDialog(bundles);
+                                        app.showDialog(settingsDialog);
+                                    });
+                                });
+                            }
+                        });
+                    });
+            });
         });
+    }
+
+    private addNewDatabase(databaseName: string, bundles: string[]): database {
+        var foundDatabase = this.databases.first((db: database) => db.name == databaseName);
+
+        if (!foundDatabase) {
+            var newDatabase = new database(databaseName, false, bundles);
+            this.databases.unshift(newDatabase);
+            return newDatabase;
+        }
+
+        return foundDatabase;
+    }
+
+    private createDefaultSettings(db: database, bundles: Array<string>): JQueryPromise<any> {
+        var deferred = $.Deferred();
+        require(["commands/createDefaultSettingsCommand"], createDefaultSettingsCommand => {
+            new createDefaultSettingsCommand(db, bundles).execute()
+                .always(() => deferred.resolve());
+        });
+        return deferred;
     }
 
     private isEmptyStringOrWhitespace(str: string) {
@@ -168,57 +226,100 @@ class databases extends viewModelBase {
         return fullEncryptionName;
     }
 
-    fetchStats(db: database) {
-        new getDatabaseStatsCommand(db)
-            .execute()
-            .done(result=> db.statistics(result));
-    }
+    deleteSelectedDatabases(databases: Array<database>) {
+        if (databases.length > 0) {
+            require(["viewmodels/deleteResourceConfirm"], deleteResourceConfirm => {
+                var confirmDeleteViewModel = new deleteResourceConfirm(databases);
 
-    selectDatabase(db: database) {
-        this.databases().forEach(d=> d.isSelected(d === db));
-        db.activate();
-        this.selectedDatabase(db);
-    }
+                confirmDeleteViewModel.deleteTask.done((deletedDatabaseNames: string[]) => {
+                    if (databases.length == 1) {
+                        this.onDatabaseDeleted(databases[0].name);
+                    } else {
+                        deletedDatabaseNames.forEach(databaseName => {
+                            this.onDatabaseDeleted(databaseName);
+                        });
+                    }
+                });
 
-    goToDocuments(db: database) {
-        // TODO: use appUrl for this.
-        router.navigate("#documents?database=" + encodeURIComponent(db.name));
-    }
-
-    filterDatabases(filter: string) {
-        var filterLower = filter.toLowerCase();
-        this.databases().forEach(d=> {
-            var isMatch = !filter || (d.name.toLowerCase().indexOf(filterLower) >= 0);
-            d.isVisible(isMatch);
-        });
-
-        var selectedDatabase = this.selectedDatabase();
-        if (selectedDatabase && !selectedDatabase.isVisible()) {
-            selectedDatabase.isSelected(false);
-            this.selectedDatabase(null);
-        }
-    }
-
-    deleteSelectedDatabase() {
-        var db = this.selectedDatabase();
-        if (db) {
-            require(["viewmodels/deleteDatabaseConfirm"], deleteDatabaseConfirm => {
-                var confirmDeleteVm: deleteDatabaseConfirm = new deleteDatabaseConfirm(db, this.systemDb);
-                confirmDeleteVm.deleteTask.done(() => this.onDatabaseDeleted(db));
-                app.showDialog(confirmDeleteVm);
+                app.showDialog(confirmDeleteViewModel);
             });
         }
     }
 
-    onDatabaseDeleted(db: database) {
-        this.databases.remove(db);
-        this.databases.valueHasMutated();
-        if (this.databases.length === 0)
-            this.selectDatabase(this.systemDb);
-        else if (this.databases.contains(this.selectedDatabase()) === false) {
-            this.selectDatabase(this.databases().first());
+    deleteCheckedDatabases() {
+        var checkedDatabases: database[] = this.databases().filter((db: database) => db.isChecked());
+        this.deleteSelectedDatabases(checkedDatabases);
+    }
+
+    private onDatabaseDeleted(databaseName: string) {
+        var databaseInArray = this.databases.first((db: database) => db.name == databaseName);
+
+        if (!!databaseInArray) {
+            this.databases.remove(databaseInArray);
+
+            if ((this.databases().length > 0) && (this.databases.contains(this.selectedDatabase()) === false)) {
+                this.selectDatabase(this.databases().first());
+            }
         }
+    }
+
+    toggleSelectedDatabases(databases: Array<database>) {
+        if (databases.length > 0) {
+            var action = !databases[0].disabled();
+
+            require(["viewmodels/disableResourceToggleConfirm"], disableResourceToggleConfirm => {
+                var disableDatabaseToggleViewModel = new disableResourceToggleConfirm(databases);
+
+                disableDatabaseToggleViewModel.disableToggleTask
+                    .done((toggledDatabasesNames: string[]) => {
+                        var activeDatabase: database = this.activeDatabase();
+
+                        if (databases.length == 1) {
+                            this.onDatabaseDisabledToggle(databases[0].name, action, activeDatabase);
+                        } else {
+                            toggledDatabasesNames.forEach(databaseName => {
+                                this.onDatabaseDisabledToggle(databaseName, action, activeDatabase);
+                            });
+                        }
+                    });
+
+                app.showDialog(disableDatabaseToggleViewModel);
+            });
+        }
+    }
+
+    toggleCheckedDatabases() {
+        var checkedDatabases: database[] = this.databases().filter((db: database) => db.isChecked());
+        this.toggleSelectedDatabases(checkedDatabases);
+    }
+
+    private onDatabaseDisabledToggle(databaseName: string, action: boolean, activeDatabase: database) {
+        var db = this.databases.first((foundDb: database) => foundDb.name == databaseName);
+
+        if (!!db) {
+            db.disabled(action);
+            db.isChecked(false);
+
+            if (!!activeDatabase && db.name == activeDatabase.name) {
+                this.selectDatabase(db);
+            }
+        }
+    }
+
+    private filterDatabases(filter: string) {
+        var filterLower = filter.toLowerCase();
+        this.databases().forEach((db: database) => {
+            var isMatch = (!filter || (db.name.toLowerCase().indexOf(filterLower) >= 0)) && db.name != '<system>';
+            db.isVisible(isMatch);
+        });
+
+        this.databases().map((db: database) => db.isChecked(!db.isVisible() ? false : db.isChecked()));
+    }
+
+    navigateToAdminSettings() {
+        this.navigate(this.appUrls.adminSettings());
+        shell.disconnectFromResourceChangesApi();
     }
 }
 
-export = databases; 
+export = databases;

@@ -95,20 +95,20 @@ namespace Raven.Client.Shard
 	        throw new NotImplementedException();
 	    }
 
-	    Lazy<Task<TResult>> IAsyncLazySessionOperations.LoadAsync<TTransformer, TResult>(string id)
-	    {
-	        throw new NotImplementedException();
-	    }
+		Lazy<Task<TResult>> IAsyncLazySessionOperations.LoadAsync<TTransformer, TResult>(string id, Action<TResult> onEval)
+		{
+			throw new NotImplementedException();
+		}
 
-	    Lazy<Task<TResult[]>> IAsyncLazySessionOperations.LoadAsync<TTransformer, TResult>(params string[] ids)
-	    {
-	        throw new NotImplementedException();
-	    }
+		Lazy<Task<TResult>> IAsyncLazySessionOperations.LoadAsync<TResult>(string id, Type transformerType, Action<TResult> onEval)
+		{
+			throw new NotImplementedException();
+		}
 
-	    public IAsyncLazySessionOperations Lazily { get; private set; }
+		public IAsyncLazySessionOperations Lazily { get; private set; }
 	    public IAsyncEagerSessionOperations Eagerly { get; private set; }
 
-	    Lazy<Task<TResult[]>> IAsyncLazySessionOperations.LoadStartingWithAsync<TResult>(string keyPrefix, string matches, int start, int pageSize, string exclude, RavenPagingInformation pagingInformation)
+	    Lazy<Task<TResult[]>> IAsyncLazySessionOperations.LoadStartingWithAsync<TResult>(string keyPrefix, string matches, int start, int pageSize, string exclude, RavenPagingInformation pagingInformation, string skipAfter)
 	    {
 	        throw new NotImplementedException();
 	    }
@@ -179,20 +179,10 @@ namespace Raven.Client.Shard
 	        throw new NotImplementedException();
 	    }
 
-	    Lazy<Task<TResult[]>> IAsyncLazySessionOperations.LoadAsync<TResult>(params string[] ids)
-	    {
-	        throw new NotImplementedException();
-	    }
-
 	    Lazy<Task<TResult[]>> IAsyncLazySessionOperations.LoadAsync<TResult>(IEnumerable<string> ids)
 	    {
 	        throw new NotImplementedException();
 	    }
-
-	    public Task<T[]> LoadAsync<T>(params string[] ids)
-		{
-			return LoadAsyncInternal<T>(ids);
-		}
 
 		public Task<T[]> LoadAsync<T>(IEnumerable<string> ids)
 		{
@@ -222,37 +212,74 @@ namespace Raven.Client.Shard
 			return LoadAsyncInternal<T>(ids, null);
 		}
 
-		public async Task<T> LoadAsync<TTransformer, T>(string id) where TTransformer : AbstractTransformerCreationTask, new()
+		public async Task<T> LoadAsync<TTransformer, T>(string id, Action<ILoadConfiguration> configure = null) where TTransformer : AbstractTransformerCreationTask, new()
 		{
-            var result = await LoadAsyncInternal<T>(new[] { id }, null, new TTransformer().TransformerName).ConfigureAwait(false);
+			var configuration = new RavenLoadConfiguration();
+			if (configure != null)
+				configure(configuration);
+
+            var result = await LoadAsyncInternal<T>(new[] { id }, null, new TTransformer().TransformerName, configuration.TransformerParameters).ConfigureAwait(false);
 			return result.FirstOrDefault();
 		}
 
-		public async Task<T> LoadAsync<TTransformer, T>(string id, Action<ILoadConfiguration> configure) where TTransformer : AbstractTransformerCreationTask, new()
+		public async Task<TResult[]> LoadAsync<TTransformer, TResult>(IEnumerable<string> ids, Action<ILoadConfiguration> configure = null) where TTransformer : AbstractTransformerCreationTask, new()
 		{
-			var ravenLoadConfiguration = new RavenLoadConfiguration();
-			configure(ravenLoadConfiguration);
-            var result = await LoadAsyncInternal<T>(new[] { id }, null, new TTransformer().TransformerName, ravenLoadConfiguration.QueryInputs).ConfigureAwait(false);
+			var configuration = new RavenLoadConfiguration();
+			if (configure != null)
+				configure(configuration);
+
+			var result = await LoadAsyncInternal<TResult>(ids.ToArray(), null, new TTransformer().TransformerName, configuration.TransformerParameters).ConfigureAwait(false);
+			return result;
+		}
+
+		public async Task<TResult> LoadAsync<TResult>(string id, string transformer, Action<ILoadConfiguration> configure = null)
+		{
+			var configuration = new RavenLoadConfiguration();
+			if (configure != null)
+				configure(configuration);
+
+			var result = await LoadAsyncInternal<TResult>(new[] { id }, null, transformer, configuration.TransformerParameters).ConfigureAwait(false);
 			return result.FirstOrDefault();
 		}
 
-		public Task<T[]> LoadAsync<TTransformer, T>(params string[] ids) where TTransformer : AbstractTransformerCreationTask, new()
+		public async Task<TResult[]> LoadAsync<TResult>(IEnumerable<string> ids, string transformer, Action<ILoadConfiguration> configure = null)
 		{
-			return LoadAsyncInternal<T>(ids, null, new TTransformer().TransformerName);
+			var configuration = new RavenLoadConfiguration();
+			if (configure != null)
+				configure(configuration);
+
+			return await LoadAsyncInternal<TResult>(ids.ToArray(), null, transformer, configuration.TransformerParameters).ConfigureAwait(false);
 		}
 
-		public Task<TResult[]> LoadAsync<TTransformer, TResult>(IEnumerable<string> ids, Action<ILoadConfiguration> configure) where TTransformer : AbstractTransformerCreationTask, new()
+		public async Task<TResult> LoadAsync<TResult>(string id, Type transformerType, Action<ILoadConfiguration> configure = null)
 		{
-			var ravenLoadConfiguration = new RavenLoadConfiguration();
-			configure(ravenLoadConfiguration);
-			return LoadAsyncInternal<TResult>(ids.ToArray(), null, new TTransformer().TransformerName, ravenLoadConfiguration.QueryInputs);
+			var configuration = new RavenLoadConfiguration();
+			if (configure != null)
+				configure(configuration);
+
+			var transformer = ((AbstractTransformerCreationTask)Activator.CreateInstance(transformerType)).TransformerName;
+
+			var result = await LoadAsyncInternal<TResult>(new[] { id }, null, transformer, configuration.TransformerParameters).ConfigureAwait(false);
+			return result.FirstOrDefault();
+		}
+
+		public async Task<TResult[]> LoadAsync<TResult>(IEnumerable<string> ids, Type transformerType, Action<ILoadConfiguration> configure = null)
+		{
+			var configuration = new RavenLoadConfiguration();
+			if (configure != null)
+				configure(configuration);
+
+			var transformer = ((AbstractTransformerCreationTask)Activator.CreateInstance(transformerType)).TransformerName;
+
+			var result = await LoadAsyncInternal<TResult>(ids.ToArray(), null, transformer, configuration.TransformerParameters).ConfigureAwait(false);
+			return result;
 		}
 
 		public async Task<T[]> LoadAsyncInternal<T>(string[] ids, KeyValuePair<string, Type>[] includes)
 		{
 			var results = new T[ids.Length];
 			var includePaths = includes != null ? includes.Select(x => x.Key).ToArray() : null;
-			var idsToLoad = GetIdsThatNeedLoading<T>(ids, includePaths).ToList();
+			var idsToLoad = GetIdsThatNeedLoading<T>(ids, includePaths, transformer: null).ToList();
 
 			if (!idsToLoad.Any())
 				return results;
@@ -306,11 +333,11 @@ namespace Raven.Client.Shard
 			}).ToArray();
 		}
 
-		public async Task<T[]> LoadAsyncInternal<T>(string[] ids, KeyValuePair<string, Type>[] includes, string transformer, Dictionary<string, RavenJToken> queryInputs = null)
+		public async Task<T[]> LoadAsyncInternal<T>(string[] ids, KeyValuePair<string, Type>[] includes, string transformer, Dictionary<string, RavenJToken> transformerParameters = null)
 		{
 			var results = new T[ids.Length];
 			var includePaths = includes != null ? includes.Select(x => x.Key).ToArray() : null;
-			var idsToLoad = GetIdsThatNeedLoading<T>(ids, includePaths).ToList();
+			var idsToLoad = GetIdsThatNeedLoading<T>(ids, includePaths, transformer).ToList();
 
 			if (!idsToLoad.Any())
 				return results;
@@ -328,7 +355,7 @@ namespace Raven.Client.Shard
 							{
 								// Returns array of arrays, public APIs don't surface that yet though as we only support Transform
 								// With a single Id
-                                var arrayOfArrays = (await dbCmd.GetAsync(currentShardIds, includePaths, transformer, queryInputs).ConfigureAwait(false))
+                                var arrayOfArrays = (await dbCmd.GetAsync(currentShardIds, includePaths, transformer, transformerParameters).ConfigureAwait(false))
 															.Results
 															.Select(x => x.Value<RavenJArray>("$values").Cast<RavenJObject>())
 															.Select(values =>
@@ -359,7 +386,7 @@ namespace Raven.Client.Shard
 						new ShardRequestData { EntityType = typeof(T), Keys = currentShardIds.ToList() },
 						async (dbCmd, i) =>
 						{
-                            var items = (await dbCmd.GetAsync(currentShardIds, includePaths, transformer, queryInputs).ConfigureAwait(false))
+                            var items = (await dbCmd.GetAsync(currentShardIds, includePaths, transformer, transformerParameters).ConfigureAwait(false))
 								.Results
 								.SelectMany(x => x.Value<RavenJArray>("$values").ToArray())
 								.Select(JsonExtensions.ToJObject)
@@ -441,17 +468,17 @@ namespace Raven.Client.Shard
 				 shardDbCommands.Values.ToList());
 		}
 
-		protected override IDocumentQuery<T> IDocumentQueryGeneratorQuery<T>(string indexName, bool isMapReduce)
+		protected override IDocumentQuery<T> DocumentQueryGeneratorQuery<T>(string indexName, bool isMapReduce)
 		{
 			throw new NotSupportedException("The async sharded document store doesn't support synchronous operations");
 		}
 
-		protected override IAsyncDocumentQuery<T> IDocumentQueryGeneratorAsyncQuery<T>(string indexName, bool isMapReduce)
+		protected override IAsyncDocumentQuery<T> DocumentQueryGeneratorAsyncQuery<T>(string indexName, bool isMapReduce)
 		{
 			return AsyncDocumentQuery<T>(indexName);
 		}
 
-		public Task<IEnumerable<T>> LoadStartingWithAsync<T>(string keyPrefix, string matches = null, int start = 0, int pageSize = 25, string exclude = null, RavenPagingInformation pagingInformation = null)
+		public Task<IEnumerable<T>> LoadStartingWithAsync<T>(string keyPrefix, string matches = null, int start = 0, int pageSize = 25, string exclude = null, RavenPagingInformation pagingInformation = null, string skipAfter = null)
 		{
 			IncrementRequestCount();
 			var shards = GetCommandsToOperateOn(new ShardRequestData
@@ -464,13 +491,13 @@ namespace Raven.Client.Shard
 			{
 				EntityType = typeof(T),
 				Keys = { keyPrefix }
-			}, (dbCmd, i) => dbCmd.StartsWithAsync(keyPrefix, matches, start, pageSize, exclude: exclude))
+			}, (dbCmd, i) => dbCmd.StartsWithAsync(keyPrefix, matches, start, pageSize, exclude: exclude, skipAfter:skipAfter))
 								.ContinueWith(task => (IEnumerable<T>)task.Result.SelectMany(x => x).Select(TrackEntity<T>).ToList());
 		}
 
 		public Task<IEnumerable<TResult>> LoadStartingWithAsync<TTransformer, TResult>(string keyPrefix, string matches = null, int start = 0, int pageSize = 25,
 		                                                    string exclude = null, RavenPagingInformation pagingInformation = null,
-		                                                    Action<ILoadConfiguration> configure = null) where TTransformer : AbstractTransformerCreationTask, new()
+															Action<ILoadConfiguration> configure = null, string skipAfter = null) where TTransformer : AbstractTransformerCreationTask, new()
 		{
 			var transformer = new TTransformer().TransformerName;
 
@@ -492,7 +519,8 @@ namespace Raven.Client.Shard
 				EntityType = typeof(TResult),
 				Keys = { keyPrefix }
 			}, (dbCmd, i) => dbCmd.StartsWithAsync(keyPrefix, matches, start, pageSize, exclude: exclude, transformer: transformer,
-														 queryInputs: configuration.QueryInputs))
+														 transformerParameters: configuration.TransformerParameters,
+														 skipAfter: skipAfter))
 								.ContinueWith(task => (IEnumerable<TResult>)task.Result.SelectMany(x => x).Select(TrackEntity<TResult>).ToList());
 		}
 
@@ -572,6 +600,36 @@ namespace Raven.Client.Shard
 		public Task<IAsyncEnumerator<StreamResult<T>>> StreamAsync<T>(string startsWith, string matches = null, int start = 0, int pageSize = Int32.MaxValue, RavenPagingInformation pagingInformation = null)
 		{
 			throw new NotSupportedException("Streams are currently not supported by sharded document store");
+		}
+
+		public async Task RefreshAsync<T>(T entity)
+		{
+			DocumentMetadata value;
+			if (entitiesAndMetadata.TryGetValue(entity, out value) == false)
+				throw new InvalidOperationException("Cannot refresh a transient instance");
+			IncrementRequestCount();
+
+			var shardRequestData = new ShardRequestData
+			{
+				EntityType = typeof(T),
+				Keys = { value.Key }
+			};
+			var dbCommands = GetCommandsToOperateOn(shardRequestData);
+
+			var results = await shardStrategy.ShardAccessStrategy.ApplyAsync(dbCommands, shardRequestData, async (dbCmd, i) =>
+			{
+				var jsonDocument = await dbCmd.GetAsync(value.Key);
+				if (jsonDocument == null)
+					return false;
+
+				RefreshInternal(entity, jsonDocument, value);
+				return true;
+			});
+
+			if (results.All(x => x == false))
+			{
+				throw new InvalidOperationException("Document '" + value.Key + "' no longer exists and was probably deleted");
+			}
 		}
 
 		#endregion
@@ -664,7 +722,7 @@ namespace Raven.Client.Shard
 
 	    public Task<ResponseTimeInformation> ExecuteAllPendingLazyOperationsAsync()
 	    {
-	        throw new NotImplementedException();
+	        throw new NotSupportedException("Async kazy requests are not supported for sharded store");
 	    }
 	}
 }

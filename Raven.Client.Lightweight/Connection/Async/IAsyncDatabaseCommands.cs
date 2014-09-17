@@ -18,9 +18,6 @@ using Raven.Abstractions.Util;
 using Raven.Client.Changes;
 using Raven.Client.Connection.Profiling;
 using Raven.Client.Document;
-#if NETFX_CORE
-using Raven.Client.WinRT.Connection;
-#endif
 using Raven.Database.Data;
 using Raven.Json.Linq;
 
@@ -59,7 +56,7 @@ namespace Raven.Client.Connection.Async
 		/// <summary>
 		/// Begins an async multi get operation
 		/// </summary>
-		Task<MultiLoadResult> GetAsync(string[] keys, string[] includes, string transformer = null, Dictionary<string, RavenJToken> queryInputs = null, bool metadataOnly = false);
+		Task<MultiLoadResult> GetAsync(string[] keys, string[] includes, string transformer = null, Dictionary<string, RavenJToken> transformerParameters = null, bool metadataOnly = false);
 
 		/// <summary>
 		/// Begins an async get operation for documents
@@ -72,7 +69,7 @@ namespace Raven.Client.Connection.Async
 		/// </remarks>
 		Task<JsonDocument[]> GetDocumentsAsync(int start, int pageSize, bool metadataOnly = false);
 
-        /// <summary>
+		/// <summary>
 		/// Begins the async query.
 		/// </summary>
 		/// <param name="index">The index.</param>
@@ -80,7 +77,7 @@ namespace Raven.Client.Connection.Async
 		/// <param name="includes">The include paths</param>
 		/// <param name="metadataOnly">Load just the document metadata</param>
 		/// <param name="indexEntriesOnly"></param>
-		Task<QueryResult> QueryAsync(string index, IndexQuery query, string[] includes, bool metadataOnly = false, bool indexEntriesOnly = false);
+		Task<QueryResult> QueryAsync(string index, IndexQuery query, string[] includes = null, bool metadataOnly = false, bool indexEntriesOnly = false);
 
 		/// <summary>
 		/// Begins the async batch operation
@@ -141,6 +138,15 @@ namespace Raven.Client.Connection.Async
 		Task<string> PutIndexAsync(string name, IndexDefinition indexDef, bool overwrite);
 
 		/// <summary>
+        /// Checks asynchronously if passed index definition matches version stored on server.
+        /// If index does not exist this method returns true.
+        /// </summary>
+        /// <param name="name">The name.</param>
+        /// <param name="indexDef">The index definition.</param>
+        /// <returns></returns>
+	    Task<bool> IndexHasChangedAsync(string name, IndexDefinition indexDef);
+
+		/// <summary>
 		/// Puts the transformer definition for the specified name asynchronously
 		/// </summary>
 		Task<string> PutTransformerAsync(string name, TransformerDefinition transformerDefinition);
@@ -178,7 +184,7 @@ namespace Raven.Client.Connection.Async
 		/// <param name="etag">The etag.</param>
 		/// <param name="document">The document.</param>
 		/// <param name="metadata">The metadata.</param>
-		Task<PutResult> PutAsync(string key, Etag etag, RavenJObject document, RavenJObject metadata);
+        Task<PutResult> PutAsync(string key, Etag etag, RavenJObject document, RavenJObject metadata);
 
 		/// <summary>
 		/// Sends a patch request for a specific document
@@ -259,45 +265,45 @@ namespace Raven.Client.Connection.Async
 		Task<DatabaseStatistics> GetStatisticsAsync();
 
 		/// <summary>
-		/// Gets the list of databases from the server asynchronously
-		/// </summary>
-		Task<string[]> GetDatabaseNamesAsync(int pageSize, int start = 0);
-
-        /// <summary>
 		/// Puts the attachment with the specified key asynchronously
 		/// </summary>
 		/// <param name="key">The key.</param>
 		/// <param name="etag">The etag.</param>
 		/// <param name="stream">The data stream.</param>
 		/// <param name="metadata">The metadata.</param>
-		Task PutAttachmentAsync(string key, Etag etag, Stream stream, RavenJObject metadata);
+        [Obsolete("Use RavenFS instead.")]
+        Task PutAttachmentAsync(string key, Etag etag, Stream stream, RavenJObject metadata);
 
 		/// <summary>
 		/// Gets the attachment by the specified key asynchronously
 		/// </summary>
 		/// <param name="key">The key.</param>
 		/// <returns></returns>
-		Task<Attachment> GetAttachmentAsync(string key);
+        [Obsolete("Use RavenFS instead.")]
+        Task<Attachment> GetAttachmentAsync(string key);
 
 		/// <summary>
 		/// Gets the attachments asynchronously
 		/// </summary>
 		/// <returns></returns>
-		Task<AttachmentInformation[]> GetAttachmentsAsync(Etag startEtag, int batchSize);
+        [Obsolete("Use RavenFS instead.")]
+        Task<AttachmentInformation[]> GetAttachmentsAsync(int start, Etag startEtag, int pageSize);
 
 		/// <summary>
 		/// Retrieves the attachment metadata with the specified key, not the actual attachmet
 		/// </summary>
 		/// <param name="key">The key.</param>
 		/// <returns></returns>
-		Task<Attachment> HeadAttachmentAsync(string key);
+        [Obsolete("Use RavenFS instead.")]
+        Task<Attachment> HeadAttachmentAsync(string key);
 
 		/// <summary>
 		/// Deletes the attachment with the specified key asynchronously
 		/// </summary>
 		/// <param name="key">The key.</param>
 		/// <param name="etag">The etag.</param>
-		Task DeleteAttachmentAsync(string key, Etag etag);
+        [Obsolete("Use RavenFS instead.")]
+        Task DeleteAttachmentAsync(string key, Etag etag);
 
 		///<summary>
 		/// Get the possible terms for the specified field in the index asynchronously
@@ -363,17 +369,13 @@ namespace Raven.Client.Connection.Async
 		Task<LicensingStatus> GetLicenseStatusAsync();
 
 		/// <summary>
-		/// Gets the build number
-		/// </summary>
-		Task<BuildNumber> GetBuildNumberAsync();
-
-		/// <summary>
 		/// Get documents with id of a specific prefix
 		/// </summary>
 		Task<JsonDocument[]> StartsWithAsync(string keyPrefix, string matches, int start, int pageSize,
 		                                     RavenPagingInformation pagingInformation = null, bool metadataOnly = false,
 		                                     string exclude = null, string transformer = null,
-		                                     Dictionary<string, RavenJToken> queryInputs = null);
+		                                     Dictionary<string, RavenJToken> transformerParameters = null,
+											 string skipAfter = null);
 
 		/// <summary>
 		/// Force the database commands to read directly from the master, unless there has been a failover.
@@ -397,7 +399,7 @@ namespace Raven.Client.Connection.Async
 		/// Streams the documents by etag OR starts with the prefix and match the matches
 		/// Will return *all* results, regardless of the number of itmes that might be returned.
 		/// </summary>
-		Task<IAsyncEnumerator<RavenJObject>> StreamDocsAsync(Etag fromEtag = null, string startsWith = null, string matches = null, int start = 0, int pageSize = int.MaxValue, string exclude = null, RavenPagingInformation pagingInformation = null);
+		Task<IAsyncEnumerator<RavenJObject>> StreamDocsAsync(Etag fromEtag = null, string startsWith = null, string matches = null, int start = 0, int pageSize = int.MaxValue, string exclude = null, RavenPagingInformation pagingInformation = null, string skipAfter = null);
 
 		/// <summary>
 		/// Get the low level  bulk insert operation
@@ -419,12 +421,14 @@ namespace Raven.Client.Connection.Async
 		/// <param name="key">The key.</param>
 		/// <param name="etag">The etag.</param>
 		/// <param name="metadata">The metadata.</param>
-		Task UpdateAttachmentMetadataAsync(string key, Etag etag, RavenJObject metadata);
+        [Obsolete("Use RavenFS instead.")]
+        Task UpdateAttachmentMetadataAsync(string key, Etag etag, RavenJObject metadata);
 
 		/// <summary>
 		/// Gets the attachments starting with the specified prefix
 		/// </summary>
-		Task<IAsyncEnumerator<Attachment>> GetAttachmentHeadersStartingWithAsync(string idPrefix, int start, int pageSize);
+        [Obsolete("Use RavenFS instead.")]
+        Task<IAsyncEnumerator<Attachment>> GetAttachmentHeadersStartingWithAsync(string idPrefix, int start, int pageSize);
 
 		/// <summary>
 		/// Commits the specified tx id.
@@ -442,7 +446,7 @@ namespace Raven.Client.Connection.Async
 		/// Prepares the transaction on the server.
 		/// </summary>
 		/// <param name="txId">The tx id.</param>
-		Task PrepareTransactionAsync(string txId);
+		Task PrepareTransactionAsync(string txId, Guid? resourceManagerId = null, byte[] recoveryInformation = null);
 
 		/// <summary>
 		/// Perform a set based update using the specified index.
@@ -463,11 +467,26 @@ namespace Raven.Client.Connection.Async
 		/// <summary>
 		/// Generate the next identity value from the server
 		/// </summary>
-		Task<long> NextIdentityForAsync(string name);
+        Task<long> NextIdentityForAsync(string name);
+
+		/// <summary>
+		/// Seeds the next identity value on the server
+		/// </summary>
+		Task<long> SeedIdentityForAsync(string name, long value);
 	}
 
 	public interface IAsyncGlobalAdminDatabaseCommands
 	{
+		/// <summary>
+		/// Gets the build number
+		/// </summary>
+		Task<BuildNumber> GetBuildNumberAsync();
+
+		/// <summary>
+		/// Gets the list of databases from the server asynchronously
+		/// </summary>
+		Task<string[]> GetDatabaseNamesAsync(int pageSize, int start = 0);
+
 		/// <summary>
 		/// Get admin statistics
 		/// </summary>
@@ -504,23 +523,25 @@ namespace Raven.Client.Connection.Async
 		///</summary>
 		Task EnsureDatabaseExistsAsync(string name, bool ignoreFailures = false);
 	}
-
+	
 	public interface IAsyncAdminDatabaseCommands
 	{
 		/// <summary>
 		/// Sends an async command that disables all indexing
 		/// </summary>
 		Task StopIndexingAsync();
-
+		
 		/// <summary>
 		/// Sends an async command that enables indexing
 		/// </summary>
-		Task StartIndexingAsync();
+        Task StartIndexingAsync(int? maxNumberOfParallelIndexTasks = null);
 
 		/// <summary>
 		/// Get the indexing status
 		/// </summary>
 		Task<string> GetIndexingStatusAsync();
+
+		Task<RavenJObject> GetDatabaseConfigurationAsync();
 	}
 
 	public interface IAsyncInfoDatabaseCommands

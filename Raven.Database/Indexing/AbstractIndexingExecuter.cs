@@ -78,7 +78,7 @@ namespace Raven.Database.Indexing
                             if (IsEsentOutOfMemory(actual))
                             {
 
-                                autoTuner.OutOfMemoryExceptionHappened();
+                                autoTuner.HandleOutOfMemory();
                             }
                             Log.ErrorException("Failed to execute indexing", ae);
                         }
@@ -102,7 +102,7 @@ namespace Raven.Database.Indexing
                         Log.ErrorException("Failed to execute indexing", e);
                         if (IsEsentOutOfMemory(e))
                         {
-                            autoTuner.OutOfMemoryExceptionHappened();
+                            autoTuner.HandleOutOfMemory();
                         }
                     }
                     if (foundWork == false && context.RunIndexing)
@@ -160,7 +160,7 @@ namespace Raven.Database.Indexing
             // memory, but we are actually aware that during indexing, the GC couldn't find garbage to clean,
             // but in here, we are AFTER the index was done, so there is likely to be a lot of garbage.
             RavenGC.CollectGarbage(GC.MaxGeneration);
-            autoTuner.OutOfMemoryExceptionHappened();
+            autoTuner.HandleOutOfMemory();
         }
 
         private bool ExecuteTasks()
@@ -205,6 +205,8 @@ namespace Raven.Database.Indexing
 
         protected abstract void FlushAllIndexes();
 
+        protected abstract void UpdateStalenessMetrics(int staleCount);
+
         protected bool ExecuteIndexing(bool isIdle, out bool onlyFoundIdleWork)
         {
             var indexesToWorkOn = new List<IndexToWorkOn>();
@@ -216,22 +218,34 @@ namespace Raven.Database.Indexing
                     var failureRate = actions.Indexing.GetFailureRate(indexesStat.Id);
                     if (failureRate.IsInvalidIndex)
                     {
-                        Log.Info("Skipped indexing documents for index: {0} because failure rate is too high: {1}",
-                                   indexesStat.Id,
-                                       failureRate.FailureRate);
-                        continue;
+	                    if (Log.IsDebugEnabled)
+	                    {
+		                    Log.Debug("Skipped indexing documents for index: {0} because failure rate is too high: {1}",
+			                    indexesStat.Id,
+			                    failureRate.FailureRate);
+	                    }
+	                    continue;
                     }
                     if (IsIndexStale(indexesStat, actions, isIdle, localFoundOnlyIdleWork) == false)
                         continue;
-                    var indexToWorkOn = GetIndexToWorkOn(indexesStat);
                     var index = context.IndexStorage.GetIndexInstance(indexesStat.Id);
                     if (index == null) // not there
                         continue;
 
+					if(context.IndexDefinitionStorage.GetViewGenerator(indexesStat.Id) == null)
+						continue; // an index that is in the process of being added, ignoring it, we'll check again on the next run
+
+					if (index.IsMapIndexingInProgress)// precomputed? slow? it is already running, nothing to do with it for now
+						continue;
+
+					var indexToWorkOn = GetIndexToWorkOn(indexesStat);
                     indexToWorkOn.Index = index;
                     indexesToWorkOn.Add(indexToWorkOn);
                 }
             });
+
+            UpdateStalenessMetrics(indexesToWorkOn.Count);
+
             onlyFoundIdleWork = localFoundOnlyIdleWork.Value;
             if (indexesToWorkOn.Count == 0)
                 return false;

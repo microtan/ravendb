@@ -94,14 +94,24 @@ namespace Raven.Abstractions.Data
 		public Dictionary<string, string> ScoreExplanations { get; set; }
 
 		/// <summary>
+		/// Detailed timings for various parts of a query (Lucene search, loading documents, transforming results)
+		/// </summary>
+		public Dictionary<string, double> TimingsInMilliseconds { get; set; }
+
+
+		/// <summary>
+		/// The size of the request which were sent from the server.
+		/// This value is the _uncompressed_ size. 
+		/// </summary>
+		public long ResultSize { get; set; }
+
+		/// <summary>
 		/// Initializes a new instance of the <see cref="QueryResult"/> class.
 		/// </summary>
 		public QueryResult()
 		{
 			Results = new List<RavenJObject>();
 			Includes = new List<RavenJObject>();
-		    Highlightings = new Dictionary<string, Dictionary<string, string[]>>();
-			ScoreExplanations = new Dictionary<string, string>();
 		}
 
 		/// <summary>
@@ -109,7 +119,7 @@ namespace Raven.Abstractions.Data
 		/// </summary>
 		public void EnsureSnapshot()
 		{
-			foreach (var result in Results)
+			foreach (var result in Results.Where(x => x != null))
 			{
 				result.EnsureCannotBeChangeAndEnableSnapshotting();
 			}
@@ -126,7 +136,7 @@ namespace Raven.Abstractions.Data
 		{
 			return new QueryResult
 			{
-				Results = new List<RavenJObject>(this.Results.Select(x => (RavenJObject)x.CreateSnapshot())),
+				Results = new List<RavenJObject>(this.Results.Select(x => x != null ? (RavenJObject)x.CreateSnapshot() : null)),
 				Includes = new List<RavenJObject>(this.Includes.Select(x => (RavenJObject)x.CreateSnapshot())),
 				IndexEtag = this.IndexEtag,
 				IndexName = this.IndexName,
@@ -134,10 +144,15 @@ namespace Raven.Abstractions.Data
 				IsStale = this.IsStale,
 				SkippedResults = this.SkippedResults,
 				TotalResults = this.TotalResults,
-				Highlightings = this.Highlightings.ToDictionary(
+				Highlightings = this.Highlightings == null ? null :  this.Highlightings.ToDictionary(
 					pair => pair.Key,
 					x => new Dictionary<string, string[]>(x.Value)),
-				ScoreExplanations = this.ScoreExplanations.ToDictionary(x => x.Key, x => x.Value)
+				ScoreExplanations = this.ScoreExplanations == null ? null : this.ScoreExplanations.ToDictionary(x => x.Key, x => x.Value),
+				TimingsInMilliseconds = this.TimingsInMilliseconds  == null ?  null :  this.TimingsInMilliseconds.ToDictionary(x => x.Key, x => x.Value),
+				LastQueryTime = this.LastQueryTime,
+				DurationMilliseconds = this.DurationMilliseconds,
+				NonAuthoritativeInformation = this.NonAuthoritativeInformation,
+				ResultEtag = this.ResultEtag
 			};
 		}
 	}

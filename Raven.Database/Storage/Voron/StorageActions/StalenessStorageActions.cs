@@ -66,6 +66,13 @@ namespace Raven.Database.Storage.Voron.StorageActions
 				}
 			}
 
+			return IsIndexStaleByTask(id, cutOff);
+		}
+
+		public bool IsIndexStaleByTask(int view, DateTime? cutOff)
+		{
+			ushort version;
+			var key = CreateKey(view);
 			var tasksByIndex = tableStorage.Tasks.GetIndex(Tables.Tasks.Indices.ByIndex);
 			using (var iterator = tasksByIndex.MultiRead(Snapshot, key))
 			{
@@ -82,8 +89,7 @@ namespace Raven.Database.Storage.Voron.StorageActions
 
 					if (time <= cutOff.Value)
 						return true;
-				}
-				while (iterator.MoveNext());
+				} while (iterator.MoveNext());
 			}
 
 			return false;
@@ -154,6 +160,7 @@ namespace Raven.Database.Storage.Voron.StorageActions
 			}
 		}
 
+        [Obsolete("Use RavenFS instead.")]
 		public Etag GetMostRecentAttachmentEtag()
 		{
 			var attachmentsByEtag = tableStorage.Attachments.GetIndex(Tables.Attachments.Indices.ByEtag);
@@ -168,15 +175,11 @@ namespace Raven.Database.Storage.Voron.StorageActions
 
 		public int GetIndexTouchCount(int id)
 		{
-			var key = CreateKey(id);
-
-			ushort version;
-			var indexingStats = LoadJson(tableStorage.IndexingStats, key, writeBatch.Value, out version);
-
-			if (indexingStats == null)
+			var read = tableStorage.IndexingMetadata.Read(Snapshot, CreateKey(id, "touches"), writeBatch.Value);
+			if (read == null)
 				return -1;
 
-			return indexingStats.Value<int>("touches");
+			return read.Reader.ReadLittleEndianInt32();
 		}
 	}
 }

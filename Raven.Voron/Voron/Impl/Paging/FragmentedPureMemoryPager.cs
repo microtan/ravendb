@@ -33,7 +33,7 @@ namespace Voron.Impl.Paging
 
 				page += buffer.SizeInPages;
 			}
-			throw new InvalidOperationException("Could not find a matchin page number: " + pageNumber);
+			throw new InvalidOperationException("Could not find a matching page number: " + pageNumber);
 		}
 
 		public override void AllocateMorePages(Transaction tx, long newLength)
@@ -59,6 +59,11 @@ namespace Voron.Impl.Paging
 		public override string ToString()
 		{
 			return "memory";
+		}
+
+		public override unsafe void ReleaseAllocationInfo(byte* baseAddress, long size)
+		{
+			throw new NotSupportedException();
 		}
 	}
 }

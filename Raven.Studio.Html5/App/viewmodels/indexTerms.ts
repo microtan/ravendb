@@ -1,14 +1,23 @@
 import viewModelBase = require("viewmodels/viewModelBase");
 import getIndexTermsCommand = require("commands/getIndexTermsCommand");
 import getIndexDefinitionCommand = require("commands/getIndexDefinitionCommand");
+import appUrl = require("common/appUrl");
 
 class indexTerms extends viewModelBase {
 
     fields = ko.observableArray<{ name: string; terms: KnockoutObservableArray<string>; }>();
+    appUrls: computedAppUrls;
+    indexName: string;
+
+    constructor() {
+        super();
+        this.appUrls = appUrl.forCurrentDatabase();
+    }
 
     activate(indexName: any) {
         super.activate(indexName);
 
+        this.indexName = indexName;
         this.fetchIndexDefinition(indexName);
     }
 

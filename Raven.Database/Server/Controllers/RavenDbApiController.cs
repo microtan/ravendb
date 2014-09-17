@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using System.Web;
 using System.Web.Http.Controllers;
 using System.Web.Http.Routing;
+using Lucene.Net.Store;
 using Raven.Abstractions;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Exceptions;
@@ -33,10 +34,19 @@ namespace Raven.Database.Server.Controllers
 		public string DatabaseName { get; private set; }
 
 		private string queryFromPostRequest;
-
+		
 		public void SetPostRequestQuery(string query)
 		{
 			queryFromPostRequest = EscapingHelper.UnescapeLongDataString(query);
+		}
+
+		public void InitializeFrom(RavenDbApiController other)
+		{
+			DatabaseName = other.DatabaseName;
+			queryFromPostRequest = other.queryFromPostRequest;
+			Configuration = other.Configuration;
+			ControllerContext = other.ControllerContext;
+			ActionContext = other.ActionContext;
 		}
 
 		public override async Task<HttpResponseMessage> ExecuteAsync(HttpControllerContext controllerContext, CancellationToken cancellationToken)
@@ -50,7 +60,17 @@ namespace Raven.Database.Server.Controllers
 				{
                     RequestManager.SetThreadLocalState(InnerHeaders, DatabaseName);
 					return await ExecuteActualRequest(controllerContext, cancellationToken, authorizer);
-				}, httpException => GetMessageWithObject(new {Error = httpException.Message}, HttpStatusCode.ServiceUnavailable));
+				}, httpException =>
+				{
+				    var response = GetMessageWithObject(new { Error = httpException.Message }, HttpStatusCode.ServiceUnavailable);
+
+				    var timeout = httpException.InnerException as TimeoutException;
+                    if (timeout != null)
+                    {
+                        response.Headers.Add("Raven-Database-Load-In-Progress", DatabaseName);
+                    }
+				    return response;
+				});
 			}
 
 			RequestManager.AddAccessControlHeaders(this, result);
@@ -62,9 +82,12 @@ namespace Raven.Database.Server.Controllers
 		private async Task<HttpResponseMessage> ExecuteActualRequest(HttpControllerContext controllerContext, CancellationToken cancellationToken,
 			MixedModeRequestAuthorizer authorizer)
 		{
-			HttpResponseMessage authMsg;
-			if (authorizer.TryAuthorize(this, out authMsg) == false)
-				return authMsg;
+			if (SkipAuthorizationSinceThisIsMultiGetRequestAlreadyAuthorized == false)
+			{
+				HttpResponseMessage authMsg;
+				if (authorizer.TryAuthorize(this, out authMsg) == false)
+					return authMsg;
+			}
 
 			var internalHeader = GetHeader("Raven-internal-request");
 			if (internalHeader == null || internalHeader != "true")
@@ -89,6 +112,8 @@ namespace Raven.Database.Server.Controllers
 		{
 			base.InnerInitialization(controllerContext);
 			landlord = (DatabasesLandlord)controllerContext.Configuration.Properties[typeof(DatabasesLandlord)];
+			fileSystemsLandlord = (FileSystemsLandlord)controllerContext.Configuration.Properties[typeof(FileSystemsLandlord)];
+			countersLandlord = (CountersLandlord)controllerContext.Configuration.Properties[typeof(CountersLandlord)];
 			requestManager = (RequestManager)controllerContext.Configuration.Properties[typeof(RequestManager)];
 
 			var values = controllerContext.Request.GetRouteData().Values;
@@ -114,7 +139,7 @@ namespace Raven.Database.Server.Controllers
 		public override HttpResponseMessage GetEmptyMessage(HttpStatusCode code = HttpStatusCode.OK, Etag etag = null)
 		{
 			var result = base.GetEmptyMessage(code, etag);
-			AddAccessControlHeaders(result);
+			RequestManager.AddAccessControlHeaders(this, result);
 			HandleReplication(result);
 			return result;
 		}
@@ -123,7 +148,7 @@ namespace Raven.Database.Server.Controllers
 		{
 			var result = base.GetMessageWithObject(item, code, etag);
 
-			AddAccessControlHeaders(result);
+			RequestManager.AddAccessControlHeaders(this, result);
 			HandleReplication(result);
 			return result;
 		}
@@ -131,39 +156,9 @@ namespace Raven.Database.Server.Controllers
 		public override HttpResponseMessage GetMessageWithString(string msg, HttpStatusCode code = HttpStatusCode.OK, Etag etag = null)
 		{
 			var result =base.GetMessageWithString(msg, code, etag);
-			AddAccessControlHeaders(result);
+			RequestManager.AddAccessControlHeaders(this, result);
 			HandleReplication(result);
 			return result;
-		}
-
-		private void AddAccessControlHeaders(HttpResponseMessage msg)
-		{
-			if (string.IsNullOrEmpty(DatabasesLandlord.SystemConfiguration.AccessControlAllowOrigin))
-				return;
-
-			AddHeader("Access-Control-Allow-Credentials", "true", msg);
-
-			var originAllowed = DatabasesLandlord.SystemConfiguration.AccessControlAllowOrigin == "*" ||
-					DatabasesLandlord.SystemConfiguration.AccessControlAllowOrigin.Split(' ')
-						.Any(o => o == GetHeader("Origin"));
-			if (originAllowed)
-			{
-				AddHeader("Access-Control-Allow-Origin", GetHeader("Origin"), msg);
-			}
-
-			AddHeader("Access-Control-Max-Age", DatabasesLandlord.SystemConfiguration.AccessControlMaxAge, msg);
-			AddHeader("Access-Control-Allow-Methods", DatabasesLandlord.SystemConfiguration.AccessControlAllowMethods, msg);
-
-			if (string.IsNullOrEmpty(DatabasesLandlord.SystemConfiguration.AccessControlRequestHeaders))
-			{
-				// allow whatever headers are being requested
-				var hdr = GetHeader("Access-Control-Request-Headers"); // typically: "x-requested-with"
-				if (hdr != null) AddHeader("Access-Control-Allow-Headers", hdr, msg);
-			}
-			else
-			{
-				AddHeader("Access-Control-Request-Headers", DatabasesLandlord.SystemConfiguration.AccessControlRequestHeaders, msg);
-			}
 		}
 
 		private DatabasesLandlord landlord;
@@ -174,6 +169,17 @@ namespace Raven.Database.Server.Controllers
 				if (Configuration == null)
 					return landlord;
 				return (DatabasesLandlord)Configuration.Properties[typeof(DatabasesLandlord)];
+			}
+		}
+
+		private CountersLandlord countersLandlord;
+		public CountersLandlord CountersLandlord
+		{
+			get
+			{
+				if (Configuration == null)
+					return countersLandlord;
+				return (CountersLandlord)Configuration.Properties[typeof(CountersLandlord)];
 			}
 		}
 
@@ -261,7 +267,6 @@ namespace Raven.Database.Server.Controllers
                 WaitForNonStaleResultsAsOfNow = GetWaitForNonStaleResultsAsOfNow(),
 				CutoffEtag = GetCutOffEtag(),
 				PageSize = GetPageSize(maxPageSize),
-				SkipTransformResults = GetSkipTransformResults(),
 				FieldsToFetch = GetQueryStringValues("fetch"),
 				DefaultField = GetQueryStringValue("defaultField"),
 
@@ -277,15 +282,24 @@ namespace Raven.Database.Server.Controllers
 				HighlighterPreTags = GetQueryStringValues("preTags"),
 				HighlighterPostTags = GetQueryStringValues("postTags"),
 				ResultsTransformer = GetQueryStringValue("resultsTransformer"),
-				QueryInputs = ExtractQueryInputs(),
+				TransformerParameters = ExtractTransformerParameters(),
 				ExplainScores = GetExplainScores(),
 				SortHints = GetSortHints(),
 				IsDistinct = IsDistinct()
 			};
 
+			var allowMultipleIndexEntriesForSameDocumentToResultTransformer = GetQueryStringValue("allowMultipleIndexEntriesForSameDocumentToResultTransformer");
+			bool allowMultiple;
+			if (string.IsNullOrEmpty(allowMultipleIndexEntriesForSameDocumentToResultTransformer) == false && bool.TryParse(allowMultipleIndexEntriesForSameDocumentToResultTransformer, out allowMultiple))
+				query.AllowMultipleIndexEntriesForSameDocumentToResultTransformer = allowMultiple;
+
             if (query.WaitForNonStaleResultsAsOfNow)
                 query.Cutoff = SystemTime.UtcNow;
 
+			var showTimingsAsString = GetQueryStringValue("showTimings");
+			bool showTimings;
+			if (string.IsNullOrEmpty(showTimingsAsString) == false && bool.TryParse(showTimingsAsString, out showTimings) && showTimings)
+				query.ShowTimings = true;
 
 			var spatialFieldName = GetQueryStringValue("spatialField") ?? Constants.DefaultSpatialFieldName;
 			var queryShape = GetQueryStringValue("queryShape");
@@ -386,13 +400,6 @@ namespace Raven.Database.Server.Controllers
 			return null;
 		}
 
-		public bool GetSkipTransformResults()
-		{
-			bool result;
-			bool.TryParse(GetQueryStringValue("skipTransformResults"), out result);
-			return result;
-		}
-
 		public IEnumerable<HighlightedField> GetHighlightedFields()
 		{
 			var highlightedFieldStrings = EnumerableExtension.EmptyIfNull(GetQueryStringValues("highlight"));
@@ -413,13 +420,13 @@ namespace Raven.Database.Server.Controllers
 			}
 		}
 
-		public Dictionary<string, RavenJToken> ExtractQueryInputs()
+		public Dictionary<string, RavenJToken> ExtractTransformerParameters()
 		{
 			var result = new Dictionary<string, RavenJToken>();
 			foreach (var key in InnerRequest.GetQueryNameValuePairs().Select(pair => pair.Key))
 			{
 				if (string.IsNullOrEmpty(key)) continue;
-				if (key.StartsWith("qp-"))
+				if (key.StartsWith("qp-") || key.StartsWith("tp-"))
 				{
 					var realkey = key.Substring(3);
 					result[realkey] = GetQueryStringValue(key);
@@ -450,6 +457,12 @@ namespace Raven.Database.Server.Controllers
 			return stale;
 		}
 
+		protected bool GetSkipOverwriteIfUnchanged()
+		{
+			bool result;
+			bool.TryParse(GetQueryStringValue("skipOverwriteIfUnchanged"), out result);
+			return result;
+		}
 	
 
 		protected void HandleReplication(HttpResponseMessage msg)
@@ -508,7 +521,7 @@ namespace Raven.Database.Server.Controllers
             }
             catch (Exception e)
             {
-                var msg = "Could open database named: " + tenantId;
+                var msg = "Could not open database named: " + tenantId;
                 Logger.WarnException(msg, e);
                 throw new HttpException(503, msg, e);
             }
@@ -521,7 +534,7 @@ namespace Raven.Database.Server.Controllers
                         var msg = "The database " + tenantId +
                                   " is currently being loaded, but after 30 seconds, this request has been aborted. Please try again later, database loading continues.";
                         Logger.Warn(msg);
-                        throw new HttpException(503, msg);
+                        throw new TimeoutException(msg);
                     }
                     var args = new BeforeRequestWebApiEventArgs()
                     {
@@ -542,7 +555,7 @@ namespace Raven.Database.Server.Controllers
                     {
                         exceptionMessage = aggregateException.ExtractSingleInnerException().Message;
                     }
-                    var msg = "Could open database named: " + tenantId + Environment.NewLine + exceptionMessage;
+                    var msg = "Could not open database named: " + tenantId + Environment.NewLine + exceptionMessage;
 
                     Logger.WarnException(msg, e);
                     throw new HttpException(503, msg, e);
@@ -561,7 +574,7 @@ namespace Raven.Database.Server.Controllers
 
 	    public override string TenantName
 	    {
-	        get { return DatabaseName; }
+            get { return DatabaseName;}
 	    }
 
 	    public override void MarkRequestDuration(long duration)

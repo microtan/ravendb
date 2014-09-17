@@ -31,7 +31,7 @@ class dynamicHeightBindingHandler {
     // Called by Knockout a single time when the binding handler is setup.
     init(element: HTMLElement, valueAccessor: () => { resizeTrigger: number; target?: string; bottomMargin: number }, allBindings: any, viewModel: any, bindingContext: KnockoutBindingContext) {
         if (valueAccessor().target) {
-            element.style.overflowY = "auto";
+            //element.style.overflowY = "auto";
             element.style.overflowX = "hidden";
         }
     }
@@ -68,6 +68,11 @@ class dynamicHeightBindingHandler {
             var footerTop = $(targetSelector).position().top;
             var padding = 5 + bottomMargin;
             var desiredElementHeight = footerTop - elementTop - padding;
+            if ($(document).fullScreen()) {
+                var windowHeightKey = "ravenStudioLastDispatchedHeight";
+                var windowHeight: number = ko.utils.domData.get(element, windowHeightKey);
+                desiredElementHeight = windowHeight - elementTop - padding;
+            }
             var minimumHeight = 100;
             if (desiredElementHeight >= minimumHeight) {
                 $element.height(desiredElementHeight);

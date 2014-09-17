@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 using Raven.Tests.Common;
+using Raven.Tests.Helpers;
 
 using Xunit;
 
@@ -424,7 +425,7 @@ namespace Raven.Tests.Issues
                     {
                         var results = session.Query<Foo, TimeSpanTestMultiMapIndex>()
                             .OrderBy(x => x.Start)
-                            .AsProjection<Foo>()
+							.ProjectFromIndexFieldsInto<Foo>()
                             .ToArray();
 
                         Assert.Equal("4", results[0].Id);
@@ -437,7 +438,7 @@ namespace Raven.Tests.Issues
                     {
                         var results = session.Query<Foo, TimeSpanTestMultiMapIndex>()
                             .OrderByDescending(x => x.Start)
-                            .AsProjection<Foo>()
+							.ProjectFromIndexFieldsInto<Foo>()
                             .ToArray();
 
                         Assert.Equal("4", results[3].Id);

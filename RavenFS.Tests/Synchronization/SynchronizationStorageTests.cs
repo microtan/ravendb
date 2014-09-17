@@ -1,5 +1,4 @@
 ﻿using System.IO;
-using Raven.Client.RavenFS;
 using Raven.Database.Server.RavenFS;
 using Raven.Database.Server.RavenFS.Extensions;
 using Raven.Database.Server.RavenFS.Storage;
@@ -7,20 +6,23 @@ using Raven.Database.Server.RavenFS.Synchronization;
 using Raven.Database.Server.RavenFS.Util;
 using Xunit;
 using Xunit.Extensions;
+using Raven.Client.FileSystem;
+using Raven.Abstractions.FileSystem;
+using Raven.Client.FileSystem.Connection;
 
 namespace RavenFS.Tests.Synchronization
 {
     public class SynchronizationStorageTests : RavenFsTestBase
 	{
-		private readonly RavenFileSystemClient destination;
+        private readonly IAsyncFilesCommandsImpl destination;
 		private readonly RavenFileSystem destinationRfs;
-		private readonly RavenFileSystemClient source;
+        private readonly IAsyncFilesCommandsImpl source;
 		private readonly RavenFileSystem sourceRfs;
 
 		public SynchronizationStorageTests()
 		{
-			source = NewClient(0);
-			destination = NewClient(1);
+            source = (IAsyncFilesCommandsImpl)NewAsyncClient(0);
+            destination = (IAsyncFilesCommandsImpl) NewAsyncClient(1);
 
 			sourceRfs = GetRavenFileSystem(0);
 			destinationRfs = GetRavenFileSystem(1);
@@ -29,8 +31,10 @@ namespace RavenFS.Tests.Synchronization
 		[Theory]
 		[InlineData(2)]
 		[InlineData(10)]
-		public void Should_reuse_pages_when_data_appended(int numberOfPages)
+		public async void Should_reuse_pages_when_data_appended(int numberOfPages)
 		{
+            string filename = FileHeader.Canonize("test");
+
 			var file = SyncTestUtils.PreparePagesStream(numberOfPages);
 
 			var sourceContent = new CombinedStream(file, SyncTestUtils.PreparePagesStream(numberOfPages));
@@ -38,20 +42,20 @@ namespace RavenFS.Tests.Synchronization
 			var destinationContent = file;
 
 			sourceContent.Position = 0;
-			source.UploadAsync("test", sourceContent).Wait();
+            await source.UploadAsync(filename, sourceContent);
 			destinationContent.Position = 0;
-			destination.UploadAsync("test", destinationContent).Wait();
+            await destination.UploadAsync(filename, destinationContent);
 
-			var contentUpdate = new ContentUpdateWorkItem("test", "http://localhost:12345", sourceRfs.Storage,
-			                                              sourceRfs.SigGenerator);
+            var contentUpdate = new ContentUpdateWorkItem(filename, "http://localhost:12345", sourceRfs.Storage, sourceRfs.SigGenerator);
 
 			// force to upload entire file, we just want to check which pages will be reused
-		    contentUpdate.UploadToAsync(destination.Synchronization).Wait();
-			destination.Synchronization.ResolveConflictAsync("test", ConflictResolutionStrategy.RemoteVersion).Wait();
-            contentUpdate.UploadToAsync(destination.Synchronization).Wait();
+		    await contentUpdate.UploadToAsync(destination.Synchronization);
+            await destination.Synchronization.ResolveConflictAsync(filename, ConflictResolutionStrategy.RemoteVersion);
+            await contentUpdate.UploadToAsync(destination.Synchronization);
 
-			FileAndPages fileAndPages = null;
-			destinationRfs.Storage.Batch(accessor => fileAndPages = accessor.GetFile("test", 0, 2*numberOfPages));
+           
+			FileAndPagesInformation fileAndPages = null;
+            destinationRfs.Storage.Batch(accessor => fileAndPages = accessor.GetFile(filename, 0, 2 * numberOfPages));
 
 			Assert.Equal(2*numberOfPages, fileAndPages.Pages.Count);
 
@@ -62,12 +66,14 @@ namespace RavenFS.Tests.Synchronization
 			}
 
 			sourceContent.Position = 0;
-			Assert.Equal(sourceContent.GetMD5Hash(), destination.GetMetadataForAsync("test").Result["Content-MD5"]);
+            Assert.Equal(sourceContent.GetMD5Hash(), destination.GetMetadataForAsync(filename).Result["Content-MD5"]);
 		}
 
 		[Fact]
 		public void Should_reuse_second_page_if_only_first_one_changed()
 		{
+            string filename = FileHeader.Canonize("test");
+
 			var file = SyncTestUtils.PreparePagesStream(2);
 			file.Position = 0;
 
@@ -79,34 +85,36 @@ namespace RavenFS.Tests.Synchronization
 			var destinationContent = file;
 
 			sourceContent.Position = 0;
-			source.UploadAsync("test", sourceContent).Wait();
+            source.UploadAsync(filename, sourceContent).Wait();
 			destinationContent.Position = 0;
-			destination.UploadAsync("test", destinationContent).Wait();
+            destination.UploadAsync(filename, destinationContent).Wait();
 
-			var contentUpdate = new ContentUpdateWorkItem("test", "http://localhost:12345", sourceRfs.Storage,
+            var contentUpdate = new ContentUpdateWorkItem(filename, "http://localhost:12345", sourceRfs.Storage,
 			                                              sourceRfs.SigGenerator);
 
 
 			sourceContent.Position = 0;
 			// force to upload entire file, we just want to check which pages will be reused
             contentUpdate.UploadToAsync(destination.Synchronization).Wait();
-			destination.Synchronization.ResolveConflictAsync("test", ConflictResolutionStrategy.RemoteVersion).Wait();
+            destination.Synchronization.ResolveConflictAsync(filename, ConflictResolutionStrategy.RemoteVersion).Wait();
             contentUpdate.UploadToAsync(destination.Synchronization).Wait();
 
-			FileAndPages fileAndPages = null;
-			destinationRfs.Storage.Batch(accessor => fileAndPages = accessor.GetFile("test", 0, 256));
+			FileAndPagesInformation fileAndPages = null;
+            destinationRfs.Storage.Batch(accessor => fileAndPages = accessor.GetFile(filename, 0, 256));
 
 			Assert.Equal(2, fileAndPages.Pages.Count);
 			Assert.Equal(3, fileAndPages.Pages[0].Id); // new page -> id == 3
 			Assert.Equal(2, fileAndPages.Pages[1].Id); // reused page -> id still == 2
 
 			sourceContent.Position = 0;
-			Assert.Equal(sourceContent.GetMD5Hash(), destination.GetMetadataForAsync("test").Result["Content-MD5"]);
+            Assert.Equal(sourceContent.GetMD5Hash(), destination.GetMetadataForAsync(filename).Result["Content-MD5"]);
 		}
 
 		[Fact]
-		public void Should_reuse_pages_where_nothing_has_changed()
+		public async void Should_reuse_pages_where_nothing_has_changed()
 		{
+            string filename = FileHeader.Canonize("test");
+
 			var file = SyncTestUtils.PreparePagesStream(3);
 			file.Position = 0;
 
@@ -118,22 +126,21 @@ namespace RavenFS.Tests.Synchronization
 			var destinationContent = file;
 
 			sourceContent.Position = 0;
-			source.UploadAsync("test", sourceContent).Wait();
+            await source.UploadAsync(filename, sourceContent);
 			destinationContent.Position = 0;
-			destination.UploadAsync("test", destinationContent).Wait();
+            await destination.UploadAsync(filename, destinationContent);
 
-			var contentUpdate = new ContentUpdateWorkItem("test", "http://localhost:12345", sourceRfs.Storage,
-			                                              sourceRfs.SigGenerator);
+            var contentUpdate = new ContentUpdateWorkItem(filename, "http://localhost:12345", sourceRfs.Storage, sourceRfs.SigGenerator);
 
 
 			sourceContent.Position = 0;
 			// force to upload entire file, we just want to check which pages will be reused
-            contentUpdate.UploadToAsync(destination.Synchronization).Wait();
-			destination.Synchronization.ResolveConflictAsync("test", ConflictResolutionStrategy.RemoteVersion).Wait();
-            contentUpdate.UploadToAsync(destination.Synchronization).Wait();
+            await contentUpdate.UploadToAsync(destination.Synchronization);
+            await destination.Synchronization.ResolveConflictAsync(filename, ConflictResolutionStrategy.RemoteVersion);
+            await contentUpdate.UploadToAsync(destination.Synchronization);
 
-			FileAndPages fileAndPages = null;
-			destinationRfs.Storage.Batch(accessor => fileAndPages = accessor.GetFile("test", 0, 256));
+			FileAndPagesInformation fileAndPages = null;
+            destinationRfs.Storage.Batch(accessor => fileAndPages = accessor.GetFile(filename, 0, 256));
 
 			Assert.Equal(3, fileAndPages.Pages.Count);
 			Assert.Equal(1, fileAndPages.Pages[0].Id); // reused page
@@ -141,7 +148,9 @@ namespace RavenFS.Tests.Synchronization
 			Assert.Equal(3, fileAndPages.Pages[2].Id); // reused page
 
 			sourceContent.Position = 0;
-			Assert.Equal(sourceContent.GetMD5Hash(), destination.GetMetadataForAsync("test").Result["Content-MD5"]);
+
+            var metadata = await destination.GetMetadataForAsync(filename);
+            Assert.Equal(sourceContent.GetMD5Hash(), metadata.Value<string>("Content-MD5"));
 		}
 	}
 }

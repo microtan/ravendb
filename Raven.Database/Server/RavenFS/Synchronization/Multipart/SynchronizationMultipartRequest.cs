@@ -1,38 +1,37 @@
-﻿using System;
+﻿using Raven.Abstractions.Connection;
+using Raven.Abstractions.FileSystem;
+using Raven.Client.Connection;
+using Raven.Client.Connection.Profiling;
+using Raven.Client.FileSystem;
+using Raven.Client.FileSystem.Connection;
+using Raven.Database.Server.RavenFS.Synchronization.Rdc.Wrapper;
+using Raven.Database.Server.RavenFS.Util;
+using Raven.Imports.Newtonsoft.Json;
+using Raven.Json.Linq;
+using System;
 using System.Collections.Generic;
-using System.Collections.Specialized;
 using System.IO;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using Raven.Abstractions.Connection;
-using Raven.Abstractions.RavenFS;
-using Raven.Client.Connection;
-using Raven.Client.Connection.Profiling;
-using Raven.Client.RavenFS;
-using Raven.Database.Server.RavenFS.Synchronization.Rdc.Wrapper;
-using Raven.Database.Server.RavenFS.Util;
-using Raven.Imports.Newtonsoft.Json;
-using Raven.Json.Linq;
 
 namespace Raven.Database.Server.RavenFS.Synchronization.Multipart
 {
 	public class SynchronizationMultipartRequest : IHoldProfilingInformation
 	{
-        private readonly RavenFileSystemClient.SynchronizationClient destination;
+        private readonly IAsyncFilesSynchronizationCommands destination;
 		private readonly string fileName;
 		private readonly IList<RdcNeed> needList;
 		private readonly ServerInfo serverInfo;
-		private readonly NameValueCollection sourceMetadata;
+        private readonly RavenJObject sourceMetadata;
 		private readonly Stream sourceStream;
 		private readonly string syncingBoundary;
 		private HttpJsonRequest request;
 
-        public SynchronizationMultipartRequest(RavenFileSystemClient.SynchronizationClient destination, ServerInfo serverInfo, string fileName,
-											   NameValueCollection sourceMetadata, Stream sourceStream,
-											   IList<RdcNeed> needList)
+        public SynchronizationMultipartRequest(IAsyncFilesSynchronizationCommands destination, ServerInfo serverInfo, string fileName,
+                                               RavenJObject sourceMetadata, Stream sourceStream, IList<RdcNeed> needList)
 		{
 			this.destination = destination;
 			this.serverInfo = serverInfo;
@@ -51,21 +50,22 @@ namespace Raven.Database.Server.RavenFS.Synchronization.Multipart
 			token.ThrowIfCancellationRequested();
 
 			if (sourceStream.CanRead == false)
-			{
 				throw new Exception("Stream does not support reading");
-			}
 
-			request =
-				destination.JsonRequestFactory.CreateHttpJsonRequest(new CreateHttpJsonRequestParams(this,
-					destination.FileSystemUrl + "/synchronization/MultipartProceed",
-					"POST", destination.Credentials, destination.Convention));
+            var commands = (IAsyncFilesCommandsImpl)this.destination.Commands;
 
-			//request.SendChunked = true;
-			//request.AllowWriteStreamBuffering = false;
-			//request.KeepAlive = true;
+            var baseUrl = commands.UrlFor();
+            var credentials = commands.PrimaryCredentials;
+            var conventions = commands.Conventions;
 
-			request.AddHeaders(sourceMetadata);
+            request = commands.RequestFactory.CreateHttpJsonRequest(
+                                    new CreateHttpJsonRequestParams(this, baseUrl + "/synchronization/MultipartProceed",
+                                                                    "POST", credentials, conventions));
 
+            // REVIEW: (Oren) There is a mismatch of expectations in the AddHeaders. ETag must always have to be surrounded by quotes. 
+            //         If AddHeader/s ever put an etag it should check for that.
+            //         I was hesitant to do the change though, because I do not understand the complete scope of such a change.
+            request.AddHeaders(sourceMetadata);           
 			request.AddHeader("Content-Type", "multipart/form-data; boundary=" + syncingBoundary);
 
 			request.AddHeader(SyncingMultipartConstants.FileName, fileName);
@@ -89,7 +89,7 @@ namespace Raven.Database.Server.RavenFS.Synchronization.Multipart
 
 				if (webException != null)
 				{
-					webException.BetterWebExceptionError();
+					webException.SimplifyException();
 				}
 
 				throw;

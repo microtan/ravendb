@@ -5,11 +5,9 @@
 //-----------------------------------------------------------------------
 using System;
 using System.Collections.Generic;
-using Microsoft.WindowsAzure.Storage;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.MEF;
 using Raven.Database.Config;
-using Raven.Database.Data;
 using Raven.Database.Impl;
 using Raven.Database.Impl.DTC;
 using Raven.Database.Plugins;
@@ -36,6 +34,7 @@ namespace Raven.Database.Storage
 		DatabaseSizeInformation GetDatabaseSize();
 		long GetDatabaseCacheSizeInBytes();
 		long GetDatabaseTransactionVersionSizeInBytes();
+		StorageStats GetStorageStats();
 
 		string FriendlyName { get; }
 		bool HandleException(Exception exception);
@@ -47,7 +46,7 @@ namespace Raven.Database.Storage
 		Guid ChangeId();
 		void ClearCaches();
 		void DumpAllStorageTables();
-		InFlightTransactionalState GetInFlightTransactionalState(Func<string, Etag, RavenJObject, RavenJObject, TransactionInformation, PutResult> put, Func<string, Etag, TransactionInformation, bool> delete);
+		InFlightTransactionalState GetInFlightTransactionalState(DocumentDatabase self, Func<string, Etag, RavenJObject, RavenJObject, TransactionInformation, PutResult> put, Func<string, Etag, TransactionInformation, bool> delete);
         IList<string> ComputeDetailedStorageInformation();
 	}
 }

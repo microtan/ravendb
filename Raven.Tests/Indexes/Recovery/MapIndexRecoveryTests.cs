@@ -8,6 +8,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using Raven.Client.Document;
+using Raven.Client.Extensions;
 using Raven.Database.Config;
 using Raven.Database.Extensions;
 using Raven.Database.Indexing;
@@ -37,6 +38,7 @@ namespace Raven.Tests.Indexes.Recovery
 	    protected override void ModifyConfiguration(InMemoryRavenConfiguration configuration)
 	    {
 	        configuration.DefaultStorageTypeName = "esent";
+			configuration.FlushIndexToDiskSizeInMb = 0;
 	    }
 
 	    [Fact]
@@ -92,8 +94,8 @@ namespace Raven.Tests.Indexes.Recovery
 
 					Assert.Equal(2, files.Length);
 
-					Assert.Equal("index.commitPoint", Path.GetFileName(files[0]));
-					Assert.True(Path.GetFileName(files[1]).StartsWith("segments_"));
+					Assert.True(files.Any(file => Path.GetFileName(file) == "index.commitPoint"));
+					Assert.True(files.Any(file => Path.GetFileName(file).StartsWith("segments_")));
 				}
 			}
 		}
@@ -325,7 +327,7 @@ namespace Raven.Tests.Indexes.Recovery
 						});
 
 						session.SaveChanges(); // second commit point
-						WaitForIndexing(store);
+						WaitForIndexing(store, timeout: TimeSpan.FromSeconds(60));
 					}
 				}
                 Index indexInstance = server.SystemDatabase.IndexStorage.GetIndexInstance(index.IndexName);

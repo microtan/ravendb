@@ -11,6 +11,7 @@ using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Http.Headers;
+using Raven.Abstractions.Util;
 using Raven.Imports.Newtonsoft.Json;
 using Raven.Abstractions;
 using Raven.Abstractions.Data;
@@ -130,14 +131,13 @@ namespace Raven.Client.Connection
 		/// <summary>
 		/// Translate a result for a query
 		/// </summary>
-		public static QueryResult ToQueryResult(RavenJObject json, Etag etag, string tempRequestTime)
+		public static QueryResult ToQueryResult(RavenJObject json, Etag etag, string tempRequestTime, long numberOfCharactersRead)
 		{
 			var result = new QueryResult
 			{
 				IsStale = Convert.ToBoolean(json["IsStale"].ToString()),
 				IndexTimestamp = json.Value<DateTime>("IndexTimestamp"),
                 IndexEtag = Etag.Parse(json.Value<string>("IndexEtag")),
-				Results = ((RavenJArray)json["Results"]).Cast<RavenJObject>().ToList(),
 				Includes = ((RavenJArray)json["Includes"]).Cast<RavenJObject>().ToList(),
 				TotalResults = Convert.ToInt32(json["TotalResults"].ToString()),
 				IndexName = json.Value<string>("IndexName"),
@@ -145,8 +145,19 @@ namespace Raven.Client.Connection
 				Highlightings = (json.Value<RavenJObject>("Highlightings") ?? new RavenJObject())
 					.JsonDeserialization<Dictionary<string, Dictionary<string, string[]>>>(),
 				ScoreExplanations = (json.Value<RavenJObject>("ScoreExplanations") ?? new RavenJObject())
-				.JsonDeserialization<Dictionary<string, string>>()
+				.JsonDeserialization<Dictionary<string, string>>(),
+				TimingsInMilliseconds = (json.Value<RavenJObject>("TimingsInMilliseconds") ?? new RavenJObject()).JsonDeserialization<Dictionary<string, double>>()
 			};
+
+			result.ResultSize = numberOfCharactersRead;
+
+			foreach (var r in ((RavenJArray)json["Results"]))
+			{
+				if (r.Type == JTokenType.Null)
+					result.Results.Add(null);
+				else
+					result.Results.Add((RavenJObject)r);
+			}
 
 			if (json.ContainsKey("NonAuthoritativeInformation"))
 				result.NonAuthoritativeInformation = Convert.ToBoolean(json["NonAuthoritativeInformation"].ToString());
@@ -208,7 +219,7 @@ namespace Raven.Client.Connection
 			var jsonData = (RavenJObject)requestJson;
 			var meta = headers.FilterHeadersToObject();
 
-			var etag = headers["ETag"];
+            var etag = headers[Constants.MetadataEtagField];
 
 			return new JsonDocument
 			{
@@ -290,7 +301,7 @@ namespace Raven.Client.Connection
 			{
 				throw new JsonReaderException("Invalid Json Response", jre);
 			}
-			var etag = headers["ETag"];
+            var etag = headers[Constants.MetadataEtagField];
 			string lastModified = headers[Constants.RavenLastModified] ?? headers[Constants.LastModified];
 			var dateTime = DateTime.ParseExact(lastModified, new[] { "o", "r" }, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
 			var lastModifiedDate = DateTime.SpecifyKind(dateTime, DateTimeKind.Utc);

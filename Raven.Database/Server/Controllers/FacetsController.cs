@@ -11,6 +11,7 @@ using Newtonsoft.Json;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Exceptions;
 using Raven.Abstractions.Extensions;
+using Raven.Abstractions.Util.Encryptors;
 using Raven.Database.Queries;
 
 namespace Raven.Database.Server.Controllers
@@ -92,6 +93,9 @@ namespace Raven.Database.Server.Controllers
                 facetedQueries.Select(
                     facetedQuery =>
                     {
+						if (Database.IndexDefinitionStorage.Contains(facetedQuery.IndexName) == false)
+							throw new IndexDoesNotExistsException(string.Format("Index '{0}' does not exist.", facetedQuery.IndexName));
+
                         if (facetedQuery.FacetSetupDoc != null)
                             return Database.ExecuteGetTermsQuery(facetedQuery.IndexName, facetedQuery.Query, facetedQuery.FacetSetupDoc,
                                 facetedQuery.PageStart, facetedQuery.PageSize);
@@ -106,13 +110,16 @@ namespace Raven.Database.Server.Controllers
             return GetMessageWithObject(results);
         }
 
-		private async Task<HttpResponseMessage> ExecuteFacetsQuery(string index, List<Facet> facets, Etag indexEtag)
+		private Task<HttpResponseMessage> ExecuteFacetsQuery(string index, List<Facet> facets, Etag indexEtag)
         {
+			if (Database.IndexDefinitionStorage.Contains(index) == false)
+				return GetMessageWithStringAsTask(string.Format("Index '{0}' does not exist.", index), HttpStatusCode.BadRequest);
+
             var indexQuery = GetIndexQuery(Database.Configuration.MaxPageSize);
             var facetStart = GetFacetStart();
             var facetPageSize = GetFacetPageSize();
             var results = Database.ExecuteGetTermsQuery(index, indexQuery, facets, facetStart, facetPageSize);
-            return GetMessageWithObject(results, HttpStatusCode.OK, indexEtag);
+            return GetMessageWithObjectAsTask(results, HttpStatusCode.OK, indexEtag);
         }
 
         private HttpResponseMessage TryGetFacetsFromString(string facetsJson, out List<Facet> facets)
@@ -125,14 +132,10 @@ namespace Raven.Database.Server.Controllers
             return null;
         }
 
-
         private Etag GetFacetsEtag(string index, byte[] additionalEtagBytes)
         {
-            using (var md5 = MD5.Create())
-            {
-                var etagBytes = md5.ComputeHash(Database.Indexes.GetIndexEtag(index, null).ToByteArray().Concat(additionalEtagBytes).ToArray());
-                return Etag.Parse(etagBytes);
-            }
+            var etagBytes = Encryptor.Current.Hash.Compute16(Database.Indexes.GetIndexEtag(index, null).ToByteArray().Concat(additionalEtagBytes).ToArray());
+            return Etag.Parse(etagBytes);
         }
 
         private int GetFacetStart()

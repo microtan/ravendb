@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -13,7 +14,6 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Web.Http;
 using System.Web.Http.Controllers;
-using ICSharpCode.SharpZipLib.Zip;
 using Mono.CSharp;
 using Raven.Abstractions.Connection;
 using Raven.Abstractions.Data;
@@ -30,15 +30,16 @@ using Raven.Imports.Newtonsoft.Json;
 using Raven.Imports.Newtonsoft.Json.Bson;
 using Raven.Imports.Newtonsoft.Json.Linq;
 using Raven.Json.Linq;
-using HttpExtensions = Raven.Database.Extensions.HttpExtensions;
 
 namespace Raven.Database.Server.Controllers
 {
-	public abstract class RavenBaseApiController : ApiController
+    public abstract class RavenBaseApiController : ApiController
 	{
 		protected static readonly ILog Log = LogManager.GetCurrentClassLogger();
-
+        
 		private HttpRequestMessage request;
+
+		internal bool SkipAuthorizationSinceThisIsMultiGetRequestAlreadyAuthorized{ get; set; }
 
 		public HttpRequestMessage InnerRequest
 		{
@@ -78,6 +79,8 @@ namespace Raven.Database.Server.Controllers
 
 		public new IPrincipal User { get; set; }
 
+        public bool WasAlreadyAuthorizedUsingSingleAuthToken { get; set; }
+
 		protected virtual void InnerInitialization(HttpControllerContext controllerContext)
 		{
 			request = controllerContext.Request;
@@ -87,7 +90,7 @@ namespace Raven.Database.Server.Controllers
 		public async Task<T> ReadJsonObjectAsync<T>()
 		{
 			using (var stream = await InnerRequest.Content.ReadAsStreamAsync())
-			//using(var gzipStream = new GZipStream(stream, CompressionMode.Decompress))
+			using(var gzipStream = new GZipStream(stream, CompressionMode.Decompress))
 			using (var streamReader = new StreamReader(stream, GetRequestEncoding()))
 			{
 				using (var jsonReader = new JsonTextReader(streamReader))
@@ -211,12 +214,6 @@ namespace Raven.Database.Server.Controllers
 		{
 			if (string.IsNullOrWhiteSpace(etag))
 				return;
-			//string clientVersion = GetHeader("Raven-Client-Version");
-			//if (string.IsNullOrEmpty(clientVersion))
-			//{
-			//	msg.Headers.ETag = new EntityTagHeaderValue(etag);
-			//	return;
-			//}
 
 			msg.Headers.ETag = new EntityTagHeaderValue("\"" + etag + "\"");
 		}
@@ -253,6 +250,10 @@ namespace Raven.Database.Server.Controllers
 							if (header.Key.StartsWith("Raven-") == false)
 								msg.Content.Headers.Add("Raven-" + header.Key, iso8601);
 						}
+                        else if (header.Value.Type == JTokenType.Boolean)
+                        {
+                            msg.Content.Headers.Add(header.Key, header.Value.ToString());
+                        }
 						else
 						{
 							var value = UnescapeStringIfNeeded(header.Value.ToString(Formatting.None));
@@ -323,7 +324,7 @@ namespace Raven.Database.Server.Controllers
 
             bool metadataOnly;
             if (bool.TryParse(GetQueryStringValue("metadata-only"), out metadataOnly) && metadataOnly)
-                token = HttpExtensions.MinimizeToken(token);
+				token = Extensions.HttpExtensions.MinimizeToken(token);
             
 			var msg = new HttpResponseMessage(code)
 			{
@@ -339,7 +340,7 @@ namespace Raven.Database.Server.Controllers
 		{
 			var resMsg = new HttpResponseMessage(code)
 			{
-				Content = JsonContent(msg)
+				Content = new StringContent(msg)
 			};
 
 			WriteETag(etag, resMsg);
@@ -355,6 +356,21 @@ namespace Raven.Database.Server.Controllers
 			};
 			WriteETag(etag, resMsg);
 			return resMsg;
+		}
+
+		public virtual Task<HttpResponseMessage> GetMessageWithObjectAsTask(object item, HttpStatusCode code = HttpStatusCode.OK, Etag etag = null)
+	    {
+			return new CompletedTask<HttpResponseMessage>(GetMessageWithObject(item, code, etag));
+	    }
+
+		public Task<HttpResponseMessage> GetMessageWithStringAsTask(string msg, HttpStatusCode code = HttpStatusCode.OK, Etag etag = null)
+		{
+			return new CompletedTask<HttpResponseMessage>(GetMessageWithString(msg, code, etag));
+		}
+
+		public Task<HttpResponseMessage> GetEmptyMessageAsTask(HttpStatusCode code = HttpStatusCode.OK, Etag etag = null)
+		{
+			return new CompletedTask<HttpResponseMessage>(GetEmptyMessage(code, etag));
 		}
 
 		public HttpResponseMessage WriteData(RavenJObject data, RavenJObject headers, Etag etag, HttpStatusCode status = HttpStatusCode.OK, HttpResponseMessage msg = null)
@@ -431,9 +447,14 @@ namespace Raven.Database.Server.Controllers
 			var filePath = Path.Combine(ravenPath, docPath);
 			if (File.Exists(filePath))
 				return WriteFile(filePath);
-			filePath = Path.Combine("~/../../../../Raven.Studio.Html5", docPath);
+			filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "../Raven.Studio.Html5/", docPath);
 			if (File.Exists(filePath))
 				return WriteFile(filePath);
+
+            filePath = Path.Combine("~/../../../../Raven.Studio.Html5", docPath);
+            if (File.Exists(filePath))
+                return WriteFile(filePath);
+
 
 			if (string.IsNullOrEmpty(zipPath) == false)
 			{
@@ -458,18 +479,18 @@ namespace Raven.Database.Server.Controllers
 				return GetEmptyMessage(HttpStatusCode.NotModified);
 
 			var fileStream = new FileStream(zipPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-			var zipFile = new ZipFile(fileStream);
-			var zipEntry = zipFile.GetEntry(docPath);
-
-			if (zipEntry == null || zipEntry.IsFile == false)
+			var zipArchive = new ZipArchive(fileStream, ZipArchiveMode.Read, false);
+			
+			var zipEntry = zipArchive.Entries.FirstOrDefault(a => a.FullName.Equals(docPath, StringComparison.OrdinalIgnoreCase));
+			if (zipEntry == null)
 				return EmbeddedFileNotFound(docPath);
 
-			var entry = zipFile.GetInputStream(zipEntry);
+			var entry = zipEntry.Open();
 			var msg = new HttpResponseMessage
 			{
 				Content = new CompressedStreamContent(entry, false)
 				{
-					Disposables = {fileStream}
+					Disposables = { zipArchive }
 				},
 			};
 
@@ -483,7 +504,7 @@ namespace Raven.Database.Server.Controllers
 
 		public HttpResponseMessage WriteFile(string filePath)
 		{
-			var etagValue = GetHeader("If-None-Match") ?? GetHeader("If-None-Match");
+			var etagValue = GetHeader("If-None-Match") ?? GetHeader("If-Match");
 			var fileEtag = File.GetLastWriteTimeUtc(filePath).ToString("G");
 			if (etagValue == fileEtag)
 				return GetEmptyMessage(HttpStatusCode.NotModified);
@@ -511,7 +532,7 @@ namespace Raven.Database.Server.Controllers
 			byte[] bytes;
 			var resourceName = embeddedPath + "." + docPath.Replace("/", ".");
 
-			var resourceAssembly = typeof(IHttpContext).Assembly;
+			var resourceAssembly = typeof(RavenBaseApiController).Assembly;
 			var resourceNames = resourceAssembly.GetManifestResourceNames();
 			var lowercasedResourceName = resourceNames.FirstOrDefault(s => string.Equals(s, resourceName, StringComparison.OrdinalIgnoreCase));
 		    if (lowercasedResourceName == null)
@@ -541,7 +562,7 @@ namespace Raven.Database.Server.Controllers
 		private HttpResponseMessage EmbeddedFileNotFound(string docPath)
 		{
 			var message = "The following embedded file was not available: " + docPath +
-			              ". Please make sure that the Raven.Studio.Html.zip file exist in the main directory (near to the Raven.Database.dll).";
+			              ". Please make sure that the Raven.Studio.Html5.zip file exist in the main directory (near to the Raven.Database.dll).";
 			return GetMessageWithObject(new {Message = message}, HttpStatusCode.NotFound);
 		}
 

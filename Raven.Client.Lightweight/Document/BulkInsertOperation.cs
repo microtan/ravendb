@@ -1,5 +1,4 @@
 ﻿using Raven.Client.Connection.Async;
-#if !NETFX_CORE
 using System;
 using System.Threading.Tasks;
 using Raven.Abstractions.Data;
@@ -16,13 +15,13 @@ namespace Raven.Client.Document
 		{
 			get
 			{
-				return operation.OperationId;
+				return Operation.OperationId;
 			}
 		}
 
 		private readonly IDocumentStore documentStore;
 		private readonly GenerateEntityIdOnTheClient generateEntityIdOnTheClient;
-		private readonly ILowLevelBulkInsertOperation operation;
+		protected ILowLevelBulkInsertOperation Operation { get; set; }
 		public IAsyncDatabaseCommands DatabaseCommands { get; private set; }
 		private readonly EntityToJson entityToJson;
 
@@ -30,10 +29,20 @@ namespace Raven.Client.Document
 
 		public event BeforeEntityInsert OnBeforeEntityInsert = delegate { };
 
+		public bool IsAborted
+		{
+			get { return Operation.IsAborted; }
+		}
+
+	    public void Abort()
+	    {
+	        Operation.Abort();
+	    }
+
 		public event Action<string> Report
 		{
-			add { operation.Report += value; }
-			remove { operation.Report -= value; }
+			add { Operation.Report += value; }
+			remove { Operation.Report -= value; }
 		}
 
 		public BulkInsertOperation(string database, IDocumentStore documentStore, DocumentSessionListeners listeners, BulkInsertOptions options, IDatabaseChanges changes)
@@ -48,18 +57,23 @@ namespace Raven.Client.Document
 				: documentStore.AsyncDatabaseCommands.ForDatabase(database);
 
 			generateEntityIdOnTheClient = new GenerateEntityIdOnTheClient(documentStore, entity => documentStore.Conventions.GenerateDocumentKeyAsync(database, DatabaseCommands, entity).ResultUnwrap());
-			operation = DatabaseCommands.GetBulkInsertOperation(options, changes);
+			Operation = GetBulkInsertOperation(options, DatabaseCommands, changes);
 			entityToJson = new EntityToJson(documentStore, listeners);
+		}
+
+		protected virtual ILowLevelBulkInsertOperation GetBulkInsertOperation(BulkInsertOptions options, IAsyncDatabaseCommands commands, IDatabaseChanges changes)
+		{
+			return commands.GetBulkInsertOperation(options, changes);
 		}
 
 		public Task DisposeAsync()
 		{
-			return operation.DisposeAsync();
+			return Operation.DisposeAsync();
 		}
 
 		public void Dispose()
 		{
-			operation.Dispose();
+			Operation.Dispose();
 		}
 
 		public string Store(object entity)
@@ -71,9 +85,12 @@ namespace Raven.Client.Document
 
 		public void Store(object entity, string id)
 		{
+			if(Operation.IsAborted)
+				throw new InvalidOperationException("Bulk insert has been aborted or the operation was timed out");
+
 			var metadata = new RavenJObject();
 
-			var tag = documentStore.Conventions.GetTypeTagName(entity.GetType());
+			var tag = documentStore.Conventions.GetDynamicTagName(entity);
 			if (tag != null)
 				metadata.Add(Constants.RavenEntityName, tag);
 
@@ -81,30 +98,24 @@ namespace Raven.Client.Document
 
 			OnBeforeEntityInsert(id, data, metadata);
 
-			operation.Write(id, metadata, data);
+			Operation.Write(id, metadata, data);
 		}
 
-		public void Store(RavenJObject document, RavenJObject metadata, string id)
+		public void Store(RavenJObject document, RavenJObject metadata, string id, int? dataSize = null)
 		{
 			OnBeforeEntityInsert(id, document, metadata);
 
-			operation.Write(id, metadata, document);
+			Operation.Write(id, metadata, document, dataSize);
 		}
 
 		private string GetId(object entity)
 		{
 			string id;
-			if (generateEntityIdOnTheClient.TryGetIdFromInstance(entity, out id))
+			if (generateEntityIdOnTheClient.TryGetIdFromInstance(entity, out id) == false)
 			{
 				id = generateEntityIdOnTheClient.GenerateDocumentKeyForStorage(entity);
-			}
-			else
-			{
-				id = generateEntityIdOnTheClient.GenerateDocumentKeyForStorage(entity);
-				generateEntityIdOnTheClient.TrySetIdentity(entity, id);
 			}
 			return id;
 		}
 	}
 }
-#endif

@@ -3,23 +3,26 @@
 //      Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 //  </copyright>
 // -----------------------------------------------------------------------
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
 
+using Raven.Abstractions;
 using Raven.Abstractions.Data;
+using Raven.Abstractions.Replication;
 using Raven.Abstractions.Util;
 using Raven.Client;
 using Raven.Client.Connection;
-using Raven.Client.Document;
+using Raven.Client.Connection.Async;
 using Raven.Client.Indexes;
-using Raven.Tests.Bundles.Replication;
 using Raven.Tests.Common;
+
 using Xunit;
 
-namespace Raven.Tests.Issues
+namespace Raven.SlowTests.Issues
 {
     public class RavenDB_1829 : ReplicationBase
     {
@@ -41,7 +44,8 @@ namespace Raven.Tests.Issues
                 TellFirstInstanceToReplicateToSecondInstance();
 
                 var replicationInformerForDatabase = store1.GetReplicationInformerForDatabase(store1.DefaultDatabase);
-                await replicationInformerForDatabase.UpdateReplicationInformationIfNeeded((ServerClient)store1.DatabaseCommands);
+				replicationInformerForDatabase.ClearReplicationInformationLocalCache((ServerClient)store1.DatabaseCommands);
+				replicationInformerForDatabase.RefreshReplicationInformation((ServerClient)store1.DatabaseCommands);
 
                 var people = InitializeData(store1);
                 var lastPersonId = people.Last().Id;
@@ -95,8 +99,9 @@ namespace Raven.Tests.Issues
             {
                 TellFirstInstanceToReplicateToSecondInstance();
 
-                var replicationInformerForDatabase = store1.GetReplicationInformerForDatabase(store1.DefaultDatabase);
-                await replicationInformerForDatabase.UpdateReplicationInformationIfNeeded((ServerClient)store1.DatabaseCommands);
+				var replicationInformerForDatabase = store1.GetReplicationInformerForDatabase(store1.DefaultDatabase);
+				replicationInformerForDatabase.ClearReplicationInformationLocalCache((ServerClient)store1.DatabaseCommands);
+				replicationInformerForDatabase.RefreshReplicationInformation((ServerClient)store1.DatabaseCommands);
 
                 var people = InitializeData(store1);
                 var lastPersonId = people.Last().Id;
@@ -106,7 +111,7 @@ namespace Raven.Tests.Issues
                 WaitForIndexing(store2);
 
                 var count = 0;
-                var enumerator = store1.DatabaseCommands.StreamDocs(null, "people/");
+                var enumerator = store1.DatabaseCommands.StreamDocs(fromEtag: null, startsWith: "people/");
                 while (enumerator.MoveNext())
                 {
                     count++;
@@ -115,7 +120,7 @@ namespace Raven.Tests.Issues
                 Assert.Equal(10, count);
 
                 count = 0;
-                enumerator = store2.DatabaseCommands.StreamDocs(null, "people/");
+                enumerator = store2.DatabaseCommands.StreamDocs(fromEtag: null, startsWith: "people/");
                 while (enumerator.MoveNext())
                 {
                     count++;
@@ -130,7 +135,7 @@ namespace Raven.Tests.Issues
                 var failed = false;
 
                 replicationInformerForDatabase.FailoverStatusChanged += (sender, args) => failed = true;
-                enumerator = store1.DatabaseCommands.StreamDocs(null, "people/");
+                enumerator = store1.DatabaseCommands.StreamDocs(fromEtag: null, startsWith: "people/");
                 while (enumerator.MoveNext())
                 {
                     count++;
@@ -150,7 +155,7 @@ namespace Raven.Tests.Issues
                 TellFirstInstanceToReplicateToSecondInstance();
 
                 var replicationInformerForDatabase = store1.GetReplicationInformerForDatabase(store1.DefaultDatabase);
-                await replicationInformerForDatabase.UpdateReplicationInformationIfNeeded((ServerClient)store1.DatabaseCommands);
+				await replicationInformerForDatabase.UpdateReplicationInformationIfNeeded((AsyncServerClient)store1.AsyncDatabaseCommands);
 
                 var people = InitializeData(store1);
                 var lastPersonId = people.Last().Id;
@@ -164,7 +169,7 @@ namespace Raven.Tests.Issues
                 var startEtag2 = EtagUtil.Increment(store2.DatabaseCommands.Get(firstPersonId).Etag, -1);
 
                 var count = 0;
-                var enumerator = store1.DatabaseCommands.StreamDocs(startEtag1);
+                var enumerator = store1.DatabaseCommands.StreamDocs(fromEtag: startEtag1);
                 while (enumerator.MoveNext())
                 {
                     count++;
@@ -173,7 +178,7 @@ namespace Raven.Tests.Issues
                 Assert.True(count > 0);
 
                 count = 0;
-                enumerator = store2.DatabaseCommands.StreamDocs(startEtag2);
+                enumerator = store2.DatabaseCommands.StreamDocs(fromEtag: startEtag2);
                 while (enumerator.MoveNext())
                 {
                     count++;
@@ -183,7 +188,7 @@ namespace Raven.Tests.Issues
 
                 StopDatabase(0);
 
-                var e = Assert.Throws<AggregateException>(() => store1.DatabaseCommands.StreamDocs(startEtag1));
+                var e = Assert.Throws<AggregateException>(() => store1.DatabaseCommands.StreamDocs(fromEtag: startEtag1));
                 var requestException = e.InnerException as HttpRequestException;
 
                 Assert.NotNull(requestException);

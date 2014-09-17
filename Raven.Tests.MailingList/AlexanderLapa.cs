@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 
 using Raven.Tests.Common;
+using Raven.Tests.Helpers;
 
 using Xunit;
 
@@ -161,7 +162,7 @@ namespace Raven.Tests.MailingList
 					                             .ToList();
 
 					WaitForUserToContinueTheTest(store);
-					Assert.Empty(store.DocumentDatabase.Statistics.Errors);
+					Assert.Empty(store.SystemDatabase.Statistics.Errors);
 					Assert.NotEmpty(result);
 				}
 			}

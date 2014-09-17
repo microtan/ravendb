@@ -11,15 +11,22 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         
         <link rel="shortcut icon" href="favicon.ico" />
-        <link rel="apple-touch-icon" href="~/Content/images/logo.png"/>
+        <link rel="apple-touch-icon" href="Content/images/logo.png"/>
         
-        <!--<link rel="stylesheet" href="//netdna.bootstrapcdn.com/bootstrap/3.0.3/css/bootstrap.min.css" />-->
+        <!-- Do not remove the BEGIN CSS BLOCK comment below. It is used by the optimized build to inline and minify the style sheets. -->
+        <!-- BEGIN CSS BLOCK -->
         <link rel="stylesheet" href="Content/bootstrap.css" />
-        <link rel="stylesheet" href="Content/font-awesome.min.css" />
+        <link rel="stylesheet" href="Content/bootstrap-datetimepicker.css" />
+        <link rel="stylesheet" href="Content/font-awesome.css" />
         <link rel="stylesheet" href="Content/durandal.css" />
         <link rel="stylesheet" href="Content/nprogress.css" />
+        <link rel="stylesheet" href="Content/jquery-ui-1.10.4.custom.min.css" />
+        <link rel="stylesheet" href="Content/jquery.dynatree/skin/ui.dynatree.css" />
+        <link rel="stylesheet" href="Content/jquery.dynatree/custom-skin/custom.css" />
+        <link rel="stylesheet" href="Content/nv.d3.css" />
         <link rel="stylesheet" href="Content/app.css" />
-        
+        <!-- END CSS BLOCK -->
+
         <script type="text/javascript">
             if (navigator.userAgent.match(/IEMobile\/10\.0/)) {
                 var msViewportStyle = document.createElement("style");
@@ -33,25 +40,34 @@
     <div id="applicationHost">
         <div class="splash">
             <div class="message">
-                <img src="Content/images/logo.png" />
+                <img alt="RavenDB" src="Content/images/logo.png" />
             </div>
         </div>
     </div>
 
-    <script type="text/javascript" src="Scripts/jquery-2.1.0.min.js"></script>
+    <!-- Note: do not remove the "BEGIN VENDOR SCRIPTS" comment below. It is used by the optimized build to determine which scripts to inline. -->
+    <!-- BEGIN VENDOR SCRIPTS -->
+    <script type="text/javascript" src="Scripts/jquery-2.1.0.js"></script>
     <script type="text/javascript" src="Scripts/nprogress.js"></script>
+    <script type="text/javascript" src="Scripts/knockout-3.2.0.js"></script>
+    <script type="text/javascript" src="Scripts/knockout.dirtyFlag.js"></script>
+    <script type="text/javascript" src="Scripts/knockout.mapping-2.4.1.js"></script>
+    <script type="text/javascript" src="Scripts/knockout-delegatedEvents.min.js"></script>
+    <script type="text/javascript" src="Scripts/knockout-postbox.min.js"></script>
+    <script type="text/javascript" src="Scripts/moment.min.js"></script>
+    <script type="text/javascript" src="Scripts/bootstrap.min.js"></script>
+    <script type="text/javascript" src="Scripts/bootstrap-datetimepicker.min.js"></script>
+    <script type="text/javascript" src="Scripts/bootstrap-contextmenu-2.1.js"></script>
+    <script type="text/javascript" src="Scripts/jquery-ui-1.10.4.custom.min.js"></script>
+    <script type="text/javascript" src="Scripts/jquery.dynatree.js"></script>
+    <script type="text/javascript" src="Scripts/jwerty-0.3.js"></script>
+    <script type="text/javascript" src="Scripts/jquery.fullscreen.js"></script>
+    <!-- END VENDOR SCRIPTS -->
+
     <script type="text/javascript">
         // Must pull down jQuery and nprogress before we show the progress indicator.
         NProgress.start();
     </script>
-    <script type="text/javascript" src="Scripts/knockout-3.1.0.js"></script>
-    <script type="text/javascript" src="Scripts/knockout.dirtyFlag.js"></script>
-    <script type="text/javascript" src="Scripts/knockout-delegatedEvents.min.js"></script>
-    <script type="text/javascript" src="Scripts/knockout-postbox.min.js"></script>
-    <script type="text/javascript" src="App/common/extensions.js"></script> <!--Todo: move extensions into main? 1 less file to pull down. -->
-    <script type="text/javascript" src="//netdna.bootstrapcdn.com/bootstrap/3.0.3/js/bootstrap.min.js"></script>
-    <script type="text/javascript" src="Scripts/bootstrap-contextmenu-2.1.js"></script>
-    <script type="text/javascript" src="Scripts/jwerty-0.3.js"></script>
     <script type="text/javascript" src="Scripts/require.js" data-main="App/main"></script>
 
 </body>

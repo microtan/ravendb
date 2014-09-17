@@ -26,6 +26,7 @@ using Raven.Database.Server;
 using Raven.Json.Linq;
 using Raven.Server;
 using Raven.Tests.Common.Util;
+using Raven.Tests.Helpers.Util;
 
 using Xunit;
 
@@ -122,9 +123,11 @@ namespace Raven.Tests.Common
                 RunInUnreliableYetFastModeThatIsNotSuitableForProduction = true,
 				RunInMemory = previousServer.SystemDatabase.Configuration.RunInMemory,
 				Port = previousServer.SystemDatabase.Configuration.Port,
-                UseFips = SettingsHelper.UseFipsEncryptionAlgorithms,
                 DefaultStorageTypeName = GetDefaultStorageType()
             };
+
+	        serverConfiguration.Encryption.UseFips = SettingsHelper.UseFipsEncryptionAlgorithms;
+
 			ModifyConfiguration(serverConfiguration);
 
             serverConfiguration.PostInit();
@@ -171,7 +174,8 @@ namespace Raven.Tests.Common
 			string db = null,
 			string username = null,
 			string password = null,
-			string domain = null)
+			string domain = null,
+			ReplicationClientConfiguration clientConfiguration = null)
         {
             db = db ?? (destination is DocumentStore ? ((DocumentStore)destination).DefaultDatabase : null);
 
@@ -202,7 +206,9 @@ namespace Raven.Tests.Common
 	            Console.WriteLine("writing rep dests for " + db + " " + source.Url);
                 session.Store(new ReplicationDocument
                 {
-                    Destinations = { replicationDestination }
+                    Destinations = { replicationDestination },
+					ClientConfiguration = clientConfiguration
+
                 }, "Raven/Replication/Destinations");
 	            session.SaveChanges();
             }
@@ -332,7 +338,7 @@ namespace Raven.Tests.Common
             return attachment;
         }
 
-        protected void WaitForDocument(IDatabaseCommands commands, string expectedId)
+        protected override void WaitForDocument(IDatabaseCommands commands, string expectedId)
         {
             for (int i = 0; i < RetriesCount; i++)
             {

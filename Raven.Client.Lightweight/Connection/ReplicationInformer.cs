@@ -13,6 +13,7 @@ using Raven.Abstractions.Extensions;
 using Raven.Abstractions.Logging;
 using Raven.Abstractions.Replication;
 using Raven.Abstractions.Util;
+using Raven.Client.Connection.Async;
 using Raven.Client.Document;
 using Raven.Client.Extensions;
 using Raven.Json.Linq;
@@ -21,9 +22,8 @@ namespace Raven.Client.Connection
 {
 	public class ReplicationInformer : ReplicationInformerBase<ServerClient>, IDocumentStoreReplicationInformer
 	{
-        private const string RavenReplicationDestinations = "Raven/Replication/Destinations";
-
-        public ReplicationInformer(Convention conventions) : base(conventions)
+        public ReplicationInformer(Convention conventions, HttpJsonRequestFactory jsonRequestFactory)
+            : base(conventions, jsonRequestFactory)
         {
         }
 
@@ -32,49 +32,60 @@ namespace Raven.Client.Connection
         /// </summary>
         public ReplicationDestination[] FailoverServers { get; set; }
 
-        public override Task UpdateReplicationInformationIfNeeded(ServerClient serverClient)
-        {
-            if (conventions.FailoverBehavior == FailoverBehavior.FailImmediately)
-                return new CompletedTask();
+		public Task UpdateReplicationInformationIfNeeded(AsyncServerClient serverClient)
+		{
+			return UpdateReplicationInformationIfNeededInternal(serverClient.Url, key => serverClient.DirectGetAsync(new OperationMetadata(serverClient.Url, serverClient.PrimaryCredentials), key).ResultUnwrap());
+		}
 
-            if (lastReplicationUpdate.AddMinutes(5) > SystemTime.UtcNow)
-                return new CompletedTask();
+		private Task UpdateReplicationInformationIfNeededInternal(string url, Func<string, JsonDocument> getDocument)
+		{
+			if (conventions.FailoverBehavior == FailoverBehavior.FailImmediately)
+				return new CompletedTask();
 
-            lock (replicationLock)
-            {
-                if (firstTime)
-                {
-                    var serverHash = ServerHash.GetServerHash(serverClient.Url);
+			if (lastReplicationUpdate.AddMinutes(5) > SystemTime.UtcNow)
+				return new CompletedTask();
 
-                    var document = ReplicationInformerLocalCache.TryLoadReplicationInformationFromLocalCache(serverHash);
-                    if (IsInvalidDestinationsDocument(document) == false)
-                    {
-                        UpdateReplicationInformationFromDocument(document);
-                    }
-                }
+			lock (replicationLock)
+			{
+				if (firstTime)
+				{
+					var serverHash = ServerHash.GetServerHash(url);
 
-                firstTime = false;
+					var document = ReplicationInformerLocalCache.TryLoadReplicationInformationFromLocalCache(serverHash);
+					if (IsInvalidDestinationsDocument(document) == false)
+					{
+						UpdateReplicationInformationFromDocument(document);
+					}
+				}
 
-                if (lastReplicationUpdate.AddMinutes(5) > SystemTime.UtcNow)
-                    return new CompletedTask();
+				firstTime = false;
 
-                var taskCopy = refreshReplicationInformationTask;
-                if (taskCopy != null)
-                    return taskCopy;
+				if (lastReplicationUpdate.AddMinutes(5) > SystemTime.UtcNow)
+					return new CompletedTask();
 
-                return refreshReplicationInformationTask = Task.Factory.StartNew(() => RefreshReplicationInformation(serverClient))
-                    .ContinueWith(task =>
-                    {
-                        if (task.Exception != null)
-                        {
-                            log.ErrorException("Failed to refresh replication information", task.Exception);
-                        }
-                        refreshReplicationInformationTask = null;
-                    });
-            }
-        }
+				var taskCopy = refreshReplicationInformationTask;
+				if (taskCopy != null)
+					return taskCopy;
 
-        protected override void UpdateReplicationInformationFromDocument(JsonDocument document)
+				return refreshReplicationInformationTask = Task.Factory.StartNew(() => RefreshReplicationInformationInternal(url, getDocument))
+					.ContinueWith(task =>
+					{
+						if (task.Exception != null)
+						{
+							log.ErrorException("Failed to refresh replication information", task.Exception);
+						}
+						refreshReplicationInformationTask = null;
+					});
+			}
+		}
+
+		public override void ClearReplicationInformationLocalCache(ServerClient client)
+		{
+			var serverHash = ServerHash.GetServerHash(client.Url);
+			ReplicationInformerLocalCache.ClearReplicationInformationFromLocalCache(serverHash);
+		}
+
+		protected override void UpdateReplicationInformationFromDocument(JsonDocument document)
         {
             var replicationDocument = document.DataAsJson.JsonDeserialization<ReplicationDocument>();
             ReplicationDestinations = replicationDocument.Destinations.Select(x =>
@@ -103,60 +114,80 @@ namespace Raven.Client.Connection
                     continue;
                 failureCounts[replicationDestination.Url] = new FailureCounter();
             }
+
+			if (replicationDocument.ClientConfiguration != null)
+				conventions.UpdateFrom(replicationDocument.ClientConfiguration);
         }
 
-        public override void RefreshReplicationInformation(ServerClient commands)
+	    protected override string GetServerCheckUrl(string baseUrl)
+	    {
+	        return baseUrl.Doc(Constants.RavenReplicationDestinations) + "?check-server-reachable";
+	    }
+
+	    public void RefreshReplicationInformation(AsyncServerClient serverClient)
+		{
+			RefreshReplicationInformationInternal(serverClient.Url, key => serverClient.DirectGetAsync(new OperationMetadata(serverClient.Url, serverClient.PrimaryCredentials), key).ResultUnwrap());
+		}
+
+        public override void RefreshReplicationInformation(ServerClient serverClient)
         {
-            lock (this)
-            {
-                var serverHash = ServerHash.GetServerHash(commands.Url);
-
-                JsonDocument document;
-                var fromFailoverUrls = false;
-
-                try
-                {
-                    document = commands.DirectGet(new OperationMetadata(commands.Url, commands.PrimaryCredentials), RavenReplicationDestinations);
-                    failureCounts[commands.Url] = new FailureCounter(); // we just hit the master, so we can reset its failure count
-                }
-                catch (Exception e)
-                {
-                    log.ErrorException("Could not contact master for new replication information", e);
-                    document = ReplicationInformerLocalCache.TryLoadReplicationInformationFromLocalCache(serverHash);
-
-                    if (document == null)
-                    {
-                        if (FailoverServers != null && FailoverServers.Length > 0) // try to use configured failover servers
-                        {
-                            var failoverServers = new ReplicationDocument { Destinations = new List<ReplicationDestination>() };
-
-                            foreach (var failover in FailoverServers)
-                            {
-                                failoverServers.Destinations.Add(failover);
-                            }
-
-                            document = new JsonDocument();
-                            document.DataAsJson = RavenJObject.FromObject(failoverServers);
-
-                            fromFailoverUrls = true;
-                        }
-                    }
-                }
-
-
-                if (document == null)
-                {
-                    lastReplicationUpdate = SystemTime.UtcNow; // checked and not found
-                    return;
-                }
-
-                if (!fromFailoverUrls)
-                    ReplicationInformerLocalCache.TrySavingReplicationInformationToLocalCache(serverHash, document);
-
-                UpdateReplicationInformationFromDocument(document);
-
-                lastReplicationUpdate = SystemTime.UtcNow;
-            }
+            RefreshReplicationInformationInternal(serverClient.Url, key => serverClient.DirectGet(new OperationMetadata(serverClient.Url, serverClient.PrimaryCredentials), key));
         }
+
+		private void RefreshReplicationInformationInternal(string url, Func<string, JsonDocument> getDocument)
+		{
+			lock (this)
+			{
+				var serverHash = ServerHash.GetServerHash(url);
+
+				JsonDocument document;
+				var fromFailoverUrls = false;
+
+				try
+				{
+					document = getDocument(Constants.RavenReplicationDestinations);
+					failureCounts[url] = new FailureCounter(); // we just hit the master, so we can reset its failure count
+				}
+				catch (Exception e)
+				{
+					log.ErrorException("Could not contact master for new replication information", e);
+					document = ReplicationInformerLocalCache.TryLoadReplicationInformationFromLocalCache(serverHash);
+
+					if (document == null)
+					{
+						if (FailoverServers != null && FailoverServers.Length > 0) // try to use configured failover servers
+						{
+							var failoverServers = new ReplicationDocument { Destinations = new List<ReplicationDestination>() };
+
+							foreach (var failover in FailoverServers)
+							{
+								failoverServers.Destinations.Add(failover);
+							}
+
+							document = new JsonDocument
+							           {
+								           DataAsJson = RavenJObject.FromObject(failoverServers)
+							           };
+
+							fromFailoverUrls = true;
+						}
+					}
+				}
+
+
+				if (document == null)
+				{
+					lastReplicationUpdate = SystemTime.UtcNow; // checked and not found
+					return;
+				}
+
+				if (!fromFailoverUrls)
+					ReplicationInformerLocalCache.TrySavingReplicationInformationToLocalCache(serverHash, document);
+
+				UpdateReplicationInformationFromDocument(document);
+
+				lastReplicationUpdate = SystemTime.UtcNow;
+			}
+		}
     }
 }

@@ -146,7 +146,7 @@ namespace Raven.Json.Linq
 		/// </summary>
 		/// <param name="value">The value.</param>
 		public RavenJValue(Guid value)
-			: this(value, JTokenType.String)
+			: this(value, JTokenType.Guid)
 		{
 		}
 
@@ -181,10 +181,8 @@ namespace Raven.Json.Linq
 		{
 			if (value == null)
 				return JTokenType.Null;
-#if !NETFX_CORE
 			else if (value == DBNull.Value)
 				return JTokenType.Null;
-#endif
 			else if (value is string)
 				return GetStringValueType(current);
 			else if (value is long || value is int || value is short || value is sbyte
@@ -575,7 +573,7 @@ namespace Raven.Json.Linq
 			return d1.CompareTo(d2);
 		}
 
-		internal override bool DeepEquals(RavenJToken node)
+        internal override bool DeepEquals(RavenJToken node)
 		{
 			if (Type == JTokenType.Null && node == null)
 				return true;

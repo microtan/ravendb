@@ -24,7 +24,7 @@ namespace Raven.Tests.Issues
 			public string Name { get; set; }
 		}
 
-		public class ProductWithQueryInput : AbstractTransformerCreationTask<Product>
+		public class ProductWithTransformerParameters : AbstractTransformerCreationTask<Product>
 		{
 			public class Result
 			{
@@ -32,14 +32,14 @@ namespace Raven.Tests.Issues
 				public string ProductName { get; set; }
 				public string Input { get; set; }
 			}
-			public ProductWithQueryInput()
+			public ProductWithTransformerParameters()
 			{
 				TransformResults = docs => from product in docs
 										   select new
 										   {
 											   ProductId = product.Id,
 											   ProductName = product.Name,
-											   Input = Query("input")
+											   Input = Parameter("input")
 										   };
 			}
 		}
@@ -53,40 +53,42 @@ namespace Raven.Tests.Issues
 			{
 				using (var documentStore = NewRemoteDocumentStore())
 				{
-					new ProductWithQueryInput().Execute(documentStore);
+					new ProductWithTransformerParameters().Execute(documentStore);
 
 					var smugglerApi = new SmugglerApi();
 
-					smugglerApi.ExportData(new SmugglerExportOptions
-					{
-						ToFile = file,
-						From = new RavenConnectionStringOptions
+					smugglerApi.ExportData(
+						new SmugglerExportOptions
 						{
-							Url = documentStore.Url,
-							DefaultDatabase = documentStore.DefaultDatabase
-						}
-					}, new SmugglerOptions()).Wait(TimeSpan.FromSeconds(15));
+							ToFile = file,
+							From = new RavenConnectionStringOptions
+							{
+								Url = documentStore.Url,
+								DefaultDatabase = documentStore.DefaultDatabase
+							}
+						}).Wait(TimeSpan.FromSeconds(15));
 				}
 
 				using (var documentStore = NewRemoteDocumentStore())
 				{
 					var smugglerApi = new SmugglerApi();
 
-					smugglerApi.ImportData(new SmugglerImportOptions
-					{
-						FromFile = file,
-						To = new RavenConnectionStringOptions
+					smugglerApi.ImportData(
+						new SmugglerImportOptions
 						{
-							Url = documentStore.Url,
-							DefaultDatabase = documentStore.DefaultDatabase
-						}
-					}, new SmugglerOptions()).Wait(TimeSpan.FromSeconds(15));
+							FromFile = file,
+							To = new RavenConnectionStringOptions
+							{
+								Url = documentStore.Url,
+								DefaultDatabase = documentStore.DefaultDatabase
+							}
+						}).Wait(TimeSpan.FromSeconds(15));
 
 					var transformers = documentStore.DatabaseCommands.GetTransformers(0, 128);
 
 					Assert.NotNull(transformers);
 					Assert.Equal(1, transformers.Length);
-					Assert.Equal("ProductWithQueryInput", transformers[0].Name);
+					Assert.Equal("ProductWithTransformerParameters", transformers[0].Name);
 				}
 			}
 			finally

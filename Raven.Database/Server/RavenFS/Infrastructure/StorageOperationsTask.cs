@@ -8,7 +8,7 @@ using System.Reactive.Linq;
 using System.Threading.Tasks;
 using Microsoft.Isam.Esent.Interop;
 using NLog;
-using Raven.Client.RavenFS;
+using Raven.Abstractions.Extensions;
 using Raven.Database.Server.RavenFS.Extensions;
 using Raven.Database.Server.RavenFS.Notifications;
 using Raven.Database.Server.RavenFS.Search;
@@ -17,6 +17,9 @@ using Raven.Database.Server.RavenFS.Storage.Esent;
 using Raven.Database.Server.RavenFS.Storage.Exceptions;
 using Raven.Database.Server.RavenFS.Synchronization;
 using Raven.Database.Server.RavenFS.Util;
+using Raven.Json.Linq;
+using Raven.Abstractions.FileSystem.Notifications;
+using Raven.Abstractions.FileSystem;
 
 namespace Raven.Database.Server.RavenFS.Infrastructure
 {
@@ -31,7 +34,7 @@ namespace Raven.Database.Server.RavenFS.Infrastructure
 		private readonly IndexStorage search;
 		private readonly ITransactionalStorage storage;
 		private readonly IObservable<long> timer = Observable.Interval(TimeSpan.FromMinutes(15));
-		private readonly ConcurrentDictionary<string, FileHeader> uploadingFiles = new ConcurrentDictionary<string, FileHeader>();
+        private readonly ConcurrentDictionary<string, FileHeader> uploadingFiles = new ConcurrentDictionary<string, FileHeader>();
 
 		public StorageOperationsTask(ITransactionalStorage storage, IndexStorage search, INotificationPublisher notificationPublisher)
 		{
@@ -54,7 +57,7 @@ namespace Raven.Database.Server.RavenFS.Infrastructure
 		public void RenameFile(RenameFileOperation operation)
 		{
 			var configName = RavenFileNameHelper.RenameOperationConfigNameForFile(operation.Name);
-			notificationPublisher.Publish(new FileChange
+			notificationPublisher.Publish(new FileChangeNotification
 			{
 				File = FilePathTools.Cannoicalise(operation.Name),
 				Action = FileChangeAction.Renaming
@@ -68,26 +71,25 @@ namespace Raven.Database.Server.RavenFS.Infrastructure
 					previousRenameTombstone.Metadata[SynchronizationConstants.RavenDeleteMarker] != null)
 				{
 					// if there is a tombstone delete it
-					accessor.Delete(previousRenameTombstone.Name);
+                    accessor.Delete(previousRenameTombstone.FullPath);
 				}
 
-				accessor.RenameFile(operation.Name, operation.Rename, true);
-				accessor.UpdateFileMetadata(operation.Rename, operation.MetadataAfterOperation);
+                accessor.RenameFile(operation.Name, operation.Rename, true);
+                accessor.UpdateFileMetadata(operation.Rename, operation.MetadataAfterOperation);
 
-				// copy renaming file metadata and set special markers
-				var tombstoneMetadata =
-					new NameValueCollection(operation.MetadataAfterOperation).WithRenameMarkers(operation.Rename);
+                // copy renaming file metadata and set special markers
+                var tombstoneMetadata = new RavenJObject(operation.MetadataAfterOperation).WithRenameMarkers(operation.Rename);
 
-				accessor.PutFile(operation.Name, 0, tombstoneMetadata, true); // put rename tombstone
+                accessor.PutFile(operation.Name, 0, tombstoneMetadata, true); // put rename tombstone
 
-				accessor.DeleteConfig(configName);
+                accessor.DeleteConfig(configName);
 
-				search.Delete(operation.Name);
-				search.Index(operation.Rename, operation.MetadataAfterOperation);
+                search.Delete(operation.Name);
+                search.Index(operation.Rename, operation.MetadataAfterOperation);
 			});
 
-			notificationPublisher.Publish(new ConfigChange { Name = configName, Action = ConfigChangeAction.Set });
-			notificationPublisher.Publish(new FileChange
+			notificationPublisher.Publish(new ConfigurationChangeNotification { Name = configName, Action = ConfigurationChangeAction.Set });
+			notificationPublisher.Publish(new FileChangeNotification
 			{
 				File = FilePathTools.Cannoicalise(operation.Rename),
 				Action = FileChangeAction.Renamed
@@ -118,11 +120,11 @@ namespace Raven.Database.Server.RavenFS.Infrastructure
 					return;
 				}
 
-				var metadata = new NameValueCollection(existingFileHeader.Metadata).WithDeleteMarker();
-
+                var metadata = new RavenJObject(existingFileHeader.Metadata).WithDeleteMarker();
+                
 				var renameSucceeded = false;
 
-				var deleteVersion = 0;
+				int deleteVersion = 0;
 
 				do
 				{
@@ -147,26 +149,23 @@ namespace Raven.Database.Server.RavenFS.Infrastructure
 					}
 				} while (!renameSucceeded && deleteVersion < 128);
 
-				if (renameSucceeded)
-				{
-					accessor.UpdateFileMetadata(deletingFileName, metadata);
-					accessor.DecrementFileCount(deletingFileName);
+                if (renameSucceeded)
+                {
+                    accessor.UpdateFileMetadata(deletingFileName, metadata);
+                    accessor.DecrementFileCount(deletingFileName);
 
-					Log.Debug(string.Format("File '{0}' was renamed to '{1}' and marked as deleted",
-											fileName, deletingFileName));
+                    Log.Debug(string.Format("File '{0}' was renamed to '{1}' and marked as deleted", fileName, deletingFileName));
 
-					var configName = RavenFileNameHelper.DeleteOperationConfigNameForFile(deletingFileName);
-					accessor.SetConfig(configName,
-									   new DeleteFileOperation { OriginalFileName = fileName, CurrentFileName = deletingFileName }.
-										   AsConfig());
+                    var configName = RavenFileNameHelper.DeleteOperationConfigNameForFile(deletingFileName);
+                    var operation = new DeleteFileOperation { OriginalFileName = fileName, CurrentFileName = deletingFileName };
+                    accessor.SetConfig(configName, JsonExtensions.ToJObject(operation));
 
-					notificationPublisher.Publish(new ConfigChange { Name = configName, Action = ConfigChangeAction.Set });
-				}
-				else
-				{
-					Log.Warn("Could not rename a file '{0}' when a delete operation was performed",
-							 fileName);
-				}
+                    notificationPublisher.Publish(new ConfigurationChangeNotification { Name = configName, Action = ConfigurationChangeAction.Set });
+                }
+                else
+                {
+                    Log.Warn("Could not rename a file '{0}' when a delete operation was performed", fileName);
+                }
 			});
 
 			if (fileExists)
@@ -180,11 +179,9 @@ namespace Raven.Database.Server.RavenFS.Infrastructure
 		{
 			var filesToDelete = new List<DeleteFileOperation>();
 
-			storage.Batch(
-				accessor =>
-				filesToDelete =
-				accessor.GetConfigsStartWithPrefix(RavenFileNameHelper.DeleteOperationConfigPrefix, 0, 10).Select(
-					config => config.AsObject<DeleteFileOperation>()).ToList());
+			storage.Batch(accessor => filesToDelete = accessor.GetConfigsStartWithPrefix(RavenFileNameHelper.DeleteOperationConfigPrefix, 0, 10)
+                                                              .Select(config => config.JsonDeserialization<DeleteFileOperation>())
+                                                              .ToList());
 
 			if(filesToDelete.Count == 0)
 				return Task.FromResult<object>(null);
@@ -227,10 +224,10 @@ namespace Raven.Database.Server.RavenFS.Infrastructure
 
 					storage.Batch(accessor => accessor.DeleteConfig(configName));
 
-					notificationPublisher.Publish(new ConfigChange
+					notificationPublisher.Publish(new ConfigurationChangeNotification
 					{
 						Name = configName,
-						Action = ConfigChangeAction.Delete
+						Action = ConfigurationChangeAction.Delete
 					});
 
 					Log.Debug("File '{0}' was deleted from storage", deletingFileName);
@@ -248,13 +245,11 @@ namespace Raven.Database.Server.RavenFS.Infrastructure
 		{
 			var filesToRename = new List<RenameFileOperation>();
 
-			storage.Batch(
-				accessor =>
+			storage.Batch(accessor =>
 				{
-					var renameOpConfigs =
-						accessor.GetConfigsStartWithPrefix(RavenFileNameHelper.RenameOperationConfigPrefix, 0, 10);
+					var renameOpConfigs = accessor.GetConfigsStartWithPrefix(RavenFileNameHelper.RenameOperationConfigPrefix, 0, 10);
 
-					filesToRename = renameOpConfigs.Select(config => config.AsObject<RenameFileOperation>()).ToList();
+                    filesToRename = renameOpConfigs.Select(config => config.JsonDeserialization<RenameFileOperation>()).ToList();
 				});
 
 			if (filesToRename.Count == 0)
@@ -298,9 +293,7 @@ namespace Raven.Database.Server.RavenFS.Infrastructure
 
 		private static string SynchronizedFileName(string originalFileName)
 		{
-			return originalFileName.Substring(0,
-											  originalFileName.IndexOf(RavenFileNameHelper.DownloadingFileSuffix,
-																	   StringComparison.InvariantCulture));
+			return originalFileName.Substring(0, originalFileName.IndexOf(RavenFileNameHelper.DownloadingFileSuffix, StringComparison.InvariantCulture));
 		}
 
 		private bool IsSynchronizationInProgress(string originalFileName)
@@ -319,18 +312,18 @@ namespace Raven.Database.Server.RavenFS.Infrastructure
 			{
 				if (deletedFile.IsFileBeingUploadedOrUploadHasBeenBroken()) // and might be uploading at the moment
 				{
-					if (!uploadingFiles.ContainsKey(deletedFile.Name))
+                    if (!uploadingFiles.ContainsKey(deletedFile.FullPath))
 					{
-						uploadingFiles.TryAdd(deletedFile.Name, deletedFile);
+                        uploadingFiles.TryAdd(deletedFile.FullPath, deletedFile);
 						return true; // first attempt to delete a file, prevent this time
 					}
-					var uploadingFile = uploadingFiles[deletedFile.Name];
+                    var uploadingFile = uploadingFiles[deletedFile.FullPath];
 					if (uploadingFile != null && uploadingFile.UploadedSize != deletedFile.UploadedSize)
 					{
 						return true; // if uploaded size changed it means that file is being uploading
 					}
 					FileHeader header;
-					uploadingFiles.TryRemove(deletedFile.Name, out header);
+                    uploadingFiles.TryRemove(deletedFile.FullPath, out header);
 				}
 			}
 			return false;

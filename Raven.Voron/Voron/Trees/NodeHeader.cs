@@ -1,12 +1,12 @@
 ﻿using System;
-using System.IO;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Voron.Impl;
 
 namespace Voron.Trees
 {
 	[StructLayout(LayoutKind.Explicit, Pack = 1)]
-	public struct  NodeHeader
+	public unsafe struct  NodeHeader
 	{
 		[FieldOffset(0)]
 		public int DataSize;
@@ -29,18 +29,31 @@ namespace Voron.Trees
 				  (Flags == (NodeFlags.PageRef) ? 0 : DataSize);
 		}
 
-
-        public unsafe static ValueReader Reader(Transaction tx, NodeHeader* node)
+		public static byte* DirectAccess(Transaction tx, NodeHeader* node)
 		{
 			if (node->Flags == (NodeFlags.PageRef))
 			{
 				var overFlowPage = tx.GetReadOnlyPage(node->PageNumber);
+				return overFlowPage.Base + Constants.PageHeaderSize;
+			}
+			return (byte*) node + node->KeySize + Constants.NodeHeaderSize;
+		}
+
+        public static ValueReader Reader(Transaction tx, NodeHeader* node)
+		{
+			if (node->Flags == (NodeFlags.PageRef))
+			{
+				var overFlowPage = tx.GetReadOnlyPage(node->PageNumber);
+
+				Debug.Assert(overFlowPage.IsOverflow, "Requested oveflow page but got " + overFlowPage.Flags);
+				Debug.Assert(overFlowPage.OverflowSize > 0, "Overflow page cannot be size equal 0 bytes");
+
                 return new ValueReader(overFlowPage.Base + Constants.PageHeaderSize, overFlowPage.OverflowSize);
 			}
             return new ValueReader((byte*)node + node->KeySize + Constants.NodeHeaderSize, node->DataSize);
 		}
 
-	    public unsafe static Slice GetData(Transaction tx, NodeHeader* node)
+	    public static Slice GetData(Transaction tx, NodeHeader* node)
 	    {
             if (node->Flags == (NodeFlags.PageRef))
             {
@@ -53,17 +66,17 @@ namespace Voron.Trees
 	    }
 
 
-        public unsafe static void CopyTo(Transaction tx, NodeHeader* node, byte* dest)
+        public static void CopyTo(Transaction tx, NodeHeader* node, byte* dest)
         {
             if (node->Flags == (NodeFlags.PageRef))
             {
                 var overFlowPage = tx.GetReadOnlyPage(node->PageNumber);
-                NativeMethods.memcpy(dest, overFlowPage.Base + Constants.PageHeaderSize, overFlowPage.OverflowSize);
+                StdLib.memcpy(dest, overFlowPage.Base + Constants.PageHeaderSize, overFlowPage.OverflowSize);
             }
-            NativeMethods.memcpy(dest, (byte*)node + node->KeySize + Constants.NodeHeaderSize, node->DataSize);
+			StdLib.memcpy(dest, (byte*)node + node->KeySize + Constants.NodeHeaderSize, node->DataSize);
         }
 
-		public unsafe static int GetDataSize(Transaction tx, NodeHeader* node)
+		public static int GetDataSize(Transaction tx, NodeHeader* node)
 		{
 			if (node->Flags == (NodeFlags.PageRef))
 			{

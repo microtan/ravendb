@@ -1,11 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
+using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Threading.Tasks;
 using System.Web.Http;
+using Mono.CSharp;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Extensions;
 using Raven.Abstractions.Logging;
@@ -15,14 +18,18 @@ using Raven.Bundles.Replication.Plugins;
 using Raven.Bundles.Replication.Responders;
 using Raven.Bundles.Replication.Tasks;
 using Raven.Database.Bundles.Replication.Plugins;
+using Raven.Database.Bundles.Replication.Utils;
 using Raven.Database.Server.Controllers;
 using Raven.Database.Storage;
+using Raven.Database.Util;
 using Raven.Json.Linq;
 
 namespace Raven.Database.Bundles.Replication.Controllers
 {
 	public class ReplicationController : BundlesApiController
 	{
+		private static readonly ILog log = LogManager.GetCurrentClassLogger();
+
 		public override string BundleName
 		{
 			get { return "replication"; }
@@ -55,6 +62,9 @@ namespace Raven.Database.Bundles.Replication.Controllers
 					case StraightforwardConflictResolution.ResolveToRemote:
 						withConfiguredResolvers.Add(RemoteDocumentReplicationConflictResolver.Instance);
 						break;
+					case StraightforwardConflictResolution.ResolveToLatest:
+						withConfiguredResolvers.Add(LatestDocumentReplicationConflictResolver.Instance);
+						break;
 					default:
 						throw new ArgumentOutOfRangeException("config.DocumentConflictResolution");
 				}
@@ -63,6 +73,17 @@ namespace Raven.Database.Bundles.Replication.Controllers
 			}
 		}
 
+		[HttpGet]
+		[Route("replication/topology")]
+		[Route("databases/{databaseName}/replication/topology")]
+		public HttpResponseMessage TopologyGet()
+		{
+			var documentsController = new DocumentsController();
+			documentsController.InitializeFrom(this);
+			return documentsController.DocGet(Constants.RavenReplicationDestinations);
+		}
+
+		[Obsolete("Use RavenFS instead.")]
 		public IEnumerable<AbstractAttachmentReplicationConflictResolver> AttachmentReplicationConflictResolvers
 		{
 			get
@@ -83,6 +104,9 @@ namespace Raven.Database.Bundles.Replication.Controllers
 						break;
 					case StraightforwardConflictResolution.ResolveToRemote:
 						withConfiguredResolvers.Add(RemoteAttachmentReplicationConflictResolver.Instance);
+						break;
+					case StraightforwardConflictResolution.ResolveToLatest:
+						// ignore this resolver for attachments
 						break;
 					default:
 						throw new ArgumentOutOfRangeException("config.AttachmentConflictResolution");
@@ -162,6 +186,7 @@ namespace Raven.Database.Bundles.Replication.Controllers
 		[HttpPost]
 		[Route("replication/replicateAttachments")]
 		[Route("databases/{databaseName}/replication/replicateAttachments")]
+        [Obsolete("Use RavenFS instead.")]
 		public async Task<HttpResponseMessage> AttachmentReplicatePost()
 		{
 			var src = GetQueryStringValue("from");
@@ -229,22 +254,7 @@ namespace Raven.Database.Bundles.Replication.Controllers
 		[Route("databases/{databaseName}/replication/info")]
 		public HttpResponseMessage ReplicationInfoGet()
 		{
-			var mostRecentDocumentEtag = Etag.Empty;
-			var mostRecentAttachmentEtag = Etag.Empty;
-			Database.TransactionalStorage.Batch(accessor =>
-			{
-				mostRecentDocumentEtag = accessor.Staleness.GetMostRecentDocumentEtag();
-				mostRecentAttachmentEtag = accessor.Staleness.GetMostRecentAttachmentEtag();
-			});
-
-			var replicationTask = Database.StartupTasks.OfType<ReplicationTask>().FirstOrDefault();
-			var replicationStatistics = new ReplicationStatistics
-			{
-				Self = Database.ServerUrl,
-				MostRecentDocumentEtag = mostRecentDocumentEtag,
-				MostRecentAttachmentEtag = mostRecentAttachmentEtag,
-				Stats = replicationTask == null ? new List<DestinationStats>() : replicationTask.DestinationStats.Values.ToList()
-			};
+		    var replicationStatistics = ReplicationUtils.GetReplicationInformation(Database);
 			return GetMessageWithObject(replicationStatistics);
 		}
 
@@ -347,10 +357,9 @@ namespace Raven.Database.Bundles.Replication.Controllers
 				var metadata = document == null ? new RavenJObject() : document.Metadata;
 
 				var newDoc = RavenJObject.FromObject(sourceReplicationInformation);
-				//TODO: log
-				//log.Debug("Updating replication last etags from {0}: [doc: {1} attachment: {2}]", src,
-				//				  sourceReplicationInformation.LastDocumentEtag,
-				//				  sourceReplicationInformation.LastAttachmentEtag);
+				log.Debug("Updating replication last etags from {0}: [doc: {1} attachment: {2}]", src,
+								  sourceReplicationInformation.LastDocumentEtag,
+								  sourceReplicationInformation.LastAttachmentEtag);
 
 				Database.Documents.Put(Constants.RavenReplicationSourcesBasePath + "/" + src, etag, newDoc, metadata, null);
 			}
@@ -409,6 +418,7 @@ namespace Raven.Database.Bundles.Replication.Controllers
 			}.Replicate(id, metadata, document);
 		}
 
+        [Obsolete("Use RavenFS instead.")]
 		private void ReplicateAttachment(IStorageActionsAccessor actions, string id, RavenJObject metadata, byte[] data, string src)
 		{
 			new AttachmentReplicationBehavior

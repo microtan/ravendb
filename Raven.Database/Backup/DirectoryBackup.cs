@@ -13,7 +13,6 @@ using Raven.Abstractions.Data;
 using Raven.Abstractions.Logging;
 using Directory = System.IO.Directory;
 using Raven.Database.Extensions;
-using System.Linq;
 
 namespace Raven.Database.Backup
 {
@@ -27,7 +26,7 @@ namespace Raven.Database.Backup
 
 		public const int MoveFileDelayUntilReboot = 0x4;
 
-		public event Action<string, BackupStatus.BackupMessageSeverity> Notify = delegate { };
+		public event Action<string, string, BackupStatus.BackupMessageSeverity> Notify = delegate { };
 
 		private readonly Dictionary<string, long> fileToSize = new Dictionary<string, long>();
 		private static readonly ILog logger = LogManager.GetCurrentClassLogger();
@@ -72,10 +71,10 @@ namespace Raven.Database.Backup
 
 			foreach (var file in Directory.EnumerateFiles(tempPath))
 			{
-				Notify("Copying " + Path.GetFileName(file), BackupStatus.BackupMessageSeverity.Informational);
+				Notify("Copying " + Path.GetFileName(file), null, BackupStatus.BackupMessageSeverity.Informational);
 				var fullName = new FileInfo(file).FullName;
 				FileCopy(file, Path.Combine(destination, Path.GetFileName(file)), fileToSize[fullName], progressNotifier);
-				Notify("Copied " + Path.GetFileName(file), BackupStatus.BackupMessageSeverity.Informational);
+				Notify("Copied " + Path.GetFileName(file), null, BackupStatus.BackupMessageSeverity.Informational);
 			}
 
 			try
@@ -142,7 +141,7 @@ namespace Raven.Database.Backup
 				if (success == false)
 				{
 					// 'The system cannot find the file specified' is explicitly ignored here
-					if (Marshal.GetLastWin32Error() != 0x80004005)
+					if (Marshal.GetLastWin32Error() != 2)
 						throw new Win32Exception();
 					sourceFilesSnapshot[index] = null;
 					continue;
@@ -167,7 +166,7 @@ namespace Raven.Database.Backup
 			{
 				if (sourceFile == null)
 					continue;
-				Notify("Hard linked " + sourceFile, BackupStatus.BackupMessageSeverity.Informational);
+				Notify("Hard linked " + sourceFile, null, BackupStatus.BackupMessageSeverity.Informational);
 			}
 
 			return fileToSize.Sum(f => f.Value);

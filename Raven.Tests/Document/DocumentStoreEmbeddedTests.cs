@@ -6,6 +6,7 @@
 using System;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Transactions;
 using Raven.Abstractions.Commands;
 using Raven.Abstractions.Data;
@@ -46,7 +47,7 @@ namespace Raven.Tests.Document
 		[Fact]
 		public void CanResetBuiltinIndex()
 		{
-			documentStore.DocumentDatabase.Indexes.ResetIndex("Raven/DocumentsByEntityName");
+			documentStore.SystemDatabase.Indexes.ResetIndex("Raven/DocumentsByEntityName");
 		}
 
 		[Fact]
@@ -126,6 +127,31 @@ namespace Raven.Tests.Document
 		}
 
 		[Fact]
+		public async Task CanRefreshEntityFromDatabaseAsync()
+		{
+			var company = new Company { Name = "Company Name" };
+			using (var session = documentStore.OpenAsyncSession())
+			{
+				await session.StoreAsync(company);
+				await session.SaveChangesAsync();
+
+				using (var session2 = documentStore.OpenSession())
+				{
+					var company2 = session2.Load<Company>(company.Id);
+					company2.Name = "Hibernating Rhinos";
+					session2.Store(company2);
+					session2.SaveChanges();
+				}
+
+				var old = session.Advanced.GetEtagFor(company);
+				await session.Advanced.RefreshAsync(company);
+				Assert.NotEqual(old, session.Advanced.GetEtagFor(company));
+				Assert.NotEqual(Etag.Empty, session.Advanced.GetEtagFor(company));
+				Assert.Equal("Hibernating Rhinos", company.Name);
+			}
+		}
+
+		[Fact]
 		public void WillSetIdFromQuery()
 		{
 			var company = new Company { Name = "Company Name" };
@@ -174,6 +200,7 @@ namespace Raven.Tests.Document
 		[Fact]
 		public void CanGetIndexDef()
 		{
+			documentStore.Conventions.PrettifyGeneratedLinqExpressions = false;
 			documentStore.DatabaseCommands.PutIndex("Companies/Name", new IndexDefinitionBuilder<Company, Company>
 																		{
 																			Map = companies => from c in companies
@@ -623,10 +650,11 @@ namespace Raven.Tests.Document
                 session.Advanced.DocumentQuery<Company>().WaitForNonStaleResults().ToArray();// wait for the index to settle down
 			}
 
-			documentStore.DatabaseCommands.DeleteByIndex("Raven/DocumentsByEntityName", new IndexQuery
-			{
-				Query = "Tag:[[Companies]]"
-			}, allowStale: false).WaitForCompletion();
+		    var deleteByIndex = documentStore.DatabaseCommands.DeleteByIndex("Raven/DocumentsByEntityName", new IndexQuery
+		    {
+		        Query = "Tag:[[Companies]]"
+		    }, allowStale: false);
+		    deleteByIndex.WaitForCompletion();
 
 			using (var session = documentStore.OpenSession())
 			{

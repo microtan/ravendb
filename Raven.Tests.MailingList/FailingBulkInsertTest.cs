@@ -8,6 +8,7 @@ using Raven.Client.Embedded;
 using Raven.Client.Indexes;
 using Raven.Json.Linq;
 using Raven.Tests.Common;
+using Raven.Tests.Helpers;
 
 using Xunit;
 
@@ -122,11 +123,11 @@ namespace Raven.Tests.MailingList
 		{
 			using (var store = NewDocumentStore(requestedStorage:"esent"))
 			{
-				store.DocumentDatabase.Documents.BulkInsert(new BulkInsertOptions(), YieldDocumentBatch(store), Guid.NewGuid());
+				store.SystemDatabase.Documents.BulkInsert(new BulkInsertOptions(), YieldDocumentBatch(store), Guid.NewGuid(), CancellationToken.None);
 
 				WaitForIndexing(store);
 
-                var queryResultWithIncludes = store.DocumentDatabase.Queries.Query("Raven/DocumentsByEntityName", new IndexQuery(), CancellationToken.None);
+                var queryResultWithIncludes = store.SystemDatabase.Queries.Query("Raven/DocumentsByEntityName", new IndexQuery(), CancellationToken.None);
 
 				Assert.Equal(12, queryResultWithIncludes.TotalResults);
 			}
@@ -138,14 +139,14 @@ namespace Raven.Tests.MailingList
 			{
 				Task.Factory.StartNew(() =>
 				{
-					store.DocumentDatabase.Documents.Put("test/" + i, null, new RavenJObject(), new RavenJObject { { "Raven-Entity-Name", "Test" } }, null);
+					store.SystemDatabase.Documents.Put("test/" + i, null, new RavenJObject(), new RavenJObject { { "Raven-Entity-Name", "Test" } }, null);
 				}).Wait();
 
 				yield return YieldDocuments(i);
 
 				Task.Factory.StartNew(() =>
 				{
-					store.DocumentDatabase.Documents.Put("test/" + i, null, new RavenJObject(), new RavenJObject { { "Raven-Entity-Name", "Test" } }, null);
+					store.SystemDatabase.Documents.Put("test/" + i, null, new RavenJObject(), new RavenJObject { { "Raven-Entity-Name", "Test" } }, null);
 				}).Wait();
 
 				// note this is called inside bulk insert batch - make sure that this will be run in a separate thread to avoid batch nesting 

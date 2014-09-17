@@ -11,38 +11,26 @@ class collection {
 
     colorClass = ""; 
     documentCount: any = ko.observable(0);
+    documentsCountWithThousandsSeparator = ko.computed(() => this.documentCount().toLocaleString());
     isAllDocuments = false;
     isSystemDocuments = false;
 
     private documentsList: pagedList;
     public static allDocsCollectionName = "All Documents";
     private static systemDocsCollectionName = "System Documents";
-    private static styleMap: any = {};
+    private static collectionColorMaps: databaseCollectionStyleMap[] = [];
 
-    constructor(public name: string, public ownerDatabase: database) {
+    constructor(public name: string, public ownerDatabase: database, docCount: number = 0) {
         this.isAllDocuments = name === collection.allDocsCollectionName;
         this.isSystemDocuments = name === collection.systemDocsCollectionName;
-        this.colorClass = collection.getCollectionCssClass(name);
-	}
+        this.colorClass = collection.getCollectionCssClass(name, ownerDatabase);
+        this.documentCount(docCount);
+    }
 
 	// Notifies consumers that this collection should be the selected one.
 	// Called from the UI when a user clicks a collection the documents page.
 	activate() {
 		ko.postbox.publish("ActivateCollection", this);
-    }
-
-    fetchTotalDocumentCount() {
-        // AFAICT, there's no way to fetch just the total number of system 
-        // documents, other than doing a full fetch for sys docs.
-        if (this.isSystemDocuments) {
-            new getSystemDocumentsCommand(this.ownerDatabase, 0, 1024)
-                .execute()
-                .done((results: pagedResultSet) => this.documentCount(results.totalResultCount));
-        } else {
-            new getCollectionInfoCommand(this)
-                .execute()
-                .done((info: collectionInfo) => this.documentCount(info.totalResults));
-        }
     }
 
     getDocuments(): pagedList {
@@ -51,6 +39,12 @@ class collection {
         }
 
         return this.documentsList;
+    }
+
+    clearCollection() {
+        if (this.isAllDocuments === true && !!this.documentsList) {
+            this.documentsList.clear();
+        }
     }
 
     fetchDocuments(skip: number, take: number): JQueryPromise<pagedResultSet> {
@@ -74,7 +68,8 @@ class collection {
         return new collection(collection.allDocsCollectionName, ownerDatabase);
     }
 
-    static getCollectionCssClass(entityName: string): string {
+    static getCollectionCssClass(entityName: string, db: database): string {
+
         if (entityName === collection.allDocsCollectionName) {
             return "all-documents-collection";
         }
@@ -83,16 +78,25 @@ class collection {
             return "system-documents-collection";
         }
 
-        var existingStyle = collection.styleMap[entityName];
+        var databaseStyleMap = this.collectionColorMaps.first(map => map.databaseName == db.name);
+        if (!databaseStyleMap) {
+            databaseStyleMap = {
+                databaseName: db.name,
+                styleMap: {}
+            };
+            this.collectionColorMaps.push(databaseStyleMap);
+        }
+
+        var existingStyle = databaseStyleMap.styleMap[entityName];
         if (existingStyle) {
             return existingStyle;
         } 
 
         // We don't have an existing style. Assign one in the form of 'collection-style-X', where X is a number between 0 and maxStyleCount. These styles are found in app.less.
-        var maxStyleCount = 16;
-        var styleNumber = Object.keys(collection.styleMap).length % maxStyleCount;
+        var maxStyleCount = 32;
+        var styleNumber = Object.keys(databaseStyleMap.styleMap).length % maxStyleCount;
         var style = "collection-style-" + styleNumber;
-        collection.styleMap[entityName] = style;
+        databaseStyleMap.styleMap[entityName] = style;
         return style;
     }
 

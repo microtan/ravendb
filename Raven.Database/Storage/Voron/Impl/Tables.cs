@@ -3,6 +3,8 @@
 //      Copyright (c) Hibernating Rhinos LTD. All rights reserved.
 //  </copyright>
 // -----------------------------------------------------------------------
+using System;
+
 namespace Raven.Database.Storage.Voron.Impl
 {
 	public class Tables
@@ -105,6 +107,7 @@ namespace Raven.Database.Storage.Voron.Impl
 			}
 		}
 
+        [Obsolete("Use RavenFS instead.")]
 		public class Attachments
 		{
 			public const string TableName = "attachments";
@@ -176,6 +179,11 @@ namespace Raven.Database.Storage.Voron.Impl
 		public class ReduceStats
 		{
 			public const string TableName = "reduce_stats";
+		}
+
+		public class IndexingMetadata
+		{
+			public const string TableName = "indexing_metadata";
 		}
 	}
 }

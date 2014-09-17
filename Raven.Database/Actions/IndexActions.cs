@@ -10,16 +10,18 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Lucene.Net.Analysis.Standard;
 
 using Raven.Abstractions;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Exceptions;
 using Raven.Abstractions.Indexing;
 using Raven.Abstractions.Logging;
+using Raven.Abstractions.Util.Encryptors;
 using Raven.Database.Data;
 using Raven.Database.Extensions;
 using Raven.Database.Impl;
@@ -71,39 +73,37 @@ namespace Raven.Database.Actions
             var indexDefinition = GetIndexDefinition(indexName);
             if (indexDefinition == null)
                 return Etag.Empty; // this ensures that we will get the normal reaction of IndexNotFound later on.
-            using (var md5 = MD5.Create())
+
+            var list = new List<byte>();
+            list.AddRange(indexDefinition.GetIndexHash());
+            list.AddRange(Encoding.Unicode.GetBytes(indexName));
+            if (string.IsNullOrWhiteSpace(resultTransformer) == false)
             {
-                var list = new List<byte>();
-                list.AddRange(indexDefinition.GetIndexHash());
-                list.AddRange(Encoding.Unicode.GetBytes(indexName));
-                if (string.IsNullOrWhiteSpace(resultTransformer) == false)
-                {
-                    var abstractTransformer = IndexDefinitionStorage.GetTransformer(resultTransformer);
-                    if (abstractTransformer == null)
-                        throw new InvalidOperationException("The result transformer: " + resultTransformer + " was not found");
-                    list.AddRange(abstractTransformer.GetHashCodeBytes());
-                }
-                list.AddRange(lastDocEtag.ToByteArray());
-                list.AddRange(BitConverter.GetBytes(touchCount));
-                list.AddRange(BitConverter.GetBytes(isStale));
-                if (lastReducedEtag != null)
-                {
-                    list.AddRange(lastReducedEtag.ToByteArray());
-                }
-
-                var indexEtag = Etag.Parse(md5.ComputeHash(list.ToArray()));
-
-                if (previousEtag != null && previousEtag != indexEtag)
-                {
-                    // the index changed between the time when we got it and the time 
-                    // we actually call this, we need to return something random so that
-                    // the next time we won't get 304
-
-                    return Etag.InvalidEtag;
-                }
-
-                return indexEtag;
+                var abstractTransformer = IndexDefinitionStorage.GetTransformer(resultTransformer);
+                if (abstractTransformer == null)
+                    throw new InvalidOperationException("The result transformer: " + resultTransformer + " was not found");
+                list.AddRange(abstractTransformer.GetHashCodeBytes());
             }
+            list.AddRange(lastDocEtag.ToByteArray());
+            list.AddRange(BitConverter.GetBytes(touchCount));
+            list.AddRange(BitConverter.GetBytes(isStale));
+            if (lastReducedEtag != null)
+            {
+                list.AddRange(lastReducedEtag.ToByteArray());
+            }
+
+            var indexEtag = Etag.Parse(Encryptor.Current.Hash.Compute16(list.ToArray()));
+
+            if (previousEtag != null && previousEtag != indexEtag)
+            {
+                // the index changed between the time when we got it and the time 
+                // we actually call this, we need to return something random so that
+                // the next time we won't get 304
+
+                return Etag.InvalidEtag;
+            }
+
+            return indexEtag;
         }
 
 
@@ -119,7 +119,17 @@ namespace Raven.Database.Actions
                 Etag afterTouchEtag = null;
                 try
                 {
-                    actions.Documents.TouchDocument(referencing, out preTouchEtag, out afterTouchEtag);
+	                actions.Documents.TouchDocument(referencing, out preTouchEtag, out afterTouchEtag);
+
+	                var docMetadata = actions.Documents.DocumentMetadataByKey(referencing);
+
+	                if (docMetadata != null)
+	                {
+						var entityName = docMetadata.Metadata.Value<string>(Constants.RavenEntityName);
+
+						if(string.IsNullOrEmpty(entityName) == false)
+							Database.LastCollectionEtags.Update(entityName, afterTouchEtag);
+	                }
                 }
                 catch (ConcurrencyException)
                 {
@@ -138,6 +148,47 @@ namespace Raven.Database.Actions
             }
         }
 
+        private static void IsIndexNameValid(string indexName)
+        {
+	        var error = string.Format("Index name {0} not permitted. ", indexName).Replace("//","__");
+            if (indexName.StartsWith("dynamic/", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(error + "Index names starting with dynamic_ or dynamic/ are reserved.");
+            }
+            if ( indexName.Equals("dynamic", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(error + "Index name dynamic is reserved.");
+            }
+
+            if (indexName.Contains("//"))
+            {
+                throw new InvalidOperationException(error+ "Index names cannot contains // (double slashes)");
+
+            }
+        }
+       
+
+        public bool IndexHasChanged(string name, IndexDefinition definition)
+        {
+            if (name == null)
+                throw new ArgumentNullException("name");
+
+            IsIndexNameValid(name);
+
+            var existingIndex = IndexDefinitionStorage.GetIndexDefinition(name);
+
+            if (existingIndex == null)
+            {
+                return true;
+            }
+
+            name = name.Trim();
+
+            var creationOption = FindIndexCreationOptions(definition, ref name);
+
+            return creationOption != IndexCreationOptions.Noop;
+        }
+
         // only one index can be created at any given time
         // the method already handle attempts to create the same index, so we don't have to 
         // worry about this.
@@ -146,7 +197,9 @@ namespace Raven.Database.Actions
         {
             if (name == null)
                 throw new ArgumentNullException("name");
-
+           
+            IsIndexNameValid(name);
+          
             var existingIndex = IndexDefinitionStorage.GetIndexDefinition(name);
 
             if (existingIndex != null)
@@ -163,6 +216,19 @@ namespace Raven.Database.Actions
             }
 
             name = name.Trim();
+
+	        if (name.Equals("dynamic", StringComparison.OrdinalIgnoreCase) ||
+	            name.StartsWith("dynamic/", StringComparison.OrdinalIgnoreCase))
+	        {
+		        throw new ArgumentException("Cannot use index name " + name + " because it clashes with reserved dynamic index names", "name");
+	        }
+
+	        if (name.Contains("//"))
+	        {
+		        throw new ArgumentException("Canot use an index with // in the name, but got: " + name, "name");
+	        }
+
+            AssertAnalyzersValid(definition);
 
             switch (FindIndexCreationOptions(definition, ref name))
             {
@@ -188,44 +254,76 @@ namespace Raven.Database.Actions
             return name;
         }
 
+        private static void AssertAnalyzersValid(IndexDefinition indexDefinition)
+        {
+            foreach (var analyzer in from analyzer in indexDefinition.Analyzers
+                                     let analyzerType = typeof(StandardAnalyzer).Assembly.GetType(analyzer.Value) ?? Type.GetType(analyzer.Value, throwOnError: false)
+                                     where analyzerType == null
+                                     select analyzer)
+            {
+                throw new ArgumentException(string.Format("Could not create analyzer for field: '{0}' because the type '{1}' was not found", analyzer.Key, analyzer.Value));
+            }
+        }
+
         internal void PutNewIndexIntoStorage(string name, IndexDefinition definition)
         {
             Debug.Assert(Database.IndexStorage != null);
             Debug.Assert(TransactionalStorage != null);
             Debug.Assert(WorkContext != null);
 
-            TransactionalStorage.Batch(actions =>
+	        Index index = null;
+			TransactionalStorage.Batch(actions =>
             {
-                definition.IndexId = (int)Database.Documents.GetNextIdentityValueWithoutOverwritingOnExistingDocuments("IndexId", actions, null);
-                IndexDefinitionStorage.RegisterNewIndexInThisSession(name, definition);
+	            var maxId = 0;
+	            if (Database.IndexStorage.Indexes.Length > 0)
+	            {
+		            maxId = Database.IndexStorage.Indexes.Max();
+	            }
+	            definition.IndexId = (int) Database.Documents.GetNextIdentityValueWithoutOverwritingOnExistingDocuments("IndexId", actions);
+	            if (definition.IndexId <= maxId)
+	            {
+		            actions.General.SetIdentityValue("IndexId", maxId + 1);
+					definition.IndexId = (int)Database.Documents.GetNextIdentityValueWithoutOverwritingOnExistingDocuments("IndexId", actions);
+	            }
 
-                // this has to happen in this fashion so we will expose the in memory status after the commit, but 
-                // before the rest of the world is notified about this.
 
-                IndexDefinitionStorage.CreateAndPersistIndex(definition);
-                Database.IndexStorage.CreateIndexImplementation(definition);
+	            IndexDefinitionStorage.RegisterNewIndexInThisSession(name, definition);
 
-                InvokeSuggestionIndexing(name, definition);
+	            // this has to happen in this fashion so we will expose the in memory status after the commit, but 
+	            // before the rest of the world is notified about this.
 
-                actions.Indexing.AddIndex(definition.IndexId, definition.IsMapReduce);
+	            IndexDefinitionStorage.CreateAndPersistIndex(definition);
+	            Database.IndexStorage.CreateIndexImplementation(definition);
+				index = Database.IndexStorage.GetIndexInstance(definition.IndexId);
+				//ensure that we don't start indexing it right away, let the precomputation run first, if applicable
+	            index.IsMapIndexingInProgress = true; 
+	            InvokeSuggestionIndexing(name, definition);
+
+	            actions.Indexing.AddIndex(definition.IndexId, definition.IsMapReduce);
             });
 
-            if (name.Equals(Constants.DocumentsByEntityNameIndex, StringComparison.InvariantCultureIgnoreCase) == false &&
-                Database.IndexStorage.HasIndex(Constants.DocumentsByEntityNameIndex))
-            {
-                // optimization of handling new index creation when the number of document in a database is significantly greater than
-                // number of documents that this index applies to - let us use built-in RavenDocumentsByEntityName to get just appropriate documents
+	        Debug.Assert(index != null);
 
-                var index = Database.IndexStorage.GetIndexInstance(definition.IndexId);
-                TryApplyPrecomputedBatchForNewIndex(index, definition);
-            }
+	        if (name.Equals(Constants.DocumentsByEntityNameIndex, StringComparison.InvariantCultureIgnoreCase) == false &&
+	            Database.IndexStorage.HasIndex(Constants.DocumentsByEntityNameIndex))
+	        {
+		        // optimization of handling new index creation when the number of document in a database is significantly greater than
+		        // number of documents that this index applies to - let us use built-in RavenDocumentsByEntityName to get just appropriate documents
 
-            WorkContext.ShouldNotifyAboutWork(() => "PUT INDEX " + name);
+		        TryApplyPrecomputedBatchForNewIndex(index, definition);
+	        }
+	        else
+	        {
+		        index.IsMapIndexingInProgress = false;// we can't apply optimization, so we'll make it eligible for running normally
+	        }
+
+			// The act of adding it here make it visible to other threads
+			// we have to do it in this way so first we prepare all the elements of the 
+			// index, then we add it to the storage in a way that make it public
+			IndexDefinitionStorage.AddIndex(definition.IndexId, definition);
+			
+			WorkContext.ShouldNotifyAboutWork(() => "PUT INDEX " + name);
             WorkContext.NotifyAboutWork();
-            // The act of adding it here make it visible to other threads
-            // we have to do it in this way so first we prepare all the elements of the 
-            // index, then we add it to the storage in a way that make it public
-            IndexDefinitionStorage.AddIndex(definition.IndexId, definition);
         }
 
 
@@ -236,10 +334,10 @@ namespace Raven.Database.Actions
             {
                 // we don't optimize if we don't have what to optimize _on, we know this is going to return all docs.
                 // no need to try to optimize that, then
-                return;
+				index.IsMapIndexingInProgress = false;
+				return;
             }
 
-            index.IsMapIndexingInProgress = true;
             try
             {
                 Task.Factory.StartNew(() => ApplyPrecomputedBatchForNewIndex(index, generator),
@@ -273,37 +371,30 @@ namespace Raven.Database.Actions
             var docsToIndex = new List<JsonDocument>();
             TransactionalStorage.Batch(actions =>
             {
-                var countOfDocuments = actions.Documents.GetDocumentsCount();
-
                 var tags = generator.ForEntityNames.Select(entityName => "Tag:[[" + entityName + "]]").ToList();
 
                 var query = string.Join(" OR ", tags);
-                var stats =
-                    actions.Indexing.GetIndexStats(
-                        IndexDefinitionStorage.GetIndexDefinition(DocumentsByEntityNameIndex).IndexId);
 
-                var lastIndexedEtagByRavenDocumentsByEntityName = stats.LastIndexedEtag;
-                var lastModifiedByRavenDocumentsByEntityName = stats.LastIndexedTimestamp;
+	            JsonDocument highestByEtag = null;
 
                 var cts = new CancellationTokenSource();
                 using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, WorkContext.CancellationToken))
                 using (var op = new QueryActions.DatabaseQueryOperation(Database, DocumentsByEntityNameIndex, new IndexQuery
                 {
-                    Query = query
-                }, actions, linked.Token)
+                    Query = query,
+					PageSize = Database.Configuration.MaxNumberOfItemsToProcessInSingleBatch
+                }, actions, linked)
                 {
                     ShouldSkipDuplicateChecking = true
                 })
                 {
                     op.Init();
                     if (op.Header.TotalResults == 0 ||
-                        op.Header.TotalResults > (countOfDocuments * 0.25) ||
-                        (op.Header.TotalResults > Database.Configuration.MaxNumberOfItemsToIndexInSingleBatch * 4))
+                        (op.Header.TotalResults > Database.Configuration.MaxNumberOfItemsToProcessInSingleBatch))
                     {
-                        // we don't apply this optimization if the total number of results is more than
-                        // 25% of the count of documents (would be easier to just run it regardless).
-                        // or if the number of docs to index is significantly more than the max numbers
-                        // to index in a single batch. The idea here is that we need to keep the amount
+                        // we don't apply this optimization if the total number of results 
+						// to index is more than the max numbers to index in a single batch. 
+						// The idea here is that we need to keep the amount
                         // of memory we use to a manageable level even when introducing a new index to a BIG 
                         // database
                         try
@@ -328,22 +419,27 @@ namespace Raven.Database.Actions
                         var lastModified = DateTime.Parse(metadata.Value<string>(Constants.LastModified));
                         document.Remove(Constants.Metadata);
 
-                        docsToIndex.Add(new JsonDocument
-                        {
-                            DataAsJson = document,
-                            Etag = etag,
-                            Key = key,
-                            LastModified = lastModified,
-                            SkipDeleteFromIndex = true,
-                            Metadata = metadata
-                        });
+	                    var doc = new JsonDocument
+	                    {
+		                    DataAsJson = document,
+		                    Etag = etag,
+		                    Key = key,
+		                    LastModified = lastModified,
+		                    SkipDeleteFromIndex = true,
+		                    Metadata = metadata
+	                    };
+
+	                    docsToIndex.Add(doc);
+
+	                    if (highestByEtag == null || doc.Etag.CompareTo(highestByEtag.Etag) > 0)
+		                    highestByEtag = doc;
                     });
                 }
 
-                result = new PrecomputedIndexingBatch
+	            result = new PrecomputedIndexingBatch
                 {
-                    LastIndexed = lastIndexedEtagByRavenDocumentsByEntityName,
-                    LastModified = lastModifiedByRavenDocumentsByEntityName,
+                    LastIndexed = highestByEtag.Etag,
+                    LastModified = highestByEtag.LastModified.Value,
                     Documents = docsToIndex,
                     Index = index
                 };
@@ -389,7 +485,7 @@ namespace Raven.Database.Actions
             return findIndexCreationOptions;
         }
 
-        internal Task StartDeletingIndexDataAsync(int id)
+        internal Task StartDeletingIndexDataAsync(int id, string indexName)
         {
             //remove the header information in a sync process
             TransactionalStorage.Batch(actions => actions.Indexing.PrepareIndexForDeletion(id));
@@ -410,7 +506,12 @@ namespace Raven.Database.Actions
             });
 
             long taskId;
-            Database.Tasks.AddTask(deleteIndexTask, null, out taskId);
+            Database.Tasks.AddTask(deleteIndexTask, null, new TaskActions.PendingTaskDescription
+                                                          {
+                                                              StartTime = SystemTime.UtcNow,
+                                                              TaskType = TaskActions.PendingTaskType.IndexDeleteOperation,
+                                                              Payload = indexName
+                                                          }, out taskId);
 
             deleteIndexTask.ContinueWith(_ => Database.Tasks.RemoveTask(taskId));
 
@@ -462,19 +563,18 @@ namespace Raven.Database.Actions
                 TransactionalStorage.Batch(actions => actions.Lists.Set("Raven/Indexes/PendingDeletion", instance.IndexId.ToString(CultureInfo.InvariantCulture), (RavenJObject.FromObject(new
                 {
                     TimeOfOriginalDeletion = SystemTime.UtcNow,
-                    instance.IndexId
+                    instance.IndexId,
+                    IndexName = instance.Name
                 })), UuidType.Tasks));
 
                 // Delete the main record synchronously
                 IndexDefinitionStorage.RemoveIndex(name);
                 Database.IndexStorage.DeleteIndex(instance.IndexId);
 
-                ConcurrentSet<string> _;
-                WorkContext.DoNotTouchAgainIfMissingReferences.TryRemove(instance.IndexId, out _);
-                WorkContext.ClearErrorsFor(name);
+	            WorkContext.ClearErrorsFor(name);
 
                 // And delete the data in the background
-                StartDeletingIndexDataAsync(instance.IndexId);
+                StartDeletingIndexDataAsync(instance.IndexId, name);
 
                 // We raise the notification now because as far as we're concerned it is done *now*
                 TransactionalStorage.ExecuteImmediatelyOrRegisterForSynchronization(() => Database.Notifications.RaiseNotifications(new IndexChangeNotification

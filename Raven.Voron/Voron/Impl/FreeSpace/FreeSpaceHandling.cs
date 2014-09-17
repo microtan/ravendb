@@ -7,14 +7,6 @@ namespace Voron.Impl.FreeSpace
 	public class FreeSpaceHandling : IFreeSpaceHandling
 	{
 		internal const int NumberOfPagesInSection = 256 * 8; // 256 bytes, 8 bits per byte = 2,048 - each section 8 MB in size
-		private readonly StorageEnvironment _env;
-		private readonly Slice _freePagesCount;
-
-		public FreeSpaceHandling(StorageEnvironment env)
-		{
-			_freePagesCount = new Slice(EndianBitConverter.Big.GetBytes(long.MinValue));
-			_env = env;
-		}
 
 		public long? TryAllocateFromFreeSpace(Transaction tx, int num)
 		{
@@ -24,7 +16,7 @@ namespace Voron.Impl.FreeSpace
 		    if (tx.State.FreeSpaceRoot.State.EntriesCount == 0)
 		        return null;
 
-			using (var it = tx.State.FreeSpaceRoot.Iterate(tx))
+			using (var it = tx.State.FreeSpaceRoot.Iterate())
 			{
 				if (it.Seek(Slice.BeforeAllKeys) == false)
 					return null;
@@ -42,7 +34,7 @@ namespace Voron.Impl.FreeSpace
 			int numberOfNeededFullSections = num / NumberOfPagesInSection;
 			int numberOfExtraBitsNeeded = num % NumberOfPagesInSection;
 			int foundSections = 0;
-			Slice startSection = null;
+			MemorySlice startSection = null;
 			long? startSectionId = null;
 			var sections = new List<Slice>();
 
@@ -51,7 +43,7 @@ namespace Voron.Impl.FreeSpace
 				var stream = it.CreateReaderForCurrent();
 				{
 					var current = new StreamBitArray(stream);
-					var currentSectionId = it.CurrentKey.ToInt64();
+				    var currentSectionId = it.CurrentKey.CreateReader().ReadBigEndianInt64();
 
 					//need to find full free pages
 					if (current.SetCount < NumberOfPagesInSection)
@@ -84,7 +76,7 @@ namespace Voron.Impl.FreeSpace
 					{
 						foreach (var section in sections)
 						{
-							tx.State.FreeSpaceRoot.Delete(tx, section);
+							tx.State.FreeSpaceRoot.Delete(section);
 						}
 
 						return startSectionId * NumberOfPagesInSection;
@@ -92,7 +84,7 @@ namespace Voron.Impl.FreeSpace
 
 					var nextSectionId = currentSectionId + 1;
 					var nextId = new Slice(EndianBitConverter.Big.GetBytes(nextSectionId));
-					var read = tx.State.FreeSpaceRoot.Read(tx, nextId);
+					var read = tx.State.FreeSpaceRoot.Read(nextId);
 					if (read == null)
 					{
 						//not a following next section
@@ -112,7 +104,7 @@ namespace Voron.Impl.FreeSpace
 					//mark selected bits to false
 					if (next.SetCount == numberOfExtraBitsNeeded)
 					{
-						tx.State.FreeSpaceRoot.Delete(tx, nextId);
+						tx.State.FreeSpaceRoot.Delete(nextId);
 					}
 					else
 					{
@@ -120,12 +112,12 @@ namespace Voron.Impl.FreeSpace
 						{
 							next.Set(i, false);
 						}
-						tx.State.FreeSpaceRoot.Add(tx, nextId, next.ToStream());
+						tx.State.FreeSpaceRoot.Add(nextId, next.ToStream());
 					}
 
 					foreach (var section in sections)
 					{
-						tx.State.FreeSpaceRoot.Delete(tx, section);
+						tx.State.FreeSpaceRoot.Delete(section);
 					}
 
 					return startSectionId * NumberOfPagesInSection;
@@ -135,7 +127,7 @@ namespace Voron.Impl.FreeSpace
 			return null;
 		}
 
-		private static void ResetSections(ref int foundSections, List<Slice> sections, ref Slice startSection, ref long? startSectionId)
+		private static void ResetSections(ref int foundSections, List<Slice> sections, ref MemorySlice startSection, ref long? startSectionId)
 		{
 			foundSections = 0;
 			startSection = null;
@@ -150,12 +142,12 @@ namespace Voron.Impl.FreeSpace
 			    var stream = it.CreateReaderForCurrent();
 				{
 					var current = new StreamBitArray(stream);
-					var currentSectionId = it.CurrentKey.ToInt64();
+				    var currentSectionId = it.CurrentKey.CreateReader().ReadBigEndianInt64();
 
 					long? page;
 					if (current.SetCount < num)
 					{
-						if (TryFindSmallValueMergingTwoSections(tx, it, num, current, currentSectionId, out page))
+						if (TryFindSmallValueMergingTwoSections(tx, it.CurrentKey, num, current, currentSectionId, out page))
 							return page;
 						continue;
 					}
@@ -164,7 +156,7 @@ namespace Voron.Impl.FreeSpace
 						return page;
 
 					//could not find a continuous so trying to merge
-					if (TryFindSmallValueMergingTwoSections(tx, it, num, current, currentSectionId, out page))
+					if (TryFindSmallValueMergingTwoSections(tx, it.CurrentKey, num, current, currentSectionId, out page))
 						return page;
 				}
 			} while (it.MoveNext());
@@ -202,7 +194,7 @@ namespace Voron.Impl.FreeSpace
 
 			if (current.SetCount == num)
 			{
-				tx.State.FreeSpaceRoot.Delete(tx, it.CurrentKey);
+				tx.State.FreeSpaceRoot.Delete(it.CurrentKey);
 			}
 			else
 			{
@@ -211,35 +203,35 @@ namespace Voron.Impl.FreeSpace
 					current.Set(i + start, false);
 				}
 
-				tx.State.FreeSpaceRoot.Add(tx, it.CurrentKey, current.ToStream());
+				tx.State.FreeSpaceRoot.Add(it.CurrentKey, current.ToStream());
 			}
 
 			return true;
 		}
 
-		private static bool TryFindSmallValueMergingTwoSections(Transaction tx, TreeIterator it, int num, StreamBitArray current, long currentSectionId, out long? result)
+		private static bool TryFindSmallValueMergingTwoSections(Transaction tx, Slice currentSectionIdSlice, int num, StreamBitArray current, long currentSectionId, out long? result)
 		{
 			result = -1;
-			var currentRange = current.GetEndRangeCount();
-			if (currentRange == 0)
+			var currentEndRange = current.GetEndRangeCount();
+			if (currentEndRange == 0)
 				return false;
 
 			var nextSectionId = currentSectionId + 1;
 
 			var nextId = new Slice(EndianBitConverter.Big.GetBytes(nextSectionId));
-			var read = tx.State.FreeSpaceRoot.Read(tx, nextId);
+			var read = tx.State.FreeSpaceRoot.Read(nextId);
 			if (read == null)
 				return false;
 
 			var next = new StreamBitArray(read.Reader);
 
-			var nextRange = num - currentRange;
+			var nextRange = num - currentEndRange;
 			if (next.HasStartRangeCount(nextRange) == false)
 				return false;
 
 			if (next.SetCount == nextRange)
 			{
-				tx.State.FreeSpaceRoot.Delete(tx, nextId);
+				tx.State.FreeSpaceRoot.Delete(nextId);
 			}
 			else
 			{
@@ -247,51 +239,40 @@ namespace Voron.Impl.FreeSpace
 				{
 					next.Set(i, false);
 				}
-				tx.State.FreeSpaceRoot.Add(tx, nextId, next.ToStream());
+				tx.State.FreeSpaceRoot.Add(nextId, next.ToStream());
 			}
 
-			if (current.SetCount == currentRange)
+			if (current.SetCount == currentEndRange)
 			{
-				tx.State.FreeSpaceRoot.Delete(tx, it.CurrentKey);
+				tx.State.FreeSpaceRoot.Delete(currentSectionIdSlice);
 			}
 			else
 			{
-				for (int i = 0; i < currentRange; i++)
+				for (int i = 0; i < currentEndRange; i++)
 				{
 					current.Set(NumberOfPagesInSection - 1 - i, false);
 				}
-				tx.State.FreeSpaceRoot.Add(tx, nextId, next.ToStream());
+				tx.State.FreeSpaceRoot.Add(currentSectionIdSlice, current.ToStream());
 			}
 
 
-			result = currentSectionId * NumberOfPagesInSection + currentRange;
+			result = currentSectionId * NumberOfPagesInSection + (NumberOfPagesInSection - currentEndRange);
 			return true;
-		}
-
-		public long GetFreePageCount()
-		{
-			using (var tx = _env.NewTransaction(TransactionFlags.Read))
-			{
-			    var readResult = tx.State.FreeSpaceRoot.Read(tx, _freePagesCount);
-			    if (readResult == null)
-			        return 0;
-                return readResult.Reader.ReadInt64();
-			}
 		}
 
 		public List<long> AllPages(Transaction tx)
 		{
-			return tx.State.FreeSpaceRoot.AllPages(tx);
+			return tx.State.FreeSpaceRoot.AllPages();
 		}
 
 		public void FreePage(Transaction tx, long pageNumber)
 		{
 			var section = pageNumber / NumberOfPagesInSection;
 			var sectionKey = new Slice(EndianBitConverter.Big.GetBytes(section));
-			var result = tx.State.FreeSpaceRoot.Read(tx, sectionKey);
+			var result = tx.State.FreeSpaceRoot.Read(sectionKey);
 			var sba = result == null ? new StreamBitArray() : new StreamBitArray(result.Reader);
 			sba.Set((int)(pageNumber % NumberOfPagesInSection), true);
-			tx.State.FreeSpaceRoot.Add(tx, sectionKey, sba.ToStream());
+			tx.State.FreeSpaceRoot.Add(sectionKey, sba.ToStream());
 		}
 	}
 }

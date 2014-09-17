@@ -13,6 +13,7 @@
     <FileAlignment>512</FileAlignment>
     <SolutionDir Condition="$(SolutionDir) == '' Or $(SolutionDir) == '*Undefined*'">..\</SolutionDir>
     <RestorePackages>true</RestorePackages>
+    <TargetFrameworkProfile />
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -22,6 +23,7 @@
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <NoWarn>618</NoWarn>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -49,6 +51,9 @@
       <SpecificVersion>False</SpecificVersion>
       <HintPath>..\packages\Microsoft.Owin.Hosting.2.1.0\lib\net45\Microsoft.Owin.Hosting.dll</HintPath>
     </Reference>
+    <Reference Include="Newtonsoft.Json, Version=4.5.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
+      <HintPath>..\packages\Newtonsoft.Json.5.0.8\lib\net45\Newtonsoft.Json.dll</HintPath>
+    </Reference>
     <Reference Include="Owin, Version=1.0.0.0, Culture=neutral, PublicKeyToken=f0ebd12fd5e55cc5, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
       <HintPath>..\packages\Owin.1.0\lib\net40\Owin.dll</HintPath>
@@ -57,17 +62,25 @@
     <Reference Include="System.ComponentModel.Composition" />
     <Reference Include="System.Core" />
     <Reference Include="System.Net.Http" />
-    <Reference Include="System.Reactive.Core">
-      <HintPath>..\packages\Rx-Core.2.2.2\lib\net45\System.Reactive.Core.dll</HintPath>
+    <Reference Include="System.Net.Http.Formatting, Version=5.1.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\packages\Microsoft.AspNet.WebApi.Client.5.1.2\lib\net45\System.Net.Http.Formatting.dll</HintPath>
     </Reference>
-    <Reference Include="System.Reactive.Interfaces">
-      <HintPath>..\packages\Rx-Interfaces.2.2.2\lib\net45\System.Reactive.Interfaces.dll</HintPath>
+    <Reference Include="System.Reactive.Core, Version=2.2.4.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\packages\Rx-Core.2.2.4\lib\net45\System.Reactive.Core.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Reactive.Interfaces, Version=2.2.4.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\packages\Rx-Interfaces.2.2.4\lib\net45\System.Reactive.Interfaces.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="System.Runtime.Serialization" />
     <Reference Include="System.Transactions" />
     <Reference Include="System.Web.Http, Version=5.1.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\packages\Microsoft.AspNet.WebApi.Core.5.1.0\lib\net45\System.Web.Http.dll</HintPath>
+      <HintPath>..\packages\Microsoft.AspNet.WebApi.Core.5.1.2\lib\net45\System.Web.Http.dll</HintPath>
     </Reference>
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
@@ -82,9 +95,6 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="..\Bundles\Raven.Bundles.UniqueConstraints\Util.cs">
-      <Link>Util.cs</Link>
-    </Compile>
     <Compile Include="..\CommonAssemblyInfo.cs">
       <Link>Properties\CommonAssemblyInfo.cs</Link>
     </Compile>
@@ -100,11 +110,18 @@
     <Compile Include="BulkInsertClient.cs" />
     <Compile Include="BulkInsertDatabaseUrl.cs" />
     <Compile Include="BulkInsertTests.cs" />
+    <Compile Include="DatabaseConfiguration.cs" />
+    <Compile Include="EmbeddedMultipleDatabases.cs" />
+    <Compile Include="GermanUmlauts.cs" />
+    <Compile Include="IndexResestWithReplication.cs" />
     <Compile Include="LongIndexAndTransformerNames.cs" />
     <Compile Include="NestedPropertiesIndex_1182.cs" />
     <Compile Include="RaveDB-1279.cs" />
     <Compile Include="RavenDB-1847.cs" />
     <Compile Include="RavenDb-1934.cs" />
+    <Compile Include="RavenDB-2036.cs" />
+    <Compile Include="RavenDB-2334.cs" />
+    <Compile Include="RavenDB-2643.cs" />
     <Compile Include="RavenDB1009.cs" />
     <Compile Include="RavenDB1019.cs" />
     <Compile Include="RavenDB1025.cs" />
@@ -118,6 +135,10 @@
     <Compile Include="RavenDB1369.cs" />
     <Compile Include="RavenDB1508.cs" />
     <Compile Include="RavenDB1519.cs" />
+    <Compile Include="RavenDb1962.cs" />
+    <Compile Include="RavenDB2408.cs" />
+    <Compile Include="RavenDB2537.cs" />
+    <Compile Include="RavenDB2568.cs" />
     <Compile Include="Ravendb718\DateTimeOffset_LoadTests.cs" />
     <Compile Include="Ravendb718\DateTimeOffset_QueryDynamicTests.cs" />
     <Compile Include="Ravendb718\DateTimeOffset_QueryMapReduceAnalyzedTests.cs" />
@@ -190,6 +211,9 @@
     <Compile Include="RavenDB_1489.cs" />
     <Compile Include="RavenDB_1493.cs" />
     <Compile Include="RavenDB_1497.cs" />
+    <Compile Include="RavenDB_2176.cs" />
+    <Compile Include="RavenDB_2514.cs" />
+    <Compile Include="RavenDB_2516.cs" />
     <Compile Include="RavenDB_1517.cs" />
     <Compile Include="RavenDB_1520.cs" />
     <Compile Include="RavenDB_1533.cs" />
@@ -220,10 +244,59 @@
     <Compile Include="RavenDB_1761.cs" />
     <Compile Include="RavenDB_1762.cs" />
     <Compile Include="RavenDB_1765.cs" />
+    <Compile Include="RavenDb_1816.cs" />
+    <Compile Include="RavenDB_1817.cs" />
+    <Compile Include="RavenDB_1824.cs" />
+    <Compile Include="RavenDB_1825.cs" />
     <Compile Include="RavenDB_1828.cs" />
-    <Compile Include="RavenDB_1829.cs" />
     <Compile Include="RavenDB_187.cs" />
     <Compile Include="RavenDB_1877.cs" />
+    <Compile Include="RavenDb_1977.cs" />
+    <Compile Include="RavenDb_1982.cs" />
+    <Compile Include="RavenDb_2016.cs" />
+    <Compile Include="RavenDB_2101.cs" />
+    <Compile Include="RavenDB_2113.cs" />
+    <Compile Include="RavenDb_2123.cs" />
+    <Compile Include="RavenDB_2124.cs" />
+    <Compile Include="RavenDB_2129.cs" />
+    <Compile Include="RavenDB_2172.cs" />
+    <Compile Include="RavenDB_2181.cs" />
+    <Compile Include="RavenDB_2183.cs" />
+    <Compile Include="RavenDB_2205.cs" />
+    <Compile Include="RavenDB_2209.cs" />
+    <Compile Include="RavenDb_2215.cs" />
+    <Compile Include="RavenDb_2239.cs" />
+    <Compile Include="RavenDB_2233.cs" />
+    <Compile Include="RavenDB_2244.cs" />
+    <Compile Include="RavenDB_2273.cs" />
+    <Compile Include="RavenDB_2325.cs" />
+    <Compile Include="RavenDB_2314.cs">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="RavenDB_2387.cs" />
+    <Compile Include="RavenDB_2424.cs" />
+    <Compile Include="RavenDB_2391.cs" />
+    <Compile Include="RavenDB_2432.cs" />
+    <Compile Include="RavenDB_2435.cs" />
+    <Compile Include="RavenDB_2440.cs" />
+    <Compile Include="RavenDB_2458.cs" />
+    <Compile Include="RavenDB_2486.cs" />
+    <Compile Include="RavenDB_2495.cs" />
+    <Compile Include="RavenDB_2496.cs" />
+    <Compile Include="RavenDB_2502.cs" />
+    <Compile Include="RavenDB_2556.cs" />
+    <Compile Include="RavenDB_2566.cs" />
+    <Compile Include="RavenDB_2571.cs" />
+    <Compile Include="RavenDB_2576.cs" />
+    <Compile Include="RavenDB_2586.cs" />
+    <Compile Include="RavenDB_2604.cs" />
+    <Compile Include="RavenDB_2605.cs" />
+    <Compile Include="RavenDB_2609.cs" />
+    <Compile Include="RavenDB_2607.cs" />
+    <Compile Include="RavenDB_2615.cs" />
+    <Compile Include="RavenDB_2623.cs" />
+    <Compile Include="RavenDB_2670.cs" />
+    <Compile Include="RavenDB_2672.cs" />
     <Compile Include="RavenDB_295.cs" />
     <Compile Include="RavenDB_299.cs" />
     <Compile Include="RavenDB_301.cs" />
@@ -275,9 +348,13 @@
     <Compile Include="RavenDB_895.cs" />
     <Compile Include="RavenDB_967.cs" />
     <Compile Include="RavenDB_993.cs" />
+    <Compile Include="RavenDB_2344.cs" />
     <Compile Include="RDBQA_1.cs" />
     <Compile Include="RDBQA_11.cs" />
     <Compile Include="RDBQA_13.cs" />
+    <Compile Include="RDBQA_16.cs" />
+    <Compile Include="RDBQA_17.cs" />
+    <Compile Include="RDBQA_18.cs" />
     <Compile Include="RDBQA_4.cs" />
     <Compile Include="RDBQA_6.cs" />
     <Compile Include="RDBQA_7.cs" />
@@ -323,9 +400,17 @@
       <Project>{381234cc-8aa7-41ff-8cad-22330e15f993}</Project>
       <Name>Raven.Tests.Common</Name>
     </ProjectReference>
+    <ProjectReference Include="..\Raven.Tests.Helpers\Raven.Tests.Helpers.csproj">
+      <Project>{1B88473F-743B-4F6B-8E5E-97BB816E6C68}</Project>
+      <Name>Raven.Tests.Helpers</Name>
+    </ProjectReference>
     <ProjectReference Include="..\Raven.Tests.MailingList\Raven.Tests.MailingList.csproj">
       <Project>{EA32FD05-8537-4A31-879E-20A0F2C87479}</Project>
       <Name>Raven.Tests.MailingList</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\Raven.Voron\Voron\Voron.csproj">
+      <Project>{ff83c7c2-bc7b-4dcc-a782-49ef9bbd9390}</Project>
+      <Name>Voron</Name>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
@@ -335,8 +420,8 @@
   <ItemGroup>
     <Service Include="{82A7F48D-3B50-4B1E-B82E-3ADA8210C358}" />
   </ItemGroup>
-  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <Import Project="$(SolutionDir)\.nuget\NuGet.targets" Condition="Exists('$(SolutionDir)\.nuget\NuGet.targets')" />
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" Condition="'$(TasksTargetsImported)' == ''" />
+  <Import Project="$(SolutionDir)\.nuget\NuGet.targets" Condition="'$(TasksTargetsImported)' == ''" />
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Enable NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
@@ -350,4 +435,5 @@
   <Target Name="AfterBuild">
   </Target>
   -->
+  <Import Project="..\Imports\Tasks.targets" Condition="'$(TasksTargetsImported)' == ''" />
 </Project>

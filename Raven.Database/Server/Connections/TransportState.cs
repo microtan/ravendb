@@ -8,8 +8,8 @@ using System.Collections.Concurrent;
 using System.Linq;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Logging;
-using Raven.Client.RavenFS;
 using Raven.Database.Server.Controllers;
+using Raven.Abstractions.FileSystem;
 
 namespace Raven.Database.Server.Connections
 {
@@ -28,8 +28,12 @@ namespace Raven.Database.Server.Connections
 
 		public void OnIdle()
 		{
-			ConnectionState _;
-			timeSensitiveStore.ForAllExpired(s => connections.TryRemove(s, out _));
+			timeSensitiveStore.ForAllExpired(s =>
+			{
+				ConnectionState value;
+				if(connections.TryRemove(s, out value))
+					value.Dispose();
+			});
 		}
 
 		public void Disconnect(string id)
@@ -61,6 +65,17 @@ namespace Raven.Database.Server.Connections
 				connectionState.Value.Send(indexChangeNotification);
 			}
 		}
+
+        public event Action<object, TransformerChangeNotification> OnTransformerChangeNotification = delegate { }; 
+
+        public void Send(TransformerChangeNotification transformerChangeNotification)
+        {
+            OnTransformerChangeNotification(this, transformerChangeNotification);
+            foreach (var connectionState in connections)
+            {
+                connectionState.Value.Send(transformerChangeNotification);
+            }
+        }
 
 		public event Action<object, DocumentChangeNotification> OnDocumentChangeNotification = delegate { }; 
 
@@ -106,7 +121,7 @@ namespace Raven.Database.Server.Connections
 			}
 		}
 
-		public ConnectionState For(string id, RavenDbApiController controller = null)
+        public ConnectionState For(string id, RavenBaseApiController controller = null)
 		{
 			return connections.GetOrAdd(id, _ =>
 			{

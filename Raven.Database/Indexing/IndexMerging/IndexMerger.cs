@@ -9,6 +9,7 @@ using System.Linq;
 using ICSharpCode.NRefactory.CSharp;
 using Raven.Abstractions.Data;
 using Raven.Abstractions.Indexing;
+using Raven.Abstractions.Util;
 
 namespace Raven.Database.Indexing.IndexMerging
 {
@@ -119,7 +120,8 @@ namespace Raven.Database.Indexing.IndexMerging
                     continue;
                 }
 
-                Expression map = parser.ParseExpression(index.Map);
+				indexData.OriginalMap = IndexPrettyPrinter.Format(indexData.OriginalMap);
+				Expression map = parser.ParseExpression(indexData.OriginalMap);
                 var visitor = new IndexVisitor(indexData);
                 map.AcceptVisitor(visitor);
             }
@@ -338,7 +340,7 @@ namespace Raven.Database.Indexing.IndexMerging
                         selectExpressionDict[curExpr.Key] = curExpr.Value;
                     }
                     mergeSuggestion.CanMerge.Add(curProposedData.IndexName);
-
+					
                     DataDictionaryMerge(mergeSuggestion.MergedIndex.Stores, curProposedData.Stores);
                     DataDictionaryMerge(mergeSuggestion.MergedIndex.Indexes, curProposedData.Indexes);
                     DataDictionaryMerge(mergeSuggestion.MergedIndex.Analyzers, curProposedData.Analyzers);
@@ -348,6 +350,7 @@ namespace Raven.Database.Indexing.IndexMerging
                     DataDictionaryMerge(mergeSuggestion.MergedIndex.SpatialIndexes, curProposedData.SpatialIndexes);
                 }
 
+				mergeSuggestion.Collection = mergeProposal.ProposedForMerge[0].Collection ?? mergeProposal.ProposedForMerge[0].FromExpression.ToString();
                 mergeSuggestion.MergedIndex.Map = mergeProposal.ProposedForMerge[0].BuildExpression(selectExpressionDict);
 
                 if (mergeProposal.ProposedForMerge.Count > 1)

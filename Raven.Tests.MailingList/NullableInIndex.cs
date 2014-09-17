@@ -6,7 +6,7 @@
 using System;
 using System.Linq;
 using Raven.Client.Indexes;
-using Raven.Tests.Common;
+using Raven.Tests.Helpers;
 
 using Xunit;
 
@@ -59,7 +59,7 @@ namespace Raven.Tests.MailingList
                     Assert.Equal(1, x);
                 }
 
-                Assert.Empty(store.DocumentDatabase.Statistics.Errors);
+                Assert.Empty(store.SystemDatabase.Statistics.Errors);
             }
         }
     }

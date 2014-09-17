@@ -12,13 +12,16 @@ namespace Raven.Tests.MailingList
 		[Fact]
 		public void CanCompile()
 		{
-			var technologySummaryIndex = new TechnologySummary_Index {Conventions = new DocumentConvention()};
+			var technologySummaryIndex = new TechnologySummary_Index {Conventions = new DocumentConvention
+			{
+				PrettifyGeneratedLinqExpressions = false
+			}};
 
 			var indexDefinition = technologySummaryIndex.CreateIndexDefinition();
 
 			Assert.Equal(
-				@"docs.Technologies.Where(technology => !technology.Id.EndsWith(""/published"")).Select(technology => new {
-    TechnologyId = technology.Id,
+                @"docs.Technologies.Where(technology => !technology.__document_id.EndsWith(""/published"")).Select(technology => new {
+    TechnologyId = technology.__document_id,
     DrugId = technology.Drug.Id
 })",
 				indexDefinition.Map);

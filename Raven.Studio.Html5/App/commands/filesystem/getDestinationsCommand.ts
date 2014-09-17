@@ -1,37 +1,30 @@
 ﻿import commandBase = require("commands/commandBase");
 import filesystem = require("models/filesystem/filesystem");
+import synchronizationDestination = require("models/filesystem/synchronizationDestination");
 import getConfigurationByKeyCommand = require("commands/filesystem/getConfigurationByKeyCommand");
+import document = require("models/document");
 
-class getFilesystemDestinationsCommand extends commandBase {
+class getDestinationsCommand extends commandBase {
 
-    constructor(private fs: filesystem) {
+    shouldResolveNotFoundAsNull: boolean;
+
+    constructor(private fs: filesystem, shouldResolveNotFoundAsNull?: boolean) {
         super();
+        if (!fs) {
+            throw new Error("Must specify filesystem");
+        }
+        this.shouldResolveNotFoundAsNull = shouldResolveNotFoundAsNull || false;
     }
 
-    execute(): JQueryPromise<string[]> {
-
+    execute(): JQueryPromise<synchronizationReplicationsDto> {
+        
         var url = "/config";
         var args = {
-            name: "Raven/Synchronization/Destinations",
+            name: "Raven/Synchronization/Destinations"
         };
 
-        var task = $.Deferred();
-        this.query<Array<Pair<string, string[]>>>(url, args, this.fs)
-            .done(data => {                
-                if (data.hasOwnProperty('url')) {
-                    var value = data['url'];
-                    if (value instanceof Array)
-                        task.resolve(value);                        
-                    else 
-                        task.resolve([value]);    
-                }
-                else {
-                    task.resolve({});
-                }                
-            });
-
-        return task;
+        return this.query<synchronizationReplicationsDto>(url, args, this.fs);
     }
 }
 
-export = getFilesystemDestinationsCommand;
+export = getDestinationsCommand;

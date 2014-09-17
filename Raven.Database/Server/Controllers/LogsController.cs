@@ -10,7 +10,7 @@ namespace Raven.Database.Server.Controllers
 {
     [Route("databases/{databaseName}/logs/{action=logsget}")]
 	[Route("logs/{action=logsget}")]
-	[Route("logs/ravenfs/{action=RavenFSLogsGet}")]
+	[Route("logs/fs/{action=RavenFSLogsGet}")]
 	public class LogsController : RavenDbApiController
 	{
 		[HttpGet]		
@@ -74,14 +74,7 @@ namespace Raven.Database.Server.Controllers
 					break;
 			}
 
-			return GetMessageWithObject(log.Select(x => new
-			{
-				x.TimeStamp,
-				Message = x.FormattedMessage,
-				x.LoggerName,
-				Level = x.Level.ToString(),
-				Exception = x.Exception == null ? null : x.Exception.ToString()
-			}));
+		    return GetMessageWithObject(log.Select(x => new LogEventInfoFormatted(x)));
 		}
 	}
 }

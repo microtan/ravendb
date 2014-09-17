@@ -56,8 +56,9 @@ namespace Raven.Abstractions.Data
 		    HighlighterPreTags = query.HighlighterPreTags;
 		    HighlighterPostTags = query.HighlighterPostTags;
 		    HighlightedFields = query.HighlightedFields;
-	        QueryInputs = query.QueryInputs;
+	        TransformerParameters = query.TransformerParameters;
 		    ResultsTransformer = query.ResultsTransformer;
+		    DefaultOperator = query.DefaultOperator;
 		}
 
 		/// <summary>

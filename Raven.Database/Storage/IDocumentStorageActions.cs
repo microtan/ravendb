@@ -5,21 +5,23 @@
 //-----------------------------------------------------------------------
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using Jint.Runtime.References;
 using Raven.Abstractions.Data;
 using Raven.Json.Linq;
 
 namespace Raven.Database.Storage
 {
-	public interface IDocumentStorageActions
+	public interface IDocumentStorageActions 
 	{
 		IEnumerable<JsonDocument> GetDocumentsByReverseUpdateOrder(int start, int take);
-		IEnumerable<JsonDocument> GetDocumentsAfter(Etag etag, int take, long? maxSize = null, Etag untilEtag = null);
-		IEnumerable<JsonDocument> GetDocumentsWithIdStartingWith(string idPrefix, int start, int take);
+        IEnumerable<JsonDocument> GetDocumentsAfter(Etag etag, int take, CancellationToken cancellationToken, long? maxSize = null, Etag untilEtag = null, TimeSpan? timeout = null);
+		IEnumerable<JsonDocument> GetDocumentsWithIdStartingWith(string idPrefix, int start, int take, string skipAfter);
 
 		long GetDocumentsCount();
 
-		JsonDocument DocumentByKey(string key, TransactionInformation transactionInformation);
-		JsonDocumentMetadata DocumentMetadataByKey(string key, TransactionInformation transactionInformation);
+		JsonDocument DocumentByKey(string key);
+		JsonDocumentMetadata DocumentMetadataByKey(string key);
 
 		bool DeleteDocument(string key, Etag etag, out RavenJObject metadata, out Etag deletedETag);
 		AddDocumentResult AddDocument(string key, Etag etag, RavenJObject data, RavenJObject metadata);
@@ -35,22 +37,34 @@ namespace Raven.Database.Storage
     public class DebugDocumentStats
     {
         public long Total { get; set; }
+        public long TotalSize { get; set; }
         public long Tombstones { get; set; }
         public long System { get; set; }
+        public long SystemSize { get; set; }
         public long NoCollection { get; set; }
-        public Dictionary<string, long> Collections { get; set; }
+        public long NoCollectionSize { get; set; }
+        public Dictionary<string, CollectionDetails> Collections { get; set; }
+        
         public TimeSpan TimeToGenerate { get; set; }
 
+        public struct CollectionDetails
+        {
+            public long Quantity { get; set; }
+            public double Size { get; set; }
+        }
         public DebugDocumentStats()
         {
-            Collections = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            Collections = new Dictionary<string, CollectionDetails>(StringComparer.OrdinalIgnoreCase);
         }
 
-        public void IncrementCollection(string name)
+        public void IncrementCollection(string name,double size=0)
         {
-            long value;
+           
+            CollectionDetails value;
             Collections.TryGetValue(name, out value);
-            Collections[name] = value + 1;
+            value.Quantity++;
+            value.Size += size;
+            Collections[name] = value;
         }
     }
 
