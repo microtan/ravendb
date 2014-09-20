@@ -273,6 +273,8 @@ namespace Raven.Client.Document
 		/// </summary>
 		public bool IsLoaded(string id)
 		{
+			if (IsDeleted(id))
+				return false;
 			return entitiesByKey.ContainsKey(id) || includedDocumentsByKey.ContainsKey(id);
 		}
 
@@ -583,8 +585,6 @@ more responsive application.
 				throw new InvalidOperationException(entity + " is marked as read only and cannot be deleted");
 			deletedEntities.Add(entity);
 			knownMissingIds.Add(value.Key);
-			entitiesAndMetadata.Remove(entity);
-			entitiesByKey.Remove(value.Key);
 		}
 
 		/// <summary>
